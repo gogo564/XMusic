@@ -7,35 +7,43 @@ struct ContentView: View {
     @EnvironmentObject var player: PlayerManager
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationView {
-                HomeView()
-            }
-            .tabItem {
-                Label("推荐", systemImage: "music.note.house")
-            }
-            .tag(0)
+        ZStack(alignment: .bottom) {
+            TabView(selection: $selectedTab) {
+                NavigationView {
+                    HomeView()
+                }
+                .tabItem {
+                    Label("推荐", systemImage: "music.note.house")
+                }
+                .tag(0)
 
-            NavigationView {
-                SearchView()
-            }
-            .tabItem {
-                Label("搜索", systemImage: "magnifyingglass")
-            }
-            .tag(1)
+                NavigationView {
+                    SearchView()
+                }
+                .tabItem {
+                    Label("搜索", systemImage: "magnifyingglass")
+                }
+                .tag(1)
 
-            NavigationView {
-                LibraryView()
+                NavigationView {
+                    LibraryView()
+                }
+                .tabItem {
+                    Label("我的", systemImage: "music.note.list")
+                }
+                .tag(2)
             }
-            .tabItem {
-                Label("我的", systemImage: "music.note.list")
+            .safeAreaInset(edge: .bottom) {
+                if !isKeyboardVisible {
+                    Color.clear
+                        .frame(height: 90)
+                        .allowsHitTesting(false)
+                }
             }
-            .tag(2)
-        }
-        .safeAreaInset(edge: .bottom) {
+
             if !isKeyboardVisible {
                 MiniPlayerView()
-                    .transition(.move(edge: .bottom))
+                    .offset(y: -48)
                     .onTapGesture {
                         if player.currentSong != nil {
                             isShowingPlayer = true
