@@ -174,10 +174,16 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     // MARK: - Helpers
 
     private func makeListEntry(title: String, detail: String, image: UIImage?, action: @escaping () -> Void) -> CPListItem {
-        let item = CPListItem(text: title, detailText: detail, image: image, showsDisclosureIndicator: true) { _, completion in
-            action()
-            completion()
-        }
+        let item = CPListItem(
+            text: title,
+            detailText: detail,
+            image: image,
+            showsDisclosureIndicator: true,
+            handler: { _, completion in
+                action()
+                completion()
+            }
+        )
         return item
     }
 
