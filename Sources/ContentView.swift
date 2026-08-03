@@ -7,42 +7,35 @@ struct ContentView: View {
     @EnvironmentObject var player: PlayerManager
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
-                NavigationView {
-                    HomeView()
-                }
-                .tabItem {
-                    Label("推荐", systemImage: "music.note.house")
-                }
-                .tag(0)
-
-                NavigationView {
-                    SearchView()
-                }
-                .tabItem {
-                    Label("搜索", systemImage: "magnifyingglass")
-                }
-                .tag(1)
-
-                NavigationView {
-                    LibraryView()
-                }
-                .tabItem {
-                    Label("我的", systemImage: "music.note.list")
-                }
-                .tag(2)
+        TabView(selection: $selectedTab) {
+            NavigationView {
+                HomeView()
             }
-            .safeAreaInset(edge: .bottom) {
-                Color.clear
-                    .frame(height: 100)
-                    .allowsHitTesting(false)
+            .tabItem {
+                Label("推荐", systemImage: "music.note.house")
             }
+            .tag(0)
 
-            // Mini Player
+            NavigationView {
+                SearchView()
+            }
+            .tabItem {
+                Label("搜索", systemImage: "magnifyingglass")
+            }
+            .tag(1)
+
+            NavigationView {
+                LibraryView()
+            }
+            .tabItem {
+                Label("我的", systemImage: "music.note.list")
+            }
+            .tag(2)
+        }
+        .safeAreaInset(edge: .bottom) {
             if !isKeyboardVisible {
                 MiniPlayerView()
-                    .offset(y: -50)
+                    .transition(.move(edge: .bottom))
                     .onTapGesture {
                         if player.currentSong != nil {
                             isShowingPlayer = true
@@ -107,7 +100,6 @@ struct HomeView: View {
                 if !recentStore.items.isEmpty {
                     recentPlayedSection
                 }
-                Spacer(minLength: 100)
             }
             .padding(.top)
         }
