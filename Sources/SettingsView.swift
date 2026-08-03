@@ -73,7 +73,11 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("设置")
-        .contentInset(EdgeInsets(top: 0, leading: 0, bottom: 120, trailing: 0))
+        .safeAreaInset(edge: .bottom) {
+            Color.clear
+                .frame(height: 120)
+                .allowsHitTesting(false)
+        }
         .onAppear(perform: load)
         .onChange(of: quality) { newQ in
             var cfg = AppConfigStore.shared.config
