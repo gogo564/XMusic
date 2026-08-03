@@ -88,6 +88,13 @@ struct LibraryView: View {
                                         deletePlaylist(pl)
                                     }
                                 }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        deletePlaylist(pl)
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                     }

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var selectedTab = 0
     @State private var isShowingPlayer = false
+    @State private var isKeyboardVisible = false
     @EnvironmentObject var player: PlayerManager
 
     var body: some View {
@@ -32,15 +33,32 @@ struct ContentView: View {
                 }
                 .tag(2)
             }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear
+                    .frame(height: 100)
+                    .allowsHitTesting(false)
+            }
 
             // Mini Player
-            MiniPlayerView()
-                .offset(y: -50)
-                .onTapGesture {
-                    if player.currentSong != nil {
-                        isShowingPlayer = true
+            if !isKeyboardVisible {
+                MiniPlayerView()
+                    .offset(y: -50)
+                    .onTapGesture {
+                        if player.currentSong != nil {
+                            isShowingPlayer = true
+                        }
                     }
-                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.25)) {
+                isKeyboardVisible = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.25)) {
+                isKeyboardVisible = false
+            }
         }
         .alert("播放错误", isPresented: Binding(
             get: { player.playbackError != nil },

@@ -273,19 +273,21 @@ struct PlayerView: View {
     // MARK: - Lyrics Full-Screen View
 
     private var lyricsView: some View {
-        GeometryReader { geo in
-            ZStack {
-                if let song = playerManager.currentSong {
+        ZStack {
+            if let song = playerManager.currentSong {
+                GeometryReader { bg in
                     AsyncImage(url: URL(string: song.imageURL)) { image in
                         image.resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height)
+                            .frame(width: bg.size.width, height: bg.size.height)
                             .blur(radius: 50)
                             .opacity(0.5)
                     } placeholder: {
                         Color.black
                     }
                 }
+                .ignoresSafeArea()
+            }
 
                 VStack {
                     HStack {
@@ -356,8 +358,6 @@ struct PlayerView: View {
                     }
                     .padding(.bottom, 30)
                 }
-            }
-            .ignoresSafeArea()
         }
     }
 
