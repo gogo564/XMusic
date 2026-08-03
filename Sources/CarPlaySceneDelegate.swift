@@ -91,6 +91,15 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             self?.pushHotSearch()
         })
 
+        // 歌单广场
+        items.append(makeListEntry(
+            title: "歌单广场",
+            detail: "按分类浏览歌单",
+            image: image("square.grid.2x2")
+        ) { [weak self] in
+            self?.pushPlaylistTags()
+        })
+
         let section = CPListSection(items: items)
         if controller.topTemplate is CPListTemplate {
             if let current = controller.topTemplate as? CPListTemplate {
@@ -133,7 +142,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         template.emptyViewTitleVariants = ["加载中…"]
         controller.pushTemplate(template, animated: true) { [weak self] _, _ in
             Task { @MainActor in
-                let keywords = (try? await LXAPIClient.shared.getHotSearch(source: "mg")) ?? []
+                let keywords = (try? await LXAPIClient.shared.getHotSearch(source: "kw")) ?? []
                 let items = keywords.prefix(10).compactMap { keyword -> CPListItem? in
                     self?.makeListEntry(
                         title: keyword,
@@ -154,7 +163,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         template.emptyViewTitleVariants = ["搜索中…"]
         controller.pushTemplate(template, animated: true) { [weak self] _, _ in
             Task { @MainActor in
-                let songs = (try? await LXAPIClient.shared.search(name: keyword, source: "mg", page: 1, pages: 3)) ?? []
+                let songs = (try? await LXAPIClient.shared.search(name: keyword, source: "kw", page: 1, pages: 3)) ?? []
                 let items = songs.enumerated().map { idx, song in
                     self?.makeListEntry(
                         title: song.name,
@@ -167,6 +176,79 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 }
                 .compactMap { $0 }
                 template.updateSections([CPListSection(items: items)])
+            }
+        }
+    }
+
+    // MARK: - 歌单广场
+
+    private func pushPlaylistTags() {
+        guard let controller = interfaceController else { return }
+        let template = CPListTemplate(title: "歌单广场", sections: [CPListSection(items: [])])
+        template.emptyViewTitleVariants = ["加载中…"]
+        controller.pushTemplate(template, animated: true) { [weak self] _, _ in
+            Task { @MainActor in
+                let tags = (try? await LXAPIClient.shared.getSongListTags(source: "kw")) ?? []
+                var items = [self?.makeListEntry(
+                    title: "推荐",
+                    detail: "热门歌单",
+                    image: self?.image("star")
+                ) {
+                    self?.pushPlaylists(tagName: "推荐", tagID: nil)
+                }]
+                for tag in tags {
+                    items.append(self?.makeListEntry(
+                        title: tag.name,
+                        detail: "浏览歌单",
+                        image: self?.image("music.note.list")
+                    ) {
+                        self?.pushPlaylists(tagName: tag.name, tagID: tag.id)
+                    })
+                }
+                template.updateSections([CPListSection(items: items.compactMap { $0 })])
+            }
+        }
+    }
+
+    private func pushPlaylists(tagName: String, tagID: String?) {
+        guard let controller = interfaceController else { return }
+        let template = CPListTemplate(title: tagName, sections: [CPListSection(items: [])])
+        template.emptyViewTitleVariants = ["加载中…"]
+        controller.pushTemplate(template, animated: true) { [weak self] _, _ in
+            Task { @MainActor in
+                let playlists = (try? await LXAPIClient.shared.getSongListByTag(source: "kw", tagId: tagID)) ?? []
+                let items = playlists.map { pl in
+                    self?.makeListEntry(
+                        title: pl.name,
+                        detail: "\(pl.songCount) 首 · \(pl.author)",
+                        image: self?.image("music.note.list")
+                    ) {
+                        self?.pushPlaylistSongs(playlist: pl)
+                    }
+                }
+                template.updateSections([CPListSection(items: items.compactMap { $0 })])
+            }
+        }
+    }
+
+    private func pushPlaylistSongs(playlist: LXOnlinePlaylist) {
+        guard let controller = interfaceController else { return }
+        let template = CPListTemplate(title: playlist.name, sections: [CPListSection(items: [])])
+        template.emptyViewTitleVariants = ["加载中…"]
+        controller.pushTemplate(template, animated: true) { [weak self] _, _ in
+            Task { @MainActor in
+                let songs = (try? await LXAPIClient.shared.getSongListDetail(source: "kw", playlistID: playlist.id)) ?? []
+                let items = songs.enumerated().map { idx, song in
+                    self?.makeListEntry(
+                        title: song.name,
+                        detail: song.singer,
+                        image: self?.image("music.note")
+                    ) {
+                        PlayerManager.shared.play(song: song, in: songs, index: idx)
+                        self?.pushNowPlaying()
+                    }
+                }
+                template.updateSections([CPListSection(items: items.compactMap { $0 })])
             }
         }
     }
