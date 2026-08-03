@@ -15,7 +15,7 @@ struct XmusicApp: App {
             container = c
         } else {
             print("⚠️ [SwiftData] 磁盘容器创建失败，回退为内存容器（最近播放将不持久化）")
-            container = try! ModelContainer(for: schema, configurations: [ModelConfiguration(schema, isStoredInMemoryOnly: true)])
+            container = try! ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
         }
         PlayerManager.shared.modelContext = container.mainContext
         return container
