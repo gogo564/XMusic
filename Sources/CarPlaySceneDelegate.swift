@@ -178,12 +178,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             text: title,
             detailText: detail,
             image: image,
-            accessoryType: .disclosureIndicator,
-            handler: { _, completion in
-                action()
-                completion()
-            }
+            accessoryImage: nil,
+            accessoryType: .disclosureIndicator
         )
+        item.handler = { _, completion in
+            action()
+            completion()
+        }
         return item
     }
 
