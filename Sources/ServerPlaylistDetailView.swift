@@ -56,6 +56,7 @@ struct ServerPlaylistDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .contentInset(EdgeInsets(top: 0, leading: 0, bottom: 120, trailing: 0))
         .navigationTitle(title)
     }
 

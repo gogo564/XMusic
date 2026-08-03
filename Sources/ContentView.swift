@@ -33,13 +33,6 @@ struct ContentView: View {
                 }
                 .tag(2)
             }
-            .safeAreaInset(edge: .bottom) {
-                if !isKeyboardVisible {
-                    Color.clear
-                        .frame(height: 90)
-                        .allowsHitTesting(false)
-                }
-            }
 
             if !isKeyboardVisible {
                 MiniPlayerView()
@@ -108,6 +101,7 @@ struct HomeView: View {
                 if !recentStore.items.isEmpty {
                     recentPlayedSection
                 }
+                Spacer(minLength: 120)
             }
             .padding(.top)
         }
@@ -445,6 +439,7 @@ struct SearchView: View {
                     }
                     .padding(.top, 80)
                 }
+                Spacer(minLength: 120)
             }
             .onTapGesture {
                 searchFocused = false
@@ -647,6 +642,7 @@ struct SongSearchResultsView: View {
             }
         }
         .listStyle(.plain)
+        .contentInset(EdgeInsets(top: 0, leading: 0, bottom: 120, trailing: 0))
         .navigationTitle(query)
         .onAppear { Task { await load() } }
     }

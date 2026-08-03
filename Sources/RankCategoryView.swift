@@ -36,6 +36,7 @@ struct RankCategoryView: View {
                         Divider().padding(.leading, 16)
                     }
                 }
+                Spacer(minLength: 120)
             }
         }
         .navigationTitle("热门榜单 · \(MusicSources.name(source))")
@@ -99,6 +100,7 @@ struct RankSongsView: View {
             }
         }
         .listStyle(.plain)
+        .contentInset(EdgeInsets(top: 0, leading: 0, bottom: 120, trailing: 0))
         .navigationTitle(rankName)
         .onAppear {
             load()
