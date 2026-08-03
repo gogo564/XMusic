@@ -621,7 +621,7 @@ struct SongSearchResultsView: View {
         }
         .listStyle(.plain)
         .navigationTitle(query)
-        .onAppear { load() }
+        .onAppear { Task { await load() } }
     }
 
     @MainActor
