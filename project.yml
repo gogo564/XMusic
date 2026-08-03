@@ -13,6 +13,7 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: XMusic.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: xmusic.XMusic
         PRODUCT_NAME: XMusic
         CODE_SIGNING_ALLOWED: "NO"
