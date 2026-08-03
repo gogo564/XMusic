@@ -9,7 +9,14 @@ struct XmusicApp: App {
     @State private var needsConfig = false
 
     let modelContainer: ModelContainer = {
-        let container = try! ModelContainer(for: RecentTrackEntity.self)
+        let schema = Schema([RecentTrackEntity.self])
+        let container: ModelContainer
+        if let c = try? ModelContainer(for: schema) {
+            container = c
+        } else {
+            print("⚠️ [SwiftData] 磁盘容器创建失败，回退为内存容器（最近播放将不持久化）")
+            container = try! ModelContainer(for: schema, configurations: [ModelConfiguration(schema, isStoredInMemoryOnly: true)])
+        }
         PlayerManager.shared.modelContext = container.mainContext
         return container
     }()
