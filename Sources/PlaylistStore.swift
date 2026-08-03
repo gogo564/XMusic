@@ -1,0 +1,191 @@
+import Foundation
+import Combine
+
+private func storedSongID(_ dict: [String: Any]) -> String {
+    if let v = dict["id"] as? String { return v }
+    if let s = dict["songmid"] as? String { return s }
+    if let i = dict["songmid"] as? Int { return String(i) }
+    if let meta = dict["meta"] as? [String: Any] {
+        if let s = meta["songId"] as? String { return s }
+        if let i = meta["songId"] as? Int { return String(i) }
+    }
+    return ""
+}
+
+private func isSameSong(_ dict: [String: Any], _ song: LXSong) -> Bool {
+    let storedID = storedSongID(dict)
+    if !storedID.isEmpty, storedID == song.songmid { return true }
+    if let id = dict["id"] as? String, id == song.id { return true }
+    return false
+}
+
+final class PlaylistStore: ObservableObject {
+    static let shared = PlaylistStore()
+
+    @Published var listData: LXListData?
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+
+    private init() {}
+
+    @MainActor
+    func refresh() async {
+        isLoading = true
+        do {
+            listData = try await LXAPIClient.shared.getData()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    var playlists: [LXPlaylist] { listData?.userList ?? [] }
+
+    func playlist(id: String) -> LXPlaylist? {
+        listData?.userList.first { $0.id == id }
+    }
+
+    // MARK: - Reading songs
+
+    func songs(kind: LXListKind, playlistID: String) -> [LXSong] {
+        listData?.songs(kind: kind, playlistID: playlistID) ?? []
+    }
+
+    // MARK: - Mutations (then push to server)
+
+    func addSongToLove(_ song: LXSong) async throws {
+        guard var raw = listData?.raw else { return }
+        var love = raw["loveList"] as? [[String: Any]] ?? []
+        if love.isEmpty {
+            love = [[
+                "id": "love",
+                "name": "我喜欢的音乐",
+                "source": "default",
+                "list": [[String: Any]](),
+            ]]
+        }
+        var loveList = love
+        if var first = loveList.first {
+            var songs = first["list"] as? [[String: Any]] ?? []
+            if !songs.contains(where: { isSameSong($0, song) }) {
+                songs.append(song.songInfoPayload)
+            }
+            first["list"] = songs
+            loveList[0] = first
+        }
+        raw["loveList"] = loveList
+        try await push(raw)
+    }
+
+    func removeSongFromLove(_ song: LXSong) async throws {
+        guard var raw = listData?.raw, var love = (raw["loveList"] as? [[String: Any]]), !love.isEmpty else { return }
+        if var first = love.first {
+            var songs = first["list"] as? [[String: Any]] ?? []
+            songs.removeAll { isSameSong($0, song) }
+            first["list"] = songs
+            love[0] = first
+        }
+        raw["loveList"] = love
+        try await push(raw)
+    }
+
+    func isLoved(_ song: LXSong) -> Bool {
+        listData?.loveSongs.contains { $0.id == song.id } ?? false
+    }
+
+    func addSongToDefault(_ song: LXSong) async throws {
+        guard var raw = listData?.raw else { return }
+        var songs = raw["defaultList"] as? [[String: Any]] ?? []
+        if !songs.contains(where: { isSameSong($0, song) }) {
+            songs.append(song.songInfoPayload)
+        }
+        raw["defaultList"] = songs
+        try await push(raw)
+    }
+
+    func removeSongFromDefault(at index: Int) async throws {
+        guard var raw = listData?.raw else { return }
+        var songs = raw["defaultList"] as? [[String: Any]] ?? []
+        if songs.indices.contains(index) { songs.remove(at: index) }
+        raw["defaultList"] = songs
+        try await push(raw)
+    }
+
+    func addSong(_ song: LXSong, toPlaylistID pid: String) async throws {
+        guard var raw = listData?.raw else { return }
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        var found = false
+        for i in userLists.indices where userLists[i]["id"] as? String == pid {
+            var songs = userLists[i]["list"] as? [[String: Any]] ?? []
+            if !songs.contains(where: { isSameSong($0, song) }) {
+                songs.append(song.songInfoPayload)
+            }
+            userLists[i]["list"] = songs
+            raw["userList"] = userLists
+            found = true
+            break
+        }
+        if !found { throw LXAPIError.decoding("歌单不存在") }
+        try await push(raw)
+    }
+
+    func removeSong(at index: Int, fromPlaylistID pid: String) async throws {
+        guard var raw = listData?.raw else { return }
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        var found = false
+        for i in userLists.indices where userLists[i]["id"] as? String == pid {
+            var songs = userLists[i]["list"] as? [[String: Any]] ?? []
+            if songs.indices.contains(index) { songs.remove(at: index) }
+            userLists[i]["list"] = songs
+            raw["userList"] = userLists
+            found = true
+            break
+        }
+        if !found { throw LXAPIError.decoding("歌单不存在") }
+        try await push(raw)
+    }
+
+    func createPlaylist(name: String) async throws {
+        guard var raw = listData?.raw else { return }
+        let pid = "webplayer_\(Int(Date().timeIntervalSince1970 * 1000))"
+        let newList: [String: Any] = [
+            "id": pid,
+            "name": name,
+            "source": "webplayer",
+            "list": [[String: Any]](),
+        ]
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        userLists.insert(newList, at: 0)
+        raw["userList"] = userLists
+        try await push(raw)
+    }
+
+    func renamePlaylist(id pid: String, newName: String) async throws {
+        guard var raw = listData?.raw else { return }
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        var found = false
+        for i in userLists.indices where userLists[i]["id"] as? String == pid {
+            userLists[i]["name"] = newName
+            raw["userList"] = userLists
+            found = true
+            break
+        }
+        if found { try await push(raw) }
+    }
+
+    func deletePlaylist(id pid: String) async throws {
+        guard var raw = listData?.raw else { return }
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        userLists.removeAll { $0["id"] as? String == pid }
+        raw["userList"] = userLists
+        try await push(raw)
+    }
+
+    @MainActor
+    private func push(_ raw: [String: Any]) async throws {
+        let updated = LXListData(raw)
+        listData = updated
+        try await LXAPIClient.shared.saveData(updated)
+    }
+}

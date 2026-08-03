@@ -1,0 +1,58 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen 2>&1 | tail -3
+
+      - name: Generate xcodeproj with XcodeGen
+        run: xcodegen generate --project . 2>&1
+
+      - name: Archive (unsigned)
+        run: |
+          LOG=$(mktemp)
+          xcodebuild -project XMusic.xcodeproj -scheme XMusic -destination generic/platform=iOS \
+            -archivePath /tmp/XMusic.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+            archive 2>&1 | tee "$LOG"
+          RC=${PIPESTATUS[0]}
+          gzip "$LOG" && mv "$LOG.gz" /tmp/build_log.gz
+          [ $RC -eq 0 ] || exit $RC
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Log
+          path: /tmp/build_log.gz
+
+      - name: Package IPA
+        run: |
+          APP=$(find /tmp/XMusic.xcarchive -name "*.app" -type d | head -1)
+          echo "App: $APP"
+          if [ -z "$APP" ]; then
+            echo "ERROR: no .app found"
+            exit 1
+          fi
+          mkdir -p /tmp/ipa/Payload
+          cp -R "$APP" /tmp/ipa/Payload/
+          cd /tmp/ipa
+          zip -r XMusic.ipa Payload/
+          ls -lh XMusic.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: XMusic.ipa
+          path: /tmp/ipa/XMusic.ipa
