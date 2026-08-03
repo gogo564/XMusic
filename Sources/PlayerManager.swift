@@ -50,6 +50,10 @@ final class PlayerManager: ObservableObject {
     var currentPlaylist: [LXSong] { queue }
     var localTitle: String { localPlaybackTitle }
 
+    private var currentQueueSong: LXSong? {
+        queue.indices.contains(currentIndex) ? queue[currentIndex] : nil
+    }
+
     private let player = AVPlayer()
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
@@ -120,7 +124,7 @@ final class PlayerManager: ObservableObject {
             }
         }
         saveLastPlayed()
-        resolveAndPlay(currentSong)
+        resolveAndPlay(song)
     }
 
     func play(song: LXSong, atQuality q: String) {
@@ -173,7 +177,7 @@ final class PlayerManager: ObservableObject {
 
     func togglePlayPause() {
         if player.currentItem == nil, currentSong != nil {
-            resolveAndPlay(currentSong)
+            resolveAndPlay(currentQueueSong)
             return
         }
         if isPlaying {
@@ -199,7 +203,7 @@ final class PlayerManager: ObservableObject {
             }
             let nextIndex = (currentIndex + 1) % queue.count
             currentIndex = nextIndex
-            resolveAndPlay(currentSong)
+            resolveAndPlay(currentQueueSong)
         case .shuffle:
             guard queue.count > 1 else { return }
             var nextIndex = currentIndex
@@ -207,7 +211,7 @@ final class PlayerManager: ObservableObject {
                 nextIndex = Int.random(in: 0..<queue.count)
             }
             currentIndex = nextIndex
-            resolveAndPlay(currentSong)
+            resolveAndPlay(currentQueueSong)
         case .sequential:
             let nextIndex = (currentIndex + 1) % queue.count
             if auto && nextIndex == 0 {
@@ -217,11 +221,11 @@ final class PlayerManager: ObservableObject {
                 return
             }
             currentIndex = nextIndex
-            resolveAndPlay(currentSong)
+            resolveAndPlay(currentQueueSong)
         case .loopAll:
             let nextIndex = (currentIndex + 1) % queue.count
             currentIndex = nextIndex
-            resolveAndPlay(currentSong)
+            resolveAndPlay(currentQueueSong)
         }
     }
 
@@ -233,7 +237,7 @@ final class PlayerManager: ObservableObject {
         }
         let prevIndex = (currentIndex - 1 + queue.count) % queue.count
         currentIndex = prevIndex
-        resolveAndPlay(currentSong)
+        resolveAndPlay(currentQueueSong)
     }
 
     func togglePlayMode() {
@@ -265,7 +269,7 @@ final class PlayerManager: ObservableObject {
     func setQuality(_ q: String) {
         quality = q
         if currentSong != nil {
-            resolveAndPlay(currentSong)
+            resolveAndPlay(currentQueueSong)
         }
     }
 

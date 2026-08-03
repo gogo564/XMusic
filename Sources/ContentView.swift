@@ -433,6 +433,14 @@ struct SearchView: View {
             }
         }
         .navigationTitle("搜索")
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") {
+                    searchFocused = false
+                }
+            }
+        }
         .onChange(of: searchText) { _ in
             debounce()
         }
@@ -477,6 +485,8 @@ struct SearchView: View {
                 .disableAutocorrection(true)
                 .font(.system(size: 15))
                 .focused($searchFocused)
+                .submitLabel(.search)
+                .onSubmit { searchFocused = false }
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
