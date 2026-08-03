@@ -1,25 +1,21 @@
 import SwiftUI
-import SwiftData
 
 struct RecentPlaylistView: View {
-    @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse)
-    var recentTracks: [RecentTrackEntity]
-
+    @ObservedObject var recentStore = RecentStore.shared
     @EnvironmentObject var playerManager: PlayerManager
     @EnvironmentObject var playlistStore: PlaylistStore
     @Environment(\.dismiss) var dismiss
-    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
-                if recentTracks.isEmpty {
+                if recentStore.items.isEmpty {
                     Text("暂无播放记录")
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .listRowBackground(Color.clear)
                 } else {
-                    ForEach(recentTracks) { item in
+                    ForEach(recentStore.items) { item in
                         Button(action: {
                             playFromList(item)
                         }) {
@@ -84,21 +80,22 @@ struct RecentPlaylistView: View {
                 }
             }
         }
+        .navigationViewStyle(.stack)
     }
 
-    private func isCurrentTrack(_ item: RecentTrackEntity) -> Bool {
+    private func isCurrentTrack(_ item: RecentTrack) -> Bool {
         playerManager.currentSong?.id == item.id
     }
 
-    private func playFromList(_ item: RecentTrackEntity) {
+    private func playFromList(_ item: RecentTrack) {
         playerManager.playFromRecent(item)
         dismiss()
     }
 
-    private func deleteRecent(_ item: RecentTrackEntity) {
+    private func deleteRecent(_ item: RecentTrack) {
         withAnimation {
-            modelContext.delete(item)
-            playerManager.setPlaylistFromRecent(recentTracks.filter { $0.id != item.id })
+            recentStore.remove(item)
+            playerManager.setPlaylistFromRecent(recentStore.items)
         }
     }
 

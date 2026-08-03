@@ -1,12 +1,10 @@
 import SwiftUI
-import SwiftData
 
 struct PlayerView: View {
     @EnvironmentObject var playerManager: PlayerManager
     @EnvironmentObject var playlistStore: PlaylistStore
     @Environment(\.dismiss) var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse) var recentTracks: [RecentTrackEntity]
+    @ObservedObject var recentStore = RecentStore.shared
     @State private var showingLyrics = false
     @State private var localTime: Double = 0
     @State private var isDraggingSlider = false
@@ -66,7 +64,7 @@ struct PlayerView: View {
                 .environmentObject(playerManager)
         }
         .onAppear {
-            playerManager.setPlaylistFromRecent(recentTracks)
+            playerManager.setPlaylistFromRecent(recentStore.items)
         }
     }
 
@@ -361,10 +359,6 @@ struct PlayerView: View {
             }
             .ignoresSafeArea()
         }
-    }
-
-    private func isLoved(_ song: LXSong) -> Bool {
-        playlistStore.isLoved(song)
     }
 
     private func toggleLove(_ song: LXSong) {

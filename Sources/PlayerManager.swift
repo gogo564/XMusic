@@ -1,7 +1,6 @@
 import AVFoundation
 import MediaPlayer
 import Combine
-import SwiftData
 
 enum PlayMode: String, CaseIterable {
     case sequential    // 顺序播放
@@ -56,7 +55,6 @@ final class PlayerManager: ObservableObject {
     private var statusObserver: NSKeyValueObservation?
     private var lrc = LRC.parse(nil)
     private var shuffledIndices: [Int] = []
-    weak var modelContext: ModelContext?
 
     private init() {
         self.quality = AppConfigStore.shared.config.defaultQuality
@@ -156,8 +154,8 @@ final class PlayerManager: ObservableObject {
         }
     }
 
-    func setPlaylistFromRecent(_ entities: [RecentTrackEntity]) {
-        let songs = entities.compactMap { $0.song }
+    func setPlaylistFromRecent(_ tracks: [RecentTrack]) {
+        let songs = tracks.compactMap { $0.song }
         if songs.isEmpty { return }
         if let song = currentSong, queue.contains(where: { $0.id == song.id }) { return }
         queue = songs
@@ -168,8 +166,8 @@ final class PlayerManager: ObservableObject {
         }
     }
 
-    func playFromRecent(_ entity: RecentTrackEntity) {
-        guard let song = entity.song else { return }
+    func playFromRecent(_ track: RecentTrack) {
+        guard let song = track.song else { return }
         play(song: song)
     }
 
@@ -438,24 +436,7 @@ final class PlayerManager: ObservableObject {
     }
 
     private func saveRecent(song: LXSong, lrc: String? = nil) {
-        guard let context = modelContext else { return }
-        let id = song.id
-        let descriptor = FetchDescriptor<RecentTrackEntity>(predicate: #Predicate { $0.id == id })
-        if let items = try? context.fetch(descriptor) {
-            for item in items { context.delete(item) }
-        }
-        let recent = RecentTrackEntity(
-            id: id,
-            name: song.name,
-            singer: song.singer,
-            albumName: song.albumName.isEmpty ? nil : song.albumName,
-            imageUrl: song.imageURL.isEmpty ? nil : song.imageURL,
-            source: song.source,
-            rawJSON: song.jsonData ?? Data(),
-            lrc: lrc
-        )
-        context.insert(recent)
-        try? context.save()
+        RecentStore.shared.upsert(song, lrc: lrc)
     }
 
     // MARK: - Now Playing + Remote commands

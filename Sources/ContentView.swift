@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
     @State private var selectedTab = 0
@@ -9,7 +8,7 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                NavigationStack {
+                NavigationView {
                     HomeView()
                 }
                 .tabItem {
@@ -17,7 +16,7 @@ struct ContentView: View {
                 }
                 .tag(0)
 
-                NavigationStack {
+                NavigationView {
                     SearchView()
                 }
                 .tabItem {
@@ -25,7 +24,7 @@ struct ContentView: View {
                 }
                 .tag(1)
 
-                NavigationStack {
+                NavigationView {
                     LibraryView()
                 }
                 .tabItem {
@@ -61,7 +60,7 @@ struct ContentView: View {
 // MARK: - Home
 
 struct HomeView: View {
-    @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse) var recentTracks: [RecentTrackEntity]
+    @ObservedObject var recentStore = RecentStore.shared
     @EnvironmentObject var player: PlayerManager
 
     @State private var source = "wy"
@@ -87,7 +86,7 @@ struct HomeView: View {
                 if !hotKeywords.isEmpty {
                     hotSearchSection
                 }
-                if !recentTracks.isEmpty {
+                if !recentStore.items.isEmpty {
                     recentPlayedSection
                 }
                 Spacer(minLength: 100)
@@ -318,7 +317,7 @@ struct HomeView: View {
             }
             .padding(.horizontal)
 
-            ForEach(recentTracks.prefix(5)) { item in
+            ForEach(recentStore.items.prefix(5)) { item in
                 Button(action: {
                     player.playFromRecent(item)
                 }) {

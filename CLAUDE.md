@@ -7,7 +7,7 @@
 
 ## 项目概述
 
-XMusic 是一个基于 SwiftUI / SwiftData / AVFoundation 的 iOS 音乐播放器（fork 自 primitiver/xmusic），已改写为对接用户自己的 lx-sync-server（局域网音乐同步服务器）。支持核心播放、下载、以及服务器歌单同步（/api/data 的 defaultList / loveList / userList）。
+XMusic 是一个基于 SwiftUI / AVFoundation 的 iOS 音乐播放器（fork 自 primitiver/xmusic），已改写为对接用户自己的 lx-sync-server（局域网音乐同步服务器）。支持核心播放、下载、以及服务器歌单同步（/api/data 的 defaultList / loveList / userList）。**最低支持 iOS 15.0，不使用 SwiftData（其仅 iOS 17+），最近播放用 UserDefaults 持久化。**
 
 ## 构建命令
 
@@ -18,17 +18,18 @@ XMusic 是一个基于 SwiftUI / SwiftData / AVFoundation 的 iOS 音乐播放�
 ## 架构
 
 ### 入口
-- `Sources/XmusicApp.swift` — SwiftUI `@main` 入口。手动创建 `ModelContainer(for: RecentTrackEntity.self)`，把 `mainContext` 注入 `PlayerManager.shared.modelContext`，通过 `.modelContainer(modelContainer)` 提供给视图。`needsConfig` 控制首次配置页（SettingsView）。
+- `Sources/XmusicApp.swift` — SwiftUI `@main` 入口。注入 `PlayerManager.shared` / `PlaylistStore.shared` / `DownloadService.shared` / `RecentStore.shared` 环境对象。`needsConfig` 控制首次配置页（SettingsView）。**不使用 SwiftData，导航用 NavigationView（iOS 15 兼容）。**
 
 ### 数据层
 - `Sources/LXSong.swift` — 歌曲模型（保留原始字典 `raw`，可回传服务器）。含 `LXPlaylist`、`LXOnlinePlaylist`、`LXListData`、`LXListKind`，以及 `LXSong.jsonData` / `init?(jsonData:)` 持久化辅助。
 - `Sources/LXAPIClient.swift` — 与 lx-sync-server 通信的单例。提供 `login` / `search` / `getPlaybackURL` / `getLyric` / `getData` / `saveData` / `getLeaderBoards` / `getLeaderBoardSongs` / `getHotSearch` / `searchPlaylists` / `getSongListTags` / `getSongListByTag` / `getSongListDetail`。请求头 `x-frontend-auth` / `x-user-name` / `x-user-token`。
 - `Sources/ServerConfig.swift` — `ServerConfig`（服务器地址/账号/密码/管理密码/音质）+ `AppConfigStore`（UserDefaults 持久化，含 token）。
 - `Sources/PlaylistStore.swift` — 服务器歌单状态（defaultList/loveList/userList），增删改后调用 `saveData` 推回服务器。
+- `Sources/RecentStore.swift` — 最近播放存储（UserDefaults，最多 50 条）。`RecentTrack` 为 Codable 结构体（存 `rawJSON`，通过 `song` 还原 `LXSong`）。
 - `Sources/LRCParser.swift` — LRC 歌词解析。
 
 ### 播放
-- `Sources/PlayerManager.swift` — `AVPlayer` 封装。缓存优先（`MusicCacheManager`），否则调 `LXAPIClient.getPlaybackURL` + `getLyric`。队列/索引/歌曲持久化到 UserDefaults；播放时通过注入的 `modelContext` 写入最近播放（`RecentTrackEntity`）。支持锁屏控制（MPRemoteCommandCenter）。
+- `Sources/PlayerManager.swift` — `AVPlayer` 封装。缓存优先（`MusicCacheManager`），否则调 `LXAPIClient.getPlaybackURL` + `getLyric`。队列/索引/歌曲持久化到 UserDefaults；播放时通过 `RecentStore.shared` 写入最近播放。支持锁屏控制（MPRemoteCommandCenter）。
 
 ### 视图（均在 `Sources/`）
 - `ContentView.swift` — 3 Tab（推荐/搜索/我的）+ 底部迷你播放器 + 全屏 `PlayerView` sheet。
@@ -49,12 +50,13 @@ XMusic 是一个基于 SwiftUI / SwiftData / AVFoundation 的 iOS 音乐播放�
 - `Sources/LXCachedImage.swift` — 简单带缓存图片加载。
 - `Sources/HapticManager.swift` — 触觉反馈。
 - `Sources/MusicSources.swift` — 音源列表 `[("kw","酷我"),("wy","网易"),("tx","腾讯"),("kg","酷狗"),("mg","咪咕")]`。
-- `Sources/RecentTrackEntity.swift` — 最近播放 SwiftData 模型（存 `rawJSON`，通过 `song` 还原 `LXSong`）。
+- `Sources/RecentStore.swift` — 最近播放存储（UserDefaults）。
 
 ## 关键约定
 - 所有对服务器的请求都通过 `LXAPIClient`，token 由 `AppConfigStore` 管理。
-- 最近播放统一由 `PlayerManager.startPlayback` / `loadLyric` 通过 `modelContext` 写入，视图无需单独保存。
+- 最近播放统一由 `PlayerManager.startPlayback` / `loadLyric` 通过 `RecentStore.shared.upsert` 写入，视图无需单独保存。
 - 音质在 `SettingsView` 和 `SongRow`（QualityPickerView）中可切换。
+- **iOS 15 兼容**：不使用 SwiftData / NavigationStack / 其它 iOS 16+ 专属 API。
 
 ## 文件布局
 
