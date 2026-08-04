@@ -118,7 +118,7 @@ struct AddSongsToPlaylistView: View {
         }
     }
 
-    private func run(_ op: () async throws -> String) {
+    private func run(_ op: @escaping () async throws -> String) {
         isWorking = true
         Task {
             do {
