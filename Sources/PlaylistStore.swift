@@ -78,6 +78,61 @@ final class PlaylistStore: ObservableObject {
         try await push(raw)
     }
 
+    func addSongsToLove(_ songs: [LXSong]) async throws {
+        guard !songs.isEmpty else { return }
+        var raw = try await freshRaw()
+        var love = raw["loveList"] as? [[String: Any]] ?? []
+        if love.isEmpty {
+            love = [[
+                "id": "love",
+                "name": "我喜欢的音乐",
+                "source": "default",
+                "list": [[String: Any]](),
+            ]]
+        }
+        var loveList = love
+        if var first = loveList.first {
+            var existing = first["list"] as? [[String: Any]] ?? []
+            for song in songs where !existing.contains(where: { isSameSong($0, song) }) {
+                existing.append(song.songInfoPayload)
+            }
+            first["list"] = existing
+            loveList[0] = first
+        }
+        raw["loveList"] = loveList
+        try await push(raw)
+    }
+
+    func addSongsToDefault(_ songs: [LXSong]) async throws {
+        guard !songs.isEmpty else { return }
+        var raw = try await freshRaw()
+        var existing = raw["defaultList"] as? [[String: Any]] ?? []
+        for song in songs where !existing.contains(where: { isSameSong($0, song) }) {
+            existing.append(song.songInfoPayload)
+        }
+        raw["defaultList"] = existing
+        try await push(raw)
+    }
+
+    func addSongsToPlaylist(_ songs: [LXSong], toPlaylistID pid: String) async throws {
+        guard !songs.isEmpty else { return }
+        var raw = try await freshRaw()
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        var found = false
+        for i in userLists.indices where userLists[i]["id"] as? String == pid {
+            var existing = userLists[i]["list"] as? [[String: Any]] ?? []
+            for song in songs where !existing.contains(where: { isSameSong($0, song) }) {
+                existing.append(song.songInfoPayload)
+            }
+            userLists[i]["list"] = existing
+            raw["userList"] = userLists
+            found = true
+            break
+        }
+        if !found { throw LXAPIError.decoding("歌单不存在") }
+        try await push(raw)
+    }
+
     func removeSongFromLove(_ song: LXSong) async throws {
         var raw = try await freshRaw()
         var love = raw["loveList"] as? [[String: Any]] ?? []

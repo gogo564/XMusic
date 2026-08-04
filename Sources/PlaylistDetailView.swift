@@ -5,9 +5,11 @@ struct PlaylistDetailView: View {
     let source: String
 
     @EnvironmentObject var player: PlayerManager
+    @EnvironmentObject var playlistStore: PlaylistStore
     @State private var songs: [LXSong] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var showAddToPlaylist = false
 
     var body: some View {
         List {
@@ -46,6 +48,13 @@ struct PlaylistDetailView: View {
                         Label("播放全部", systemImage: "play.circle.fill")
                             .font(.system(size: 15, weight: .medium))
                     }
+                    Button {
+                        showAddToPlaylist = true
+                    } label: {
+                        Label("添加到我的歌单", systemImage: "plus.circle")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                    .disabled(songs.isEmpty)
                 }
                 .padding(.vertical, 4)
             }
@@ -81,6 +90,10 @@ struct PlaylistDetailView: View {
         }
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showAddToPlaylist) {
+            AddSongsToPlaylistView(songs: songs, playlistName: playlist.name)
+                .environmentObject(playlistStore)
+        }
         .onAppear {
             load()
         }
