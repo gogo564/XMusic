@@ -45,6 +45,15 @@ jobs:
             echo "ERROR: no .app found"
             exit 1
           fi
+          brew install ldid >/dev/null 2>&1 || true
+          BIN="$APP/XMusic"
+          if [ -f "$BIN" ]; then
+            ldid -SXMusic.entitlements "$BIN"
+            echo "Signed with ldid + entitlements"
+            ldid -e "$BIN" 2>/dev/null | head -20 || true
+          else
+            echo "WARN: binary not found at $BIN"
+          fi
           mkdir -p /tmp/ipa/Payload
           cp -R "$APP" /tmp/ipa/Payload/
           cd /tmp/ipa
