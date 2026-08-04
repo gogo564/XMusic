@@ -2,7 +2,7 @@ import SwiftUI
 import ShazamKit
 import AVFoundation
 
-enum RecognitionState {
+enum RecognitionState: Equatable {
     case idle
     case listening
     case matching
