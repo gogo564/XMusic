@@ -110,7 +110,9 @@ struct AddSongsToPlaylistView: View {
             try await playlistStore.addSongsToLove(songs)
             return "已添加 \(songs.count) 首到「我喜欢的音乐」"
         }
-    }    private func addToDefault() {
+    }
+
+    private func addToDefault() {
         run {
             try await playlistStore.addSongsToDefault(songs)
             return "已添加 \(songs.count) 首到「默认列表」"
