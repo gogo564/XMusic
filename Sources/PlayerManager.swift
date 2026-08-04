@@ -99,7 +99,7 @@ final class PlayerManager: ObservableObject {
                 let tr = first.timeRangeValue
                 self.bufferedTime = CMTimeGetSeconds(tr.start) + CMTimeGetSeconds(tr.duration)
             }
-            self.updateNowPlaying()
+            self.updateNowPlayingElapsed()
         }
     }
 
@@ -321,6 +321,13 @@ final class PlayerManager: ObservableObject {
         parsedLyrics = []
         currentLyricIndex = -1
 
+        // 0. Downloaded-file first (Documents/Downloads/) - instant playback
+        if let localURL = DownloadService.shared.localURL(for: song) {
+            startPlayback(url: localURL, song: song, sourceName: "下载", qualityName: "本地")
+            Task { await loadLyric(for: song) }
+            return
+        }
+
         // 1. Cache-first
         if MusicCacheManager.shared.isCached(id: song.id), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id) {
             startPlayback(url: cachedURL, song: song, sourceName: "缓存", qualityName: qualityName.isEmpty ? "缓存" : qualityName)
@@ -445,6 +452,10 @@ final class PlayerManager: ObservableObject {
 
     // MARK: - Now Playing + Remote commands
 
+    /// In-memory artwork cache keyed by song id, so we download each cover only once.
+    private var artworkCache: [String: MPMediaItemArtwork] = [:]
+
+    /// Full now playing update. Called on play/pause/seek/song change.
     private func updateNowPlaying() {
         guard let song = currentSong else {
             if !localPlaybackTitle.isEmpty {
@@ -455,6 +466,9 @@ final class PlayerManager: ObservableObject {
                     MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
                     MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
                 ]
+                if let art = artworkCache["local"] {
+                    info[MPMediaItemPropertyArtwork] = art
+                }
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = info
             } else {
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -468,18 +482,41 @@ final class PlayerManager: ObservableObject {
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
         ]
-        if !song.imageURL.isEmpty, let coverURL = URL(string: song.imageURL) {
-            let coverSize = CGSize(width: 600, height: 600)
-            Task {
-                if let data = try? Data(contentsOf: coverURL), let img = UIImage(data: data) {
-                    let art = MPMediaItemArtwork(boundsSize: coverSize) { _ in img }
-                    var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
-                    updated[MPMediaItemPropertyArtwork] = art
-                    MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+        if let art = artworkCache[song.id] {
+            info[MPMediaItemPropertyArtwork] = art
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        loadArtwork(for: song)
+    }
+
+    /// Lightweight periodic update (every 0.5s): only refreshes elapsed time + rate,
+    /// reusing the cached nowPlayingInfo so the artwork is never cleared/re-added.
+    private func updateNowPlayingElapsed() {
+        guard currentSong != nil else { return }
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        if info.isEmpty { updateNowPlaying(); return }
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    /// Downloads the cover once per song, then re-applies it without disturbing the rest.
+    private func loadArtwork(for song: LXSong) {
+        guard artworkCache[song.id] == nil, !song.imageURL.isEmpty, let coverURL = URL(string: song.imageURL) else { return }
+        let coverSize = CGSize(width: 600, height: 600)
+        Task { [weak self] in
+            if let data = try? Data(contentsOf: coverURL), let img = UIImage(data: data) {
+                let art = MPMediaItemArtwork(boundsSize: coverSize) { _ in img }
+                await MainActor.run {
+                    guard let self = self else { return }
+                    self.artworkCache[song.id] = art
+                    guard self.currentSong?.id == song.id else { return }
+                    var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+                    info[MPMediaItemPropertyArtwork] = art
+                    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
                 }
             }
         }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     private func setupRemoteCommands() {

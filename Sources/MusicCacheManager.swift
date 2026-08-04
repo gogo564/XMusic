@@ -73,7 +73,22 @@ class MusicCacheManager: ObservableObject {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? handle.close() }
 
-        let headerData = handle.readData(ofLength: 12)
+        // Read the start of the file. If it carries an ID3v2 tag, skip past it and
+        // validate the actual audio payload (many MP3s start with "ID3", not 0xFF).
+        let readLength = 32 * 1024
+        var headerData = handle.readData(ofLength: readLength)
+        if headerData.count >= 3,
+           String(bytes: headerData[0..<3], encoding: .ascii) == "ID3",
+           headerData.count >= 10 {
+            let tagSize = ((Int(headerData[6]) & 0x7F) << 21) | ((Int(headerData[7]) & 0x7F) << 14) | ((Int(headerData[8]) & 0x7F) << 7) | (Int(headerData[9]) & 0x7F)
+            let audioOffset = 10 + tagSize
+            if audioOffset < headerData.count {
+                headerData = Data(headerData[audioOffset...])
+            } else {
+                handle.seek(toFileOffset: UInt64(audioOffset))
+                headerData = handle.readData(ofLength: readLength)
+            }
+        }
         guard headerData.count >= 4 else { return false }
         let headerBytes = [UInt8](headerData)
 
