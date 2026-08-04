@@ -56,50 +56,22 @@ final class PlaylistStore: ObservableObject {
 
     func addSongToLove(_ song: LXSong) async throws {
         var raw = try await freshRaw()
-        var love = raw["loveList"] as? [[String: Any]] ?? []
-        if love.isEmpty {
-            love = [[
-                "id": "love",
-                "name": "我喜欢的音乐",
-                "source": "default",
-                "list": [[String: Any]](),
-            ]]
+        var songs = raw["loveList"] as? [[String: Any]] ?? []
+        if !songs.contains(where: { isSameSong($0, song) }) {
+            songs.append(song.songInfoPayload)
         }
-        var loveList = love
-        if var first = loveList.first {
-            var songs = first["list"] as? [[String: Any]] ?? []
-            if !songs.contains(where: { isSameSong($0, song) }) {
-                songs.append(song.songInfoPayload)
-            }
-            first["list"] = songs
-            loveList[0] = first
-        }
-        raw["loveList"] = loveList
+        raw["loveList"] = songs
         try await push(raw)
     }
 
     func addSongsToLove(_ songs: [LXSong]) async throws {
         guard !songs.isEmpty else { return }
         var raw = try await freshRaw()
-        var love = raw["loveList"] as? [[String: Any]] ?? []
-        if love.isEmpty {
-            love = [[
-                "id": "love",
-                "name": "我喜欢的音乐",
-                "source": "default",
-                "list": [[String: Any]](),
-            ]]
+        var existing = raw["loveList"] as? [[String: Any]] ?? []
+        for song in songs where !existing.contains(where: { isSameSong($0, song) }) {
+            existing.append(song.songInfoPayload)
         }
-        var loveList = love
-        if var first = loveList.first {
-            var existing = first["list"] as? [[String: Any]] ?? []
-            for song in songs where !existing.contains(where: { isSameSong($0, song) }) {
-                existing.append(song.songInfoPayload)
-            }
-            first["list"] = existing
-            loveList[0] = first
-        }
-        raw["loveList"] = loveList
+        raw["loveList"] = existing
         try await push(raw)
     }
 
@@ -135,15 +107,9 @@ final class PlaylistStore: ObservableObject {
 
     func removeSongFromLove(_ song: LXSong) async throws {
         var raw = try await freshRaw()
-        var love = raw["loveList"] as? [[String: Any]] ?? []
-        guard !love.isEmpty else { return }
-        if var first = love.first {
-            var songs = first["list"] as? [[String: Any]] ?? []
-            songs.removeAll { isSameSong($0, song) }
-            first["list"] = songs
-            love[0] = first
-        }
-        raw["loveList"] = love
+        var songs = raw["loveList"] as? [[String: Any]] ?? []
+        songs.removeAll { isSameSong($0, song) }
+        raw["loveList"] = songs
         try await push(raw)
     }
 
