@@ -55,7 +55,7 @@ final class PlaylistStore: ObservableObject {
     // MARK: - Mutations (then push to server)
 
     func addSongToLove(_ song: LXSong) async throws {
-        guard var raw = listData?.raw else { return }
+        var raw = try await freshRaw()
         var love = raw["loveList"] as? [[String: Any]] ?? []
         if love.isEmpty {
             love = [[
@@ -79,7 +79,9 @@ final class PlaylistStore: ObservableObject {
     }
 
     func removeSongFromLove(_ song: LXSong) async throws {
-        guard var raw = listData?.raw, var love = (raw["loveList"] as? [[String: Any]]), !love.isEmpty else { return }
+        var raw = try await freshRaw()
+        var love = raw["loveList"] as? [[String: Any]] ?? []
+        guard !love.isEmpty else { return }
         if var first = love.first {
             var songs = first["list"] as? [[String: Any]] ?? []
             songs.removeAll { isSameSong($0, song) }
@@ -95,7 +97,7 @@ final class PlaylistStore: ObservableObject {
     }
 
     func addSongToDefault(_ song: LXSong) async throws {
-        guard var raw = listData?.raw else { return }
+        var raw = try await freshRaw()
         var songs = raw["defaultList"] as? [[String: Any]] ?? []
         if !songs.contains(where: { isSameSong($0, song) }) {
             songs.append(song.songInfoPayload)
@@ -105,7 +107,7 @@ final class PlaylistStore: ObservableObject {
     }
 
     func removeSongFromDefault(at index: Int) async throws {
-        guard var raw = listData?.raw else { return }
+        var raw = try await freshRaw()
         var songs = raw["defaultList"] as? [[String: Any]] ?? []
         if songs.indices.contains(index) { songs.remove(at: index) }
         raw["defaultList"] = songs
@@ -113,7 +115,7 @@ final class PlaylistStore: ObservableObject {
     }
 
     func addSong(_ song: LXSong, toPlaylistID pid: String) async throws {
-        guard var raw = listData?.raw else { return }
+        var raw = try await freshRaw()
         var userLists = raw["userList"] as? [[String: Any]] ?? []
         var found = false
         for i in userLists.indices where userLists[i]["id"] as? String == pid {
@@ -131,7 +133,7 @@ final class PlaylistStore: ObservableObject {
     }
 
     func removeSong(at index: Int, fromPlaylistID pid: String) async throws {
-        guard var raw = listData?.raw else { return }
+        var raw = try await freshRaw()
         var userLists = raw["userList"] as? [[String: Any]] ?? []
         var found = false
         for i in userLists.indices where userLists[i]["id"] as? String == pid {
@@ -147,7 +149,7 @@ final class PlaylistStore: ObservableObject {
     }
 
     func createPlaylist(name: String) async throws {
-        guard var raw = listData?.raw else { return }
+        var raw = try await freshRaw()
         let pid = "webplayer_\(Int(Date().timeIntervalSince1970 * 1000))"
         let newList: [String: Any] = [
             "id": pid,
@@ -162,7 +164,7 @@ final class PlaylistStore: ObservableObject {
     }
 
     func renamePlaylist(id pid: String, newName: String) async throws {
-        guard var raw = listData?.raw else { return }
+        var raw = try await freshRaw()
         var userLists = raw["userList"] as? [[String: Any]] ?? []
         var found = false
         for i in userLists.indices where userLists[i]["id"] as? String == pid {
@@ -175,11 +177,26 @@ final class PlaylistStore: ObservableObject {
     }
 
     func deletePlaylist(id pid: String) async throws {
-        guard var raw = listData?.raw else { return }
+        var raw = try await freshRaw()
         var userLists = raw["userList"] as? [[String: Any]] ?? []
         userLists.removeAll { $0["id"] as? String == pid }
         raw["userList"] = userLists
         try await push(raw)
+    }
+
+    /// Fetch the latest server data before mutating, so edits never overwrite
+    /// changes made elsewhere (CarPlay / web / other devices).
+    private func freshRaw() async throws -> [String: Any] {
+        do {
+            let fresh = try await LXAPIClient.shared.getData()
+            await MainActor.run { self.listData = fresh }
+            return fresh.raw
+        } catch {
+            if let raw = listData?.raw {
+                return raw
+            }
+            throw error
+        }
     }
 
     @MainActor

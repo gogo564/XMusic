@@ -187,9 +187,19 @@ final class SongRecognizer: NSObject, SHSessionDelegate {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil
         session = nil
+        restoreAudioSession()
     }
 
     private func startEngine() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            onError?("麦克风启动失败: \(error.localizedDescription)")
+            return
+        }
+
         let session = SHSession()
         session.delegate = self
         self.session = session
@@ -207,6 +217,16 @@ final class SongRecognizer: NSObject, SHSessionDelegate {
             isRunning = true
         } catch {
             onError?("麦克风启动失败: \(error.localizedDescription)")
+        }
+    }
+
+    private func restoreAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default)
+            try audioSession.setActive(true)
+        } catch {
+            print("🔊 [Recognition] restore session error: \(error.localizedDescription)")
         }
     }
 

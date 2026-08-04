@@ -297,6 +297,8 @@ final class PlayerManager: ObservableObject {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: artist,
+            MPMediaItemPropertyPlaybackDuration: duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: 1.0,
         ]
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
@@ -388,6 +390,7 @@ final class PlayerManager: ObservableObject {
                     if d.isFinite, d > 0 {
                         self.duration = d
                     }
+                    self.updateNowPlaying()
                 default:
                     break
                 }
@@ -406,6 +409,7 @@ final class PlayerManager: ObservableObject {
                 self.parsedLyrics = parsed.lines.map { LyricLine(time: $0.time, text: $0.text) }
                 self.currentLyricIndex = -1
                 self.saveRecent(song: song, lrc: raw)
+                self.updateNowPlaying()
             }
         } catch {
             await MainActor.run {
@@ -413,6 +417,7 @@ final class PlayerManager: ObservableObject {
                 self.lrc = LRC.parse(nil)
                 self.parsedLyrics = []
                 self.currentLyricIndex = -1
+                self.updateNowPlaying()
             }
         }
     }
@@ -466,6 +471,9 @@ final class PlayerManager: ObservableObject {
                     MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
                     MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
                 ]
+                if !lyrics.isEmpty {
+                    info[MPMediaItemPropertyLyrics] = lyrics
+                }
                 if let art = artworkCache["local"] {
                     info[MPMediaItemPropertyArtwork] = art
                 }
@@ -482,6 +490,9 @@ final class PlayerManager: ObservableObject {
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
         ]
+        if !lyrics.isEmpty {
+            info[MPMediaItemPropertyLyrics] = lyrics
+        }
         if let art = artworkCache[song.id] {
             info[MPMediaItemPropertyArtwork] = art
         }
