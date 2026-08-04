@@ -218,6 +218,41 @@ final class PlaylistStore: ObservableObject {
         try await push(raw)
     }
 
+    /// 一键整单加入：同名歌单已存在则加入其中，否则新建同名歌单再加入。
+    func addSongsToNamedPlaylist(_ songs: [LXSong], name: String) async throws -> String {
+        guard !songs.isEmpty else { throw LXAPIError.decoding("歌单为空") }
+        var raw = try await freshRaw()
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        let pid: String
+        if let existing = userLists.first(where: { ($0["name"] as? String) == name }) {
+            pid = existing["id"] as? String ?? ""
+        } else {
+            pid = "webplayer_\(Int(Date().timeIntervalSince1970 * 1000))"
+            let newList: [String: Any] = [
+                "id": pid,
+                "name": name,
+                "source": "webplayer",
+                "list": [[String: Any]](),
+            ]
+            userLists.insert(newList, at: 0)
+        }
+        guard !pid.isEmpty else { throw LXAPIError.decoding("歌单不存在") }
+        var found = false
+        for i in userLists.indices where userLists[i]["id"] as? String == pid {
+            var existing = userLists[i]["list"] as? [[String: Any]] ?? []
+            for song in songs where !existing.contains(where: { isSameSong($0, song) }) {
+                existing.append(song.songInfoPayload)
+            }
+            userLists[i]["list"] = existing
+            raw["userList"] = userLists
+            found = true
+            break
+        }
+        if !found { throw LXAPIError.decoding("歌单不存在") }
+        try await push(raw)
+        return pid
+    }
+
     func renamePlaylist(id pid: String, newName: String) async throws {
         var raw = try await freshRaw()
         var userLists = raw["userList"] as? [[String: Any]] ?? []

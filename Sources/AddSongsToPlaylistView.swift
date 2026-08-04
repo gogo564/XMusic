@@ -17,6 +17,19 @@ struct AddSongsToPlaylistView: View {
         NavigationView {
             List {
                 Button {
+                    addAsNamedPlaylist()
+                } label: {
+                    HStack {
+                        Label("一键整单加入：\(playlistName)", systemImage: "folder.badge.plus")
+                            .foregroundColor(.accentColor)
+                        Spacer()
+                        if isWorking {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isWorking)
+                Button {
                     showNewPlaylist = true
                 } label: {
                     Label("新建歌单并添加", systemImage: "plus.circle.fill")
@@ -85,14 +98,19 @@ struct AddSongsToPlaylistView: View {
         .navigationViewStyle(.stack)
     }
 
+    private func addAsNamedPlaylist() {
+        run {
+            try await playlistStore.addSongsToNamedPlaylist(songs, name: playlistName)
+            return "已整单加入「\(playlistName)」"
+        }
+    }
+
     private func addToLove() {
         run {
             try await playlistStore.addSongsToLove(songs)
             return "已添加 \(songs.count) 首到「我喜欢的音乐」"
         }
-    }
-
-    private func addToDefault() {
+    }    private func addToDefault() {
         run {
             try await playlistStore.addSongsToDefault(songs)
             return "已添加 \(songs.count) 首到「默认列表」"
