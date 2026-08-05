@@ -52,7 +52,7 @@ struct DownloadsView: View {
         }
     }
 
-    private func activeRow(song: DownloadedSong, key: String) -> some View {
+    private func activeRow(song: LXSong, key: String) -> some View {
         HStack(spacing: 12) {
             LXCachedImage(urlString: song.imageURL, size: 44)
             VStack(alignment: .leading, spacing: 3) {
