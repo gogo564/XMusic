@@ -6,6 +6,7 @@ struct XmusicApp: App {
     @StateObject private var playlistStore = PlaylistStore.shared
     @StateObject private var downloader = DownloadService.shared
     @StateObject private var recentStore = RecentStore.shared
+    @StateObject private var libraryStore = LibraryStore.shared
     @State private var needsConfig = false
 
     var body: some Scene {
@@ -15,10 +16,14 @@ struct XmusicApp: App {
                 .environmentObject(playlistStore)
                 .environmentObject(downloader)
                 .environmentObject(recentStore)
+                .environmentObject(libraryStore)
                 .onAppear {
                     needsConfig = AppConfigStore.shared.token == nil
                     if !needsConfig {
-                        Task { await playlistStore.refresh() }
+                        Task {
+                            await playlistStore.refresh()
+                            await libraryStore.loadIfNeeded()
+                        }
                     }
                 }
                 .preferredColorScheme(.dark)

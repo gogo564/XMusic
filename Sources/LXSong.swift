@@ -173,13 +173,52 @@ struct LXOnlinePlaylist: Identifiable {
         raw = dict
     }
 
-    var id: String { raw["id"] as? String ?? name }
+    var id: String { String(describing: raw["id"] ?? "") }
     var name: String { raw["name"] as? String ?? "" }
     var author: String { raw["author"] as? String ?? "" }
-    var imageURL: String { raw["img"] as? String ?? "" }
-    var playCount: String { raw["play_count"] as? String ?? "" }
-    var songCount: Int { (raw["total"] as? Int) ?? 0 }
+    var imageURL: String { raw["picUrl"] as? String ?? (raw["img"] as? String) ?? "" }
+    var playCount: String { raw["playCount"] as? String ?? "" }
+    var songCount: Int { (raw["trackCount"] as? Int) ?? (raw["total"] as? Int) ?? 0 }
     var desc: String { raw["desc"] as? String ?? "" }
+    var source: String { raw["source"] as? String ?? "wy" }
+}
+
+// 搜索到的歌手 (type=singer)
+struct LXArtist: Identifiable {
+    let raw: [String: Any]
+
+    init(_ dict: [String: Any]) {
+        raw = dict
+    }
+
+    var id: String { String(describing: raw["id"] ?? "") }
+    var name: String { raw["name"] as? String ?? "" }
+    var picUrl: String { raw["picUrl"] as? String ?? "" }
+    var albumSize: Int { (raw["albumSize"] as? Int) ?? 0 }
+    var aliases: [String] { raw["alias"] as? [String] ?? [] }
+    var source: String { raw["source"] as? String ?? "wy" }
+
+    func toPayload() -> [String: Any] { raw }
+}
+
+// 搜索到的专辑 (type=album)
+struct LXAlbum: Identifiable {
+    let raw: [String: Any]
+
+    init(_ dict: [String: Any]) {
+        raw = dict
+    }
+
+    var id: String { String(describing: raw["id"] ?? "") }
+    var name: String { raw["name"] as? String ?? "" }
+    var picUrl: String { raw["picUrl"] as? String ?? "" }
+    var artistName: String { raw["artistName"] as? String ?? "" }
+    var artistId: String { String(describing: raw["artistId"] ?? "") }
+    var size: Int { (raw["size"] as? Int) ?? 0 }
+    var publishTime: Int64 { (raw["publishTime"] as? Int64) ?? 0 }
+    var source: String { raw["source"] as? String ?? "wy" }
+
+    func toPayload() -> [String: Any] { raw }
 }
 
 enum LXListKind: String {

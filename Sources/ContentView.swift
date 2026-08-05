@@ -400,43 +400,55 @@ struct HomeView: View {
 
 struct SearchView: View {
     @EnvironmentObject var player: PlayerManager
+    @EnvironmentObject var libraryStore: LibraryStore
     @State private var searchText = ""
     @State private var source = "wy"
-    @State private var mode = 0 // 0 = 歌曲, 1 = 歌单
+    @State private var mode = 0 // 0 = 歌曲, 1 = 歌手, 2 = 专辑, 3 = 歌单
     @State private var songResults: [LXSong] = []
+    @State private var artistResults: [LXArtist] = []
+    @State private var albumResults: [LXAlbum] = []
     @State private var playlistResults: [LXOnlinePlaylist] = []
+    @State private var hasSearched = false
     @State private var isLoading = false
-    @State private var searchTask: Task<Void, Never>?
     @FocusState private var searchFocused: Bool
 
-    private var isSearching: Bool {
-        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    private var trimmedText: String {
+        searchText.trimmingCharacters(in: .whitespaces)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             sourcePicker
             searchField
-            if isSearching {
+            if hasSearched {
                 modePicker
             }
             ScrollView {
-                if isSearching {
-                    if mode == 0 {
-                        songResultsList
-                    } else {
-                        playlistResultsList
-                    }
-                } else {
+                if !hasSearched {
                     VStack(spacing: 10) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 36))
                             .foregroundColor(.secondary)
-                        Text("搜索你喜欢的音乐、歌手、歌单")
+                        Text("搜索歌曲、歌手、专辑、歌单")
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
                     }
                     .padding(.top, 80)
+                } else if isLoading {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("搜索中…")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 60)
+                } else {
+                    switch mode {
+                    case 0: songResultsList
+                    case 1: artistResultsList
+                    case 2: albumResultsList
+                    default: playlistResultsList
+                    }
                 }
                 Spacer(minLength: 120)
             }
@@ -448,19 +460,17 @@ struct SearchView: View {
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
-                Button("完成") {
+                Button("搜索") {
                     searchFocused = false
+                    Task { await performSearch() }
                 }
             }
         }
-        .onChange(of: searchText) { _ in
-            debounce()
-        }
         .onChange(of: source) { _ in
-            if isSearching { Task { await performSearch() } }
+            if hasSearched { Task { await performSearch() } }
         }
         .onChange(of: mode) { _ in
-            if isSearching { Task { await performSearch() } }
+            if hasSearched { Task { await performSearch() } }
         }
     }
 
@@ -492,13 +502,16 @@ struct SearchView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 15))
                 .foregroundColor(.secondary)
-            TextField(mode == 0 ? "搜索歌曲 / 歌手" : "搜索歌单", text: $searchText)
+            TextField("搜索歌曲、歌手、专辑、歌单", text: $searchText)
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
                 .font(.system(size: 15))
                 .focused($searchFocused)
                 .submitLabel(.search)
-                .onSubmit { searchFocused = false }
+                .onSubmit {
+                    searchFocused = false
+                    Task { await performSearch() }
+                }
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
@@ -519,8 +532,10 @@ struct SearchView: View {
 
     private var modePicker: some View {
         Picker("搜索类型", selection: $mode) {
-            Text("搜歌曲").tag(0)
-            Text("搜歌单").tag(1)
+            Text("歌曲").tag(0)
+            Text("歌手").tag(1)
+            Text("专辑").tag(2)
+            Text("歌单").tag(3)
         }
         .pickerStyle(.segmented)
         .padding(.horizontal, 16)
@@ -529,9 +544,7 @@ struct SearchView: View {
 
     private var songResultsList: some View {
         LazyVStack(spacing: 0) {
-            if isLoading {
-                HStack { Spacer(); ProgressView(); Spacer() }.padding(30)
-            } else if songResults.isEmpty {
+            if songResults.isEmpty {
                 emptyView(text: "未找到歌曲")
             } else {
                 ForEach(Array(songResults.enumerated()), id: \.element.id) { idx, song in
@@ -546,24 +559,113 @@ struct SearchView: View {
         .padding(.top, 4)
     }
 
+    private var artistResultsList: some View {
+        LazyVStack(spacing: 0) {
+            if artistResults.isEmpty {
+                emptyView(text: "未找到歌手")
+            } else {
+                ForEach(artistResults) { artist in
+                    HStack(spacing: 12) {
+                        NavigationLink(destination: ArtistDetailView(artist: artist, source: source)) {
+                            HStack(spacing: 12) {
+                                LXCachedImage(urlString: artist.picUrl, size: 48, cornerRadius: 24)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(artist.name)
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                    Text("歌手 · \(artist.albumSize) 张专辑")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                        loveButton(loved: libraryStore.isArtistLoved(artist)) {
+                            libraryStore.toggleArtist(artist)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    Divider().padding(.leading, 76)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private var albumResultsList: some View {
+        LazyVStack(spacing: 0) {
+            if albumResults.isEmpty {
+                emptyView(text: "未找到专辑")
+            } else {
+                ForEach(albumResults) { album in
+                    HStack(spacing: 12) {
+                        NavigationLink(destination: AlbumDetailView(album: album, source: source)) {
+                            HStack(spacing: 12) {
+                                LXCachedImage(urlString: album.picUrl, size: 48, cornerRadius: 10)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(album.name)
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                    Text("\(album.artistName) · \(album.size) 首")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                        loveButton(loved: libraryStore.isAlbumLoved(album)) {
+                            libraryStore.toggleAlbum(album)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    Divider().padding(.leading, 76)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
     private var playlistResultsList: some View {
         LazyVStack(spacing: 0) {
-            if isLoading {
-                HStack { Spacer(); ProgressView(); Spacer() }.padding(30)
-            } else if playlistResults.isEmpty {
+            if playlistResults.isEmpty {
                 emptyView(text: "未找到歌单")
             } else {
                 ForEach(playlistResults) { pl in
-                    NavigationLink(destination: PlaylistDetailView(playlist: pl, source: source)) {
-                        OnlinePlaylistRow(playlist: pl)
-                            .padding(.horizontal, 16)
+                    HStack(spacing: 12) {
+                        NavigationLink(destination: PlaylistDetailView(playlist: pl, source: source)) {
+                            OnlinePlaylistRow(playlist: pl)
+                                .padding(.horizontal, 16)
+                        }
+                        .buttonStyle(.plain)
+                        loveButton(loved: libraryStore.isPlaylistLoved(pl)) {
+                            libraryStore.togglePlaylist(pl)
+                        }
                     }
-                    .buttonStyle(.plain)
                     Divider().padding(.leading, 68)
                 }
             }
         }
         .padding(.top, 4)
+    }
+
+    private func loveButton(loved: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: loved ? "heart.fill" : "heart")
+                .font(.system(size: 18))
+                .foregroundColor(loved ? .red : .secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 8)
     }
 
     private func emptyView(text: String) -> some View {
@@ -579,38 +681,270 @@ struct SearchView: View {
 
     @MainActor
     private func performSearch() async {
-        let text = searchText.trimmingCharacters(in: .whitespaces)
+        let text = trimmedText
         guard !text.isEmpty else { return }
+        hasSearched = true
         isLoading = true
-        if mode == 0 {
+        switch mode {
+        case 0:
             do {
                 songResults = try await LXAPIClient.shared.search(name: text, source: source, page: 1, pages: 3)
             } catch {
                 songResults = []
             }
-        } else {
-            do {
-                playlistResults = try await LXAPIClient.shared.searchPlaylists(name: text, source: source)
-            } catch {
-                playlistResults = []
-            }
+        case 1:
+            let arr = (try? await LXAPIClient.shared.searchMulti(name: text, source: source, type: "singer")) ?? []
+            artistResults = arr.map(LXArtist.init)
+        case 2:
+            let arr = (try? await LXAPIClient.shared.searchMulti(name: text, source: source, type: "album")) ?? []
+            albumResults = arr.map(LXAlbum.init)
+        default:
+            playlistResults = (try? await LXAPIClient.shared.searchPlaylistsMulti(name: text, source: source)) ?? []
         }
         isLoading = false
     }
+}
 
-    private func debounce() {
-        searchTask?.cancel()
-        let text = searchText.trimmingCharacters(in: .whitespaces)
-        if text.isEmpty {
-            songResults = []
-            playlistResults = []
-            return
+// MARK: - 歌手详情
+
+struct ArtistDetailView: View {
+    @EnvironmentObject var player: PlayerManager
+    @EnvironmentObject var libraryStore: LibraryStore
+    let artist: LXArtist
+    let source: String
+
+    @State private var songs: [LXSong] = []
+    @State private var albums: [LXAlbum] = []
+    @State private var isLoading = true
+    @State private var showAlbums = false
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 14) {
+                    LXCachedImage(urlString: artist.picUrl, size: 88, cornerRadius: 44)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(artist.name)
+                            .font(.system(size: 20, weight: .bold))
+                        Text("歌手")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        libraryStore.toggleArtist(artist)
+                    } label: {
+                        Image(systemName: libraryStore.isArtistLoved(artist) ? "heart.fill" : "heart")
+                            .font(.system(size: 24))
+                            .foregroundColor(libraryStore.isArtistLoved(artist) ? .red : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 6)
+                Button {
+                    playAll()
+                } label: {
+                    Label("播放全部", systemImage: "play.circle.fill")
+                        .font(.system(size: 15, weight: .medium))
+                }
+            }
+            if showAlbums {
+                Section(header: Text("专辑")) {
+                    if albums.isEmpty {
+                        Text("暂无专辑")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(albums) { album in
+                            NavigationLink(destination: AlbumDetailView(album: album, source: source)) {
+                                HStack(spacing: 12) {
+                                    LXCachedImage(urlString: album.picUrl, size: 48, cornerRadius: 10)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(album.name)
+                                            .font(.system(size: 15, weight: .medium))
+                                            .lineLimit(1)
+                                        Text("\(album.artistName) · \(album.size) 首")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Section(header: Text("热门歌曲")) {
+                    if songs.isEmpty {
+                        Text("暂无歌曲")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
+                            Button {
+                                player.play(song: song, in: songs, index: idx)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Text("\(idx + 1)")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 24, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(song.name)
+                                            .font(.system(size: 15))
+                                            .foregroundColor(.primary)
+                                            .lineLimit(1)
+                                        Text(song.singer)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    if !song.interval.isEmpty {
+                                        Text(song.interval)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
-        searchTask = Task {
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled else { return }
-            await performSearch()
+        .listStyle(.insetGrouped)
+        .navigationTitle(artist.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(showAlbums ? "歌曲" : "专辑") {
+                    showAlbums.toggle()
+                }
+            }
         }
+        .onAppear {
+            Task { await load() }
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        async let songsTask = LXAPIClient.shared.getArtistSongs(source: source, artistID: artist.id)
+        async let albumsTask = LXAPIClient.shared.getArtistAlbums(source: source, artistID: artist.id)
+        songs = await (try? songsTask) ?? []
+        albums = ((try? await albumsTask) ?? []).map(LXAlbum.init)
+        isLoading = false
+    }
+
+    private func playAll() {
+        guard !songs.isEmpty else { return }
+        player.play(song: songs[0], in: songs, index: 0)
+    }
+}
+
+// MARK: - 专辑详情
+
+struct AlbumDetailView: View {
+    @EnvironmentObject var player: PlayerManager
+    @EnvironmentObject var libraryStore: LibraryStore
+    let album: LXAlbum
+    let source: String
+
+    @State private var songs: [LXSong] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 14) {
+                    LXCachedImage(urlString: album.picUrl, size: 96, cornerRadius: 14)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(album.name)
+                            .font(.system(size: 17, weight: .bold))
+                            .lineLimit(2)
+                        Text(album.artistName)
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                        Text("\(album.size) 首")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        libraryStore.toggleAlbum(album)
+                    } label: {
+                        Image(systemName: libraryStore.isAlbumLoved(album) ? "heart.fill" : "heart")
+                            .font(.system(size: 24))
+                            .foregroundColor(libraryStore.isAlbumLoved(album) ? .red : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 6)
+                Button {
+                    playAll()
+                } label: {
+                    Label("播放全部", systemImage: "play.circle.fill")
+                        .font(.system(size: 15, weight: .medium))
+                }
+            }
+            Section(header: Text("曲目")) {
+                if isLoading {
+                    HStack { Spacer(); ProgressView(); Spacer() }.padding(20)
+                } else if songs.isEmpty {
+                    Text("暂无歌曲")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
+                        Button {
+                            player.play(song: song, in: songs, index: idx)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text("\(idx + 1)")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 24, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(song.name)
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                    Text(song.singer)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                if !song.interval.isEmpty {
+                                    Text(song.interval)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(album.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            Task { await load() }
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        songs = (try? await LXAPIClient.shared.getAlbumSongs(source: source, albumID: album.id)) ?? []
+        isLoading = false
+    }
+
+    private func playAll() {
+        guard !songs.isEmpty else { return }
+        player.play(song: songs[0], in: songs, index: 0)
     }
 }
 

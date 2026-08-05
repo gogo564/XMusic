@@ -427,6 +427,71 @@ final class LXAPIClient {
         return list.map(LXSong.init)
     }
 
+    // MARK: - Singer / Album 详情
+
+    /// type = song | singer | album | playlist
+    func searchMulti(name: String, source: String, type: String, page: Int = 1, limit: Int = 20) async throws -> [[String: Any]] {
+        let cfg = AppConfigStore.shared.config
+        var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/search")!
+        comps.queryItems = [
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "source", value: source),
+            URLQueryItem(name: "type", value: type),
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+        ]
+        guard let url = comps.url else { return [] }
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try ensureOK(response)
+        return (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+    }
+
+    /// type=playlist 搜索歌单（返回 list 数组）
+    func searchPlaylistsMulti(name: String, source: String, page: Int = 1, limit: Int = 20) async throws -> [LXOnlinePlaylist] {
+        let arr = try await searchMulti(name: name, source: source, type: "playlist", page: page, limit: limit)
+        return arr.map(LXOnlinePlaylist.init)
+    }
+
+    /// 歌手歌曲（服务器循环拉取全部）
+    func getArtistSongs(source: String, artistID: String, order: String = "hot") async throws -> [LXSong] {
+        var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/artistSongs")!
+        comps.queryItems = [
+            URLQueryItem(name: "id", value: artistID),
+            URLQueryItem(name: "source", value: source),
+            URLQueryItem(name: "order", value: order),
+        ]
+        guard let url = comps.url else { return [] }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return ((try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []).map(LXSong.init)
+    }
+
+    /// 歌手专辑列表
+    func getArtistAlbums(source: String, artistID: String, page: Int = 1) async throws -> [[String: Any]] {
+        var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/artistAlbums")!
+        comps.queryItems = [
+            URLQueryItem(name: "id", value: artistID),
+            URLQueryItem(name: "source", value: source),
+            URLQueryItem(name: "page", value: "\(page)"),
+        ]
+        guard let url = comps.url else { return [] }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+    }
+
+    /// 专辑歌曲
+    func getAlbumSongs(source: String, albumID: String) async throws -> [LXSong] {
+        var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/albumSongs")!
+        comps.queryItems = [
+            URLQueryItem(name: "id", value: albumID),
+            URLQueryItem(name: "source", value: source),
+        ]
+        guard let url = comps.url else { return [] }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return ((try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []).map(LXSong.init)
+    }
+
     // MARK: - Download
 
     func downloadURL(for song: LXSong, quality: String) async throws -> String {
