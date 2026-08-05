@@ -5,17 +5,31 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     private var interfaceController: CPInterfaceController?
     private var window: UIWindow?
+    private var didConnect = false
 
     // MARK: - CPTemplateApplicationSceneDelegate
+
+    func templateApplicationScene(
+        _ templateApplicationScene: CPTemplateApplicationScene,
+        didConnect interfaceController: CPInterfaceController
+    ) {
+        attach(interfaceController: interfaceController, window: nil)
+    }
 
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
         didConnect interfaceController: CPInterfaceController,
         to window: UIWindow?
     ) {
+        attach(interfaceController: interfaceController, window: window)
+    }
+
+    private func attach(interfaceController: CPInterfaceController, window: UIWindow?) {
         self.interfaceController = interfaceController
         self.window = window
         window?.isHidden = false
+        guard !didConnect else { return }
+        didConnect = true
         buildRootTemplate()
         Task { @MainActor in
             await PlaylistStore.shared.refresh()
@@ -30,6 +44,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     ) {
         self.interfaceController = nil
         self.window = nil
+        didConnect = false
     }
 
     // MARK: - Root
