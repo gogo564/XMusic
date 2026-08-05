@@ -102,11 +102,13 @@ struct PlayerView: View {
 
                 Spacer()
 
-                // Album Art
+                // Album Art (CD rotation)
                 if let song = playerManager.currentSong {
                     AsyncImage(url: URL(string: song.imageURL)) { image in
                         image.resizable()
                             .aspectRatio(contentMode: .fit)
+                            .rotationEffect(.degrees(albumRotationAngle))
+                            .animation(.linear(duration: 0.5), value: playerManager.currentTime)
                             .cornerRadius(20)
                             .shadow(radius: 20)
                     } placeholder: {
@@ -116,6 +118,22 @@ struct PlayerView: View {
                     }
                     .frame(width: geo.size.width * 0.8)
                     .padding(20)
+
+                    // Single current-line lyric, tap to open full lyrics
+                    if let line = currentLyricLine {
+                        Button {
+                            withAnimation { showingLyrics = true }
+                        } label: {
+                            Text(line)
+                                .font(.subheadline.weight(.medium))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                                .foregroundColor(.white.opacity(0.85))
+                                .padding(.horizontal, 40)
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.opacity)
+                    }
                 }
 
                 Spacer()
@@ -326,11 +344,18 @@ struct PlayerView: View {
                                         Text(line.text)
                                             .font(isActive ? .title2.bold() : .title3)
                                             .multilineTextAlignment(.center)
-                                            .foregroundColor(isActive ? .white : .white.opacity(0.4))
-                                            .scaleEffect(isActive ? 1.05 : 1.0)
-                                            .animation(.spring(), value: isActive)
+                                            .foregroundColor(isActive ? .white : .white.opacity(0.35))
+                                            .scaleEffect(isActive ? 1.15 : 1.0)
+                                            .shadow(color: isActive ? Color.black.opacity(0.6) : .clear, radius: isActive ? 4 : 0)
+                                            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isActive)
                                             .id(line.id)
                                             .padding(.horizontal)
+                                            .padding(.vertical, 4)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                playerManager.seek(to: line.time)
+                                                HapticManager.shared.selection()
+                                            }
                                     }
                                 }
                             }
@@ -343,6 +368,16 @@ struct PlayerView: View {
                                 }
                             }
                         }
+                        .overlay(
+                            VStack {
+                                LinearGradient(colors: [Color.black.opacity(0.8), .clear], startPoint: .top, endPoint: .bottom)
+                                    .frame(height: 70)
+                                Spacer()
+                                LinearGradient(colors: [.clear, Color.black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                                    .frame(height: 70)
+                            }
+                            .allowsHitTesting(false)
+                        )
                     }
 
                     HStack {
@@ -381,6 +416,17 @@ struct PlayerView: View {
     }
 
     // MARK: - Lyric Helpers
+
+    private var currentLyricLine: String? {
+        let idx = playerManager.currentLyricIndex
+        guard idx >= 0, idx < playerManager.parsedLyrics.count else { return nil }
+        return playerManager.parsedLyrics[idx].text
+    }
+
+    /// CD-style rotation: 15°/s while playing, frozen when paused (derived from currentTime).
+    private var albumRotationAngle: Double {
+        (playerManager.currentTime * 15).truncatingRemainder(dividingBy: 360)
+    }
 
     private func isCurrentLine(_ line: PlayerManager.LyricLine) -> Bool {
         guard let index = playerManager.parsedLyrics.firstIndex(where: { $0.id == line.id }) else { return false }

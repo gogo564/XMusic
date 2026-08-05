@@ -99,6 +99,7 @@ final class PlayerManager: ObservableObject {
                 let tr = first.timeRangeValue
                 self.bufferedTime = CMTimeGetSeconds(tr.start) + CMTimeGetSeconds(tr.duration)
             }
+            self.updateLyricIndex()
             self.updateNowPlayingElapsed()
         }
     }
@@ -106,6 +107,20 @@ final class PlayerManager: ObservableObject {
     private func observeEnd() {
         NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] _ in
             self?.playNext(auto: true)
+        }
+    }
+
+    private func updateLyricIndex() {
+        guard !parsedLyrics.isEmpty else {
+            currentLyricIndex = -1
+            return
+        }
+        var idx = -1
+        for (i, line) in parsedLyrics.enumerated() {
+            if currentTime >= line.time { idx = i } else { break }
+        }
+        if idx != currentLyricIndex {
+            currentLyricIndex = idx
         }
     }
 
