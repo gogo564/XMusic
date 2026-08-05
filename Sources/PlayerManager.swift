@@ -291,6 +291,7 @@ final class PlayerManager: ObservableObject {
     func playLocalFile(url: URL, title: String, artist: String) {
         localPlaybackTitle = title
         localPlaybackArtist = artist
+        currentSong = LXSong(["name": title, "singer": artist])
         queue = []
         currentIndex = -1
         currentTime = 0
