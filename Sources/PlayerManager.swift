@@ -422,10 +422,26 @@ final class PlayerManager: ObservableObject {
     private func loadLyric(for song: LXSong) async {
         do {
             let result = try await LXAPIClient.shared.getLyric(for: song)
+            var raw = result.lyric ?? ""
+            var parsed = LRC.parse(raw, translation: result.translated)
+
+            if parsed.lines.isEmpty, LRC.hasTimestamps(result.lxlyric) {
+                let lxLines = LRC.parseLxlyric(result.lxlyric)
+                if !lxLines.isEmpty {
+                    raw = lxLines.map { formatLRC($0.time) + $0.text }.joined(separator: "\n")
+                    parsed = LRC.parse(raw)
+                }
+            }
+
+            if parsed.lines.isEmpty, LRC.hasTimestamps(raw) == false {
+                if let fallback = await LXAPIClient.shared.getLyricFallback(for: song) {
+                    raw = fallback
+                    parsed = LRC.parse(fallback)
+                }
+            }
+
             await MainActor.run {
-                let raw = result.lyric ?? ""
                 self.lyrics = raw
-                let parsed = LRC.parse(raw, translation: result.translated)
                 self.lrc = parsed
                 self.parsedLyrics = parsed.lines.map { LyricLine(time: $0.time, text: $0.text) }
                 self.currentLyricIndex = -1
@@ -474,6 +490,14 @@ final class PlayerManager: ObservableObject {
 
     private func saveRecent(song: LXSong, lrc: String? = nil) {
         RecentStore.shared.upsert(song, lrc: lrc)
+    }
+
+    /// Format a time interval as `[mm:ss.xx]` for LRC reconstruction.
+    private func formatLRC(_ t: TimeInterval) -> String {
+        let m = Int(t) / 60
+        let s = Int(t) % 60
+        let ms = Int((t - floor(t)) * 100)
+        return String(format: "[%02d:%02d.%02d]", m, s, ms)
     }
 
     // MARK: - Now Playing + Remote commands

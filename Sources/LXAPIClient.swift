@@ -26,6 +26,7 @@ struct PlaybackURLResult {
 struct LyricResult {
     let lyric: String?
     let translated: String?
+    let lxlyric: String?
 }
 
 final class LXAPIClient {
@@ -168,8 +169,44 @@ final class LXAPIClient {
         }
         return LyricResult(
             lyric: obj["lyric"] as? String,
-            translated: obj["tlyric"] as? String
+            translated: obj["tlyric"] as? String,
+            lxlyric: obj["lxlyric"] as? String
         )
+    }
+
+    /// 当原源返回的歌词无时间戳时，尝试从其他音源（kw/tx/kg/mg）搜索同名歌曲获取带时间戳的歌词。
+    /// 返回带时间戳的 LRC 文本，找不到则返回 nil。
+    func getLyricFallback(for song: LXSong) async -> String? {
+        let candidates = ["kw", "tx", "kg", "mg"].filter { $0 != song.source }
+        let targetBase = baseName(song.name)
+        let targetSingers = song.singer.components(separatedBy: "、").map { $0.trimmingCharacters(in: .whitespaces) }
+        for source in candidates {
+            guard let results = try? await search(name: targetBase, source: source, page: 1) else { continue }
+            for match in results where singerOverlap(targetSingers, match.singer) && baseName(match.name) == targetBase {
+                if let res = try? await getLyric(for: match), let lyr = res.lyric, LRC.hasTimestamps(lyr) {
+                    return lyr
+                }
+            }
+        }
+        return nil
+    }
+
+    /// 去掉标题括号后缀/空格，得到基准名（"不如 (Live合唱版)" → "不如"）。
+    private func baseName(_ name: String) -> String {
+        let cleaned = name.replacingOccurrences(of: #"\([^)]*\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"（[^）]*）"#, with: "", options: .regularExpression)
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 两个歌手字符串是否有重叠成员（艾利（Ellie）、老窦 vs 7paste、艾利（Ellie））。
+    private func singerOverlap(_ targetSingers: [String], _ candidate: String) -> Bool {
+        let candidateSingers = candidate.components(separatedBy: "、").map { $0.trimmingCharacters(in: .whitespaces) }
+        for t in targetSingers where !t.isEmpty {
+            for c in candidateSingers where !c.isEmpty {
+                if t == c || t.contains(c) || c.contains(t) { return true }
+            }
+        }
+        return false
     }
 
     // MARK: - Data / playlists

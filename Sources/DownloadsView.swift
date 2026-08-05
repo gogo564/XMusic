@@ -85,7 +85,7 @@ struct DownloadsView: View {
                             }
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                playLocal(d)
+                                downloader.playDownloaded(d)
                             }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
@@ -105,13 +105,6 @@ struct DownloadsView: View {
                 .allowsHitTesting(false)
         }
             .navigationTitle("下载")
-    }
-
-    private func playLocal(_ d: DownloadedSong) {
-        let url = downloader.downloadsDir.appendingPathComponent(d.localFile)
-        if FileManager.default.fileExists(atPath: url.path) {
-            PlayerManager.shared.playLocalFile(url: url, title: d.name, artist: d.singer)
-        }
     }
 
     private func sizeText(_ localFile: String) -> String {

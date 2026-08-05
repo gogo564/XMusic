@@ -11,6 +11,53 @@ struct DownloadedSong: Identifiable, Codable, Equatable {
     let fileURL: String
     let createdAt: Date
     let localFile: String
+    let rawJSON: String?
+
+    init(id: String, name: String, singer: String, source: String, songmid: String,
+         quality: String, fileURL: String, createdAt: Date, localFile: String, rawJSON: String? = nil) {
+        self.id = id
+        self.name = name
+        self.singer = singer
+        self.source = source
+        self.songmid = songmid
+        self.quality = quality
+        self.fileURL = fileURL
+        self.createdAt = createdAt
+        self.localFile = localFile
+        self.rawJSON = rawJSON
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, singer, source, songmid, quality, fileURL, createdAt, localFile, rawJSON
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        singer = try c.decode(String.self, forKey: .singer)
+        source = try c.decode(String.self, forKey: .source)
+        songmid = try c.decodeIfPresent(String.self, forKey: .songmid) ?? ""
+        quality = try c.decodeIfPresent(String.self, forKey: .quality) ?? ""
+        fileURL = try c.decodeIfPresent(String.self, forKey: .fileURL) ?? ""
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        localFile = try c.decodeIfPresent(String.self, forKey: .localFile) ?? ""
+        rawJSON = try c.decodeIfPresent(String.self, forKey: .rawJSON)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(singer, forKey: .singer)
+        try c.encode(source, forKey: .source)
+        try c.encode(songmid, forKey: .songmid)
+        try c.encode(quality, forKey: .quality)
+        try c.encode(fileURL, forKey: .fileURL)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(localFile, forKey: .localFile)
+        try c.encode(rawJSON, forKey: .rawJSON)
+    }
 }
 
 final class DownloadService: NSObject, ObservableObject {
@@ -47,7 +94,19 @@ final class DownloadService: NSObject, ObservableObject {
 
     func playLocal(_ song: LXSong) {
         guard let url = localURL(for: song) else { return }
-        PlayerManager.shared.playLocalFile(url: url, title: song.name, artist: song.singer)
+        PlayerManager.shared.play(song: song)
+    }
+
+    func playDownloaded(_ d: DownloadedSong) {
+        let url = downloadsDir.appendingPathComponent(d.localFile)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        if let rawJSON = d.rawJSON, let data = rawJSON.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let song = LXSong(obj)
+            PlayerManager.shared.play(song: song)
+        } else {
+            PlayerManager.shared.playLocalFile(url: url, title: d.name, artist: d.singer)
+        }
     }
 
     func download(_ song: LXSong, quality: String) {
@@ -165,7 +224,8 @@ extension DownloadService: URLSessionDownloadDelegate {
                 quality: quality,
                 fileURL: dest.absoluteString,
                 createdAt: Date(),
-                localFile: destName
+                localFile: destName,
+                rawJSON: song.jsonData.flatMap { String(data: $0, encoding: .utf8) }
             )
             DispatchQueue.main.async {
                 self.downloadedSongs.append(song)
