@@ -39,6 +39,7 @@ final class PlayerManager: ObservableObject {
     @Published var currentLyricIndex: Int = -1
     @Published var localPlaybackTitle = ""
     @Published var localPlaybackArtist = ""
+    @Published var showPlayer = false
 
     struct LyricLine: Identifiable {
         let id = UUID()
@@ -140,6 +141,7 @@ final class PlayerManager: ObservableObject {
         }
         saveLastPlayed()
         resolveAndPlay(song)
+        showPlayer = true
     }
 
     func play(song: LXSong, atQuality q: String) {
@@ -320,6 +322,7 @@ final class PlayerManager: ObservableObject {
             MPNowPlayingInfoPropertyPlaybackRate: 1.0,
         ]
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        showPlayer = true
     }
 
     func canPlayNext() -> Bool {

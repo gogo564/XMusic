@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedTab = 0
-    @State private var isShowingPlayer = false
     @State private var isKeyboardVisible = false
     @EnvironmentObject var player: PlayerManager
 
@@ -39,7 +38,7 @@ struct ContentView: View {
                     .offset(y: -48)
                     .onTapGesture {
                         if player.currentSong != nil {
-                            isShowingPlayer = true
+                            player.showPlayer = true
                         }
                     }
             }
@@ -62,7 +61,7 @@ struct ContentView: View {
         } message: {
             Text(player.playbackError ?? "")
         }
-        .fullScreenCover(isPresented: $isShowingPlayer) {
+        .fullScreenCover(isPresented: $player.showPlayer) {
             PlayerView()
                 .environmentObject(player)
         }

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct DownloadsView: View {
     @EnvironmentObject private var downloader: DownloadService
-    @EnvironmentObject private var player: PlayerManager
 
     var body: some View {
         List {
@@ -80,13 +79,13 @@ struct DownloadsView: View {
                                     .lineLimit(1)
                                 }
                                 Spacer()
-                                Button {
-                                    playLocal(d)
-                                } label: {
-                                    Image(systemName: player.isPlaying && player.localTitle == d.name ? "pause.circle.fill" : "play.circle.fill")
-                                        .font(.system(size: 30))
-                                }
-                                .buttonStyle(.borderless)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                playLocal(d)
                             }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
