@@ -30,20 +30,13 @@ struct ServerPlaylistDetailView: View {
     }
 
     var body: some View {
-        Group {
-            if isEditing {
-                editingList
-            } else {
-                normalList
-            }
-        }
-        .listStyle(.insetGrouped)
-        .safeAreaInset(edge: .bottom) {
+        VStack(spacing: 0) {
+            songList
             if isEditing {
                 editBottomBar
             } else {
                 Color.clear
-                    .frame(height: 120)
+                    .frame(height: 80)
                     .allowsHitTesting(false)
             }
         }
@@ -59,7 +52,7 @@ struct ServerPlaylistDetailView: View {
                     }
                 }
                 Button(isEditing ? "完成" : "选择") {
-                    withAnimation { isEditing.toggle() }
+                    withAnimation(.easeInOut(duration: 0.2)) { isEditing.toggle() }
                     selectedIDs.removeAll()
                 }
             }
@@ -70,27 +63,29 @@ struct ServerPlaylistDetailView: View {
         }
     }
 
-    // MARK: - Normal list
+    // MARK: - 同一个列表（编辑模式就地加复选框，不做整页替换）
 
-    private var normalList: some View {
+    private var songList: some View {
         List {
-            Section {
-                Button {
-                    playAll()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
-                        Text("播放全部")
+            if !isEditing {
+                Section {
+                    Button {
+                        playAll()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.fill")
+                            Text("播放全部")
+                        }
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-                .buttonStyle(.borderedProminent)
-                if let msg = message {
-                    Text(msg)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                    .buttonStyle(.borderedProminent)
+                    if let msg = message {
+                        Text(msg)
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             Section {
@@ -100,62 +95,50 @@ struct ServerPlaylistDetailView: View {
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
-                        SongRow(song: song, showSource: false) { s in
-                            player.play(song: s, in: songs, index: idx)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                remove(at: idx)
-                            } label: {
-                                Label("删除", systemImage: "trash")
+                        if isEditing {
+                            selectableRow(song)
+                        } else {
+                            SongRow(song: song, showSource: false) { s in
+                                player.play(song: s, in: songs, index: idx)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    remove(at: idx)
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
                             }
                         }
                     }
                 }
             }
         }
+        .listStyle(.insetGrouped)
     }
 
-    // MARK: - Editing list
-
-    private var editingList: some View {
-        List {
-            Section {
-                if songs.isEmpty {
-                    Text("暂无歌曲")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                } else {
-                    ForEach(songs) { song in
-                        HStack(spacing: 10) {
-                            Image(systemName: selectedIDs.contains(song.id) ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 20))
-                                .foregroundColor(selectedIDs.contains(song.id) ? .accentColor : .secondary)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    toggleSelection(song.id)
-                                }
-                            LXCachedImage(urlString: song.imageURL, size: 48)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(song.name)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-                                Text(song.singer)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            toggleSelection(song.id)
-                        }
-                    }
-                }
+    private func selectableRow(_ song: LXSong) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: selectedIDs.contains(song.id) ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 20))
+                .foregroundColor(selectedIDs.contains(song.id) ? .accentColor : .secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+            LXCachedImage(urlString: song.imageURL, size: 48)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(song.name)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                Text(song.singer)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
             }
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            toggleSelection(song.id)
         }
     }
 
@@ -192,16 +175,21 @@ struct ServerPlaylistDetailView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
+        .background(Color(.systemBackground))
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 
     // MARK: - Actions
 
     private func toggleSelection(_ id: String) {
-        if selectedIDs.contains(id) {
-            selectedIDs.remove(id)
-        } else {
-            selectedIDs.insert(id)
+        withAnimation(.easeInOut(duration: 0.15)) {
+            if selectedIDs.contains(id) {
+                selectedIDs.remove(id)
+            } else {
+                selectedIDs.insert(id)
+            }
         }
     }
 
