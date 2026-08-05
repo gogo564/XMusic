@@ -83,7 +83,6 @@ struct HomeView: View {
     @State private var hotKeywords: [String] = []
     @State private var isLoadingBoards = true
     @State private var squareLoading = true
-    @State private var isShowingRecognition = false
 
     let gridColumns = [
         GridItem(.flexible(), spacing: 15),
@@ -94,7 +93,6 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 25) {
                 sourcePicker
-                recognizeButton
                 rankSection
                 squareSection
                 if !hotKeywords.isEmpty {
@@ -116,46 +114,6 @@ struct HomeView: View {
         .onChange(of: source) { _ in
             Task { await loadHome() }
         }
-        .fullScreenCover(isPresented: $isShowingRecognition) {
-            SongRecognitionView()
-                .environmentObject(player)
-        }
-    }
-
-    // MARK: 听歌识曲
-    private var recognizeButton: some View {
-        Button {
-            isShowingRecognition = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("听歌识曲")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                    Text("识别正在播放的音乐，识别后自动播放")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.85))
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .foregroundColor(.white.opacity(0.8))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                LinearGradient(
-                    colors: [.accentColor, Color.accentColor.opacity(0.7)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal)
     }
 
     // MARK: 音源选择
