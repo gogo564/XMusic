@@ -1,6 +1,7 @@
 import CarPlay
 import UIKit
 
+@MainActor
 final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
 
     private var interfaceController: CPInterfaceController?
@@ -13,21 +14,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         _ templateApplicationScene: CPTemplateApplicationScene,
         didConnect interfaceController: CPInterfaceController
     ) {
-        attach(interfaceController: interfaceController, window: nil)
-    }
-
-    func templateApplicationScene(
-        _ templateApplicationScene: CPTemplateApplicationScene,
-        didConnect interfaceController: CPInterfaceController,
-        to window: UIWindow?
-    ) {
-        attach(interfaceController: interfaceController, window: window)
-    }
-
-    private func attach(interfaceController: CPInterfaceController, window: UIWindow?) {
         self.interfaceController = interfaceController
-        self.window = window
-        window?.isHidden = false
         guard !didConnect else { return }
         didConnect = true
         buildRootTemplate()
@@ -39,8 +26,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
-        didDisconnectInterfaceController interfaceController: CPInterfaceController,
-        from window: UIWindow?
+        didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
         self.interfaceController = nil
         self.window = nil
@@ -122,7 +108,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             }
         } else {
             let template = CPListTemplate(title: "LX音乐", sections: [section])
-            controller.setRootTemplate(template, animated: false, completion: nil)
+            controller.setRootTemplate(template, animated: true) { success, error in
+                if let error = error {
+                    NSLog("CarPlay setRootTemplate error: \(error.localizedDescription)")
+                } else if !success {
+                    NSLog("CarPlay setRootTemplate did not succeed")
+                }
+            }
         }
     }
 
