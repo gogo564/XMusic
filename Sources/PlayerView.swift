@@ -27,14 +27,23 @@ struct PlayerView: View {
 
     private var backgroundBlur: some View {
         GeometryReader { geo in
-            AsyncImage(url: coverURL) { image in
-                image.resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .blur(radius: 50)
-                    .opacity(0.5)
-            } placeholder: {
-                Color.black
+            ZStack {
+                AsyncImage(url: coverURL) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .blur(radius: 45)
+                        .opacity(0.6)
+                } placeholder: {
+                    Color.black
+                }
+
+                // 顶部 + 底部渐变遮罩，保证文字可读
+                LinearGradient(
+                    colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.65)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
         }
         .ignoresSafeArea()
@@ -51,6 +60,7 @@ struct PlayerView: View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 topBar
+                    .padding(.top, 8)
 
                 Spacer()
 
@@ -59,6 +69,7 @@ struct PlayerView: View {
                 Spacer()
 
                 trackInfoAndControls
+                    .padding(.bottom, 40)
             }
         }
     }
@@ -68,13 +79,19 @@ struct PlayerView: View {
             Button(action: { dismiss() }) {
                 Image(systemName: "chevron.down")
                     .font(.title2.bold())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            .frame(width: 44, height: 44)
 
             Spacer()
 
-            Text("正在播放")
-                .font(.headline)
+            VStack(spacing: 2) {
+                Text("正在播放")
+                    .font(.headline)
+                Text(playerManager.sourceName.isEmpty ? " " : "\(playerManager.sourceName) · \(playerManager.qualityName)")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.55))
+            }
 
             Spacer()
 
@@ -84,32 +101,32 @@ struct PlayerView: View {
             }) {
                 Image(systemName: "text.quote")
                     .font(.title2)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            .frame(width: 44, height: 44)
         }
         .padding(.horizontal)
         .foregroundColor(.white)
-        .padding(.top, 10)
     }
 
     // MARK: - Center Area (cover <-> lyrics in place)
 
     private func centerArea(width: CGFloat) -> some View {
-        let cdSize = min(width * 0.72, 320)
+        let cdSize = min(width * 0.74, 320)
         return ZStack {
             if showInPlaceLyrics {
                 inPlaceLyricsView
                     .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.85)),
-                        removal: .opacity.combined(with: .scale(scale: 0.85))))
+                        insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                        removal: .opacity.combined(with: .scale(scale: 0.9))))
             } else {
                 cdCoverView(size: cdSize)
                     .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.85)),
-                        removal: .opacity.combined(with: .scale(scale: 0.85))))
+                        insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                        removal: .opacity.combined(with: .scale(scale: 0.9))))
             }
         }
-        .frame(height: cdSize + 40)
+        .frame(height: cdSize + 20)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -134,51 +151,73 @@ struct PlayerView: View {
 
     private func cdCoverView(size: CGFloat) -> some View {
         ZStack {
+            // 唱片外圈渐变环
+            Circle()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.55), Color.white.opacity(0.08), Color.white.opacity(0.4)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 3
+                )
+
+            // 封面
             AsyncImage(url: coverURL) { image in
                 image.resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: size, height: size)
+                    .frame(width: size - 12, height: size - 12)
                     .clipShape(Circle())
                     .rotationEffect(.degrees(albumRotationAngle))
                     .animation(.linear(duration: 0.5), value: playerManager.currentTime)
             } placeholder: {
                 Circle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(width: size, height: size)
+                    .fill(Color.gray.opacity(0.35))
+                    .frame(width: size - 12, height: size - 12)
                     .overlay(
                         Image(systemName: "music.note")
-                            .font(.system(size: 60))
-                            .foregroundColor(.white.opacity(0.6))
+                            .font(.system(size: 54))
+                            .foregroundColor(.white.opacity(0.55))
                     )
             }
-            .overlay(
-                Circle()
-                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 2)
-            )
 
+            // 静态高光（不随封面旋转）
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.16), .clear],
+                        startPoint: .topLeading,
+                        endPoint: .center
+                    )
+                )
+                .frame(width: size - 12, height: size - 12)
+                .clipShape(Circle())
+                .allowsHitTesting(false)
+
+            // 中心轴心
             Circle()
                 .fill(Color.black.opacity(0.55))
-                .frame(width: size * 0.16, height: size * 0.16)
+                .frame(width: size * 0.15, height: size * 0.15)
                 .overlay(
-                    Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5)
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5)
                 )
-
             Circle()
-                .fill(Color.gray.opacity(0.4))
-                .frame(width: size * 0.05, height: size * 0.05)
+                .fill(Color.white.opacity(0.85))
+                .frame(width: size * 0.04, height: size * 0.04)
         }
-        .shadow(color: Color.black.opacity(0.4), radius: 18, y: 8)
+        .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
     }
 
     // MARK: - In-place Layered Lyrics (上一句 / 当前句 / 下一句)
 
     private var inPlaceLyricsView: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 18) {
             if playerManager.parsedLyrics.isEmpty {
                 Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
                     .font(.title3)
                     .multilineTextAlignment(.center)
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(.white.opacity(0.75))
                     .padding(.horizontal, 24)
             } else if playerManager.currentLyricIndex < 0 {
                 Text("正在加载歌词…")
@@ -187,10 +226,11 @@ struct PlayerView: View {
             } else {
                 ForEach(visibleLyrics) { item in
                     Text(item.text)
-                        .font(item.diff == 0 ? .title2.bold() : .callout)
+                        .font(item.diff == 0 ? .title2.bold() : .subheadline)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
-                        .foregroundColor(item.diff == 0 ? .white : .white.opacity(0.35))
+                        .foregroundColor(item.diff == 0 ? .white : .white.opacity(0.3))
+                        .shadow(color: Color.black.opacity(0.5), radius: 6)
                         .padding(.horizontal, 24)
                         .transition(.asymmetric(
                             insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -219,88 +259,119 @@ struct PlayerView: View {
     // MARK: - Track Info & Controls
 
     private var trackInfoAndControls: some View {
-        VStack(spacing: 30) {
-            HStack {
-                VStack(alignment: .leading, spacing: 5) {
+        VStack(spacing: 26) {
+            // 歌名 / 歌手（居中）+ 收藏按钮（左对齐占位）
+            HStack(spacing: 0) {
+                Button(action: {
+                    if let song = playerManager.currentSong { toggleLove(song) }
+                }) {
+                    let isLoved = playerManager.currentSong.map { playlistStore.isLoved($0) } ?? false
+                    Image(systemName: isLoved ? "heart.fill" : "heart")
+                        .font(.title3)
+                        .foregroundColor(isLoved ? .red : .white.opacity(0.85))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+
+                Spacer()
+
+                VStack(spacing: 6) {
                     Text(playerManager.currentSong?.name ?? "未知歌曲")
                         .font(.title2.bold())
                         .lineLimit(1)
                     Text(playerManager.currentSong?.singer ?? "未知歌手")
-                        .font(.headline)
-                        .foregroundColor(.white.opacity(0.8))
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.7))
                         .lineLimit(1)
-                    if !playerManager.sourceName.isEmpty {
-                        Text("\(playerManager.sourceName) · \(playerManager.qualityName)")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.6))
-                    }
                 }
+
                 Spacer()
 
-                if let song = playerManager.currentSong {
-                    Button(action: {
-                        toggleLove(song)
-                    }) {
-                        Image(systemName: playlistStore.isLoved(song) ? "heart.fill" : "heart")
-                            .font(.title2)
-                            .foregroundColor(playlistStore.isLoved(song) ? .red : .white)
-                    }
-                }
+                // 右侧占位保持居中
+                Color.clear
+                    .frame(width: 44, height: 44)
             }
-            .padding(.horizontal, 30)
+            .padding(.horizontal, 24)
 
             if playerManager.isResolving {
                 HStack(spacing: 8) {
-                    ProgressView()
+                    ProgressView().tint(.white)
                     Text("正在解析播放地址...")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
                 }
-                .padding(.bottom, 10)
             }
 
             progressSection
 
             controlsSection
-                .padding(.bottom, 50)
         }
     }
 
-    // MARK: - Progress Section
+    // MARK: - Custom Progress Section
 
     private var progressSection: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             ZStack(alignment: .leading) {
                 GeometryReader { geo in
-                    Capsule()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(width: geo.size.width * CGFloat(playerManager.bufferedTime / max(playerManager.duration, 1)))
-                }
-                .frame(height: 3)
+                    let total = max(playerManager.duration, 1)
+                    let bufferedRatio = CGFloat(min(playerManager.bufferedTime / total, 1))
+                    let progressRatio = CGFloat(isDraggingSlider ? localTime / total : playerManager.currentTime / total)
 
-                Slider(value: $localTime, in: 0...max(playerManager.duration, 1), onEditingChanged: { dragging in
-                    if dragging {
-                        isDraggingSlider = true
-                    } else {
-                        playerManager.seek(to: localTime)
+                    ZStack(alignment: .leading) {
+                        // 轨道
+                        Capsule()
+                            .fill(Color.white.opacity(0.18))
+                            .frame(height: 3)
+
+                        // 缓冲
+                        Capsule()
+                            .fill(Color.white.opacity(0.3))
+                            .frame(width: geo.size.width * bufferedRatio, height: 3)
+
+                        // 进度
+                        Capsule()
+                            .fill(Color.white)
+                            .frame(width: geo.size.width * max(progressRatio, 0), height: 3)
+
+                        // 圆形滑块
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 12, height: 12)
+                            .shadow(color: Color.black.opacity(0.4), radius: 3, y: 1)
+                            .offset(x: geo.size.width * max(progressRatio, 0) - 6)
                     }
-                })
-                .accentColor(.white)
+                    .frame(height: geo.size.height)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                isDraggingSlider = true
+                                let ratio = min(max(value.location.x / geo.size.width, 0), 1)
+                                localTime = Double(ratio) * total
+                            }
+                            .onEnded { _ in
+                                playerManager.seek(to: localTime)
+                                isDraggingSlider = false
+                            }
+                    )
+                }
+                .frame(height: 24)
             }
 
             HStack {
                 Text(formatTime(isDraggingSlider ? localTime : playerManager.currentTime))
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(.white.opacity(0.7))
                 Spacer()
                 Text(formatTime(playerManager.duration))
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(.white.opacity(0.7))
             }
         }
-        .padding(.horizontal, 30)
+        .padding(.horizontal, 28)
         .onChange(of: playerManager.currentTime) { newValue in
-            if isDraggingSlider {
-                if abs(localTime - newValue) < 0.5 {
-                    isDraggingSlider = false
-                }
-            } else {
+            if !isDraggingSlider {
                 localTime = newValue
             }
         }
@@ -309,15 +380,16 @@ struct PlayerView: View {
     // MARK: - Controls Section
 
     private var controlsSection: some View {
-        HStack(spacing: 25) {
+        HStack(spacing: 28) {
             Button(action: {
                 playerManager.togglePlayMode()
                 HapticManager.shared.selection()
             }) {
                 Image(systemName: playerManager.playModeIcon)
                     .font(.body)
-                    .foregroundColor(.white.opacity(0.7))
-                    .frame(width: 44, height: 44)
+                    .foregroundColor(.white.opacity(0.75))
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
             }
 
             Button(action: {
@@ -325,9 +397,10 @@ struct PlayerView: View {
                 HapticManager.shared.selection()
             }) {
                 Image(systemName: "backward.fill")
-                    .font(.title)
+                    .font(.system(size: 26))
                     .foregroundColor(playerManager.canPlayPrevious() ? .white : .gray)
                     .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(!playerManager.canPlayPrevious())
 
@@ -336,7 +409,8 @@ struct PlayerView: View {
                 HapticManager.shared.selection()
             }) {
                 Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 70))
+                    .font(.system(size: 68))
+                    .shadow(color: Color.black.opacity(0.3), radius: 8, y: 4)
             }
 
             Button(action: {
@@ -344,8 +418,10 @@ struct PlayerView: View {
                 HapticManager.shared.selection()
             }) {
                 Image(systemName: "forward.fill")
-                    .font(.title)
+                    .font(.system(size: 26))
                     .foregroundColor(playerManager.canPlayNext() ? .white : .gray)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(!playerManager.canPlayNext())
 
@@ -355,8 +431,9 @@ struct PlayerView: View {
             }) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.body)
-                    .foregroundColor(.white.opacity(0.7))
-                    .frame(width: 44, height: 44)
+                    .foregroundColor(.white.opacity(0.75))
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
             }
         }
     }
