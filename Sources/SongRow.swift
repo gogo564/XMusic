@@ -99,6 +99,7 @@ struct SongRow: View {
         }
     }
 
+    @ViewBuilder
     private var trailingActionView: some View {
         let key = song.id + "_320k"
         let downloading = downloader.activeTasks[key]
