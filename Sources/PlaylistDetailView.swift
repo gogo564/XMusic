@@ -47,9 +47,9 @@ struct PlaylistDetailView: View {
                         Button {
                             playAll()
                         } label: {
-                            Label("播放全部", systemImage: "play.circle.fill")
+                            Label("播放全部", systemImage: "play.fill")
                                 .font(.system(size: 15, weight: .medium))
-                                .frame(maxWidth: .infinity)
+                                .frame(maxWidth: .infinity, alignment: .center)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(songs.isEmpty)
@@ -60,7 +60,7 @@ struct PlaylistDetailView: View {
                             Label(isCollected ? "已收藏" : "收藏歌单",
                                   systemImage: isCollected ? "heart.fill" : "heart")
                                 .font(.system(size: 15, weight: .medium))
-                                .frame(maxWidth: .infinity)
+                                .frame(maxWidth: .infinity, alignment: .center)
                         }
                         .buttonStyle(.bordered)
                         .foregroundColor(isCollected ? .red : .accentColor)
