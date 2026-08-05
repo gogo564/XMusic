@@ -67,7 +67,9 @@ struct LibraryView: View {
                     get: { createdPlaylist != nil },
                     set: { if !$0 { createdPlaylist = nil } }
                 )
-            )
+            ) {
+                EmptyView()
+            }
             .hidden()
         )
         .onAppear {
