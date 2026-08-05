@@ -47,9 +47,13 @@ struct PlaylistDetailView: View {
                         Button {
                             playAll()
                         } label: {
-                            Label("播放全部", systemImage: "play.fill")
-                                .font(.system(size: 15, weight: .medium))
-                                .frame(maxWidth: .infinity, alignment: .center)
+                            HStack(spacing: 6) {
+                                Image(systemName: "play.fill")
+                                Text("播放全部")
+                            }
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity, alignment: .center)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(songs.isEmpty)
