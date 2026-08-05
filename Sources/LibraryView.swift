@@ -97,6 +97,27 @@ struct LibraryView: View {
                                 }
                             }
                         }
+                        NavigationLink(destination: LibraryFavoritesView()) {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.orange.opacity(0.18))
+                                        .frame(width: 48, height: 48)
+                                    Image(systemName: "star.fill")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(.orange)
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("收藏歌手 / 收藏专辑")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .lineLimit(1)
+                                    Text("与网页端同步")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
                     }
 
                     Section(header: Text("存储空间")) {

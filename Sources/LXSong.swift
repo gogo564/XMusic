@@ -122,6 +122,49 @@ extension LXSong {
     }
 }
 
+// 收藏歌手 (server /api/user/library/artists)
+struct LXLibraryArtist: Identifiable {
+    let raw: [String: Any]
+
+    init(_ dict: [String: Any]) {
+        raw = dict
+    }
+
+    var id: String { (source + "_" + String(describing: raw["id"] ?? "")).isEmpty ? name : source + "_" + String(describing: raw["id"] ?? "") }
+    var artistID: String { String(describing: raw["id"] ?? "") }
+    var name: String { raw["name"] as? String ?? "未知歌手" }
+    var source: String { raw["source"] as? String ?? "wy" }
+    var picUrl: String { raw["picUrl"] as? String ?? "" }
+
+    func toPayload() -> [String: Any] { raw }
+}
+
+// 收藏专辑 (server /api/user/library/albums), songs embedded in `list`
+struct LXLibraryAlbum: Identifiable {
+    let raw: [String: Any]
+    let songs: [LXSong]
+
+    init(_ dict: [String: Any]) {
+        raw = dict
+        let list = dict["list"] as? [[String: Any]] ?? []
+        songs = list.map(LXSong.init)
+    }
+
+    var id: String {
+        let base = source + "_" + String(describing: raw["id"] ?? "")
+        return base.isEmpty ? name : base
+    }
+    var albumID: String { String(describing: raw["id"] ?? "") }
+    var name: String { raw["name"] as? String ?? "未知专辑" }
+    var artistName: String { raw["artistName"] as? String ?? "" }
+    var source: String { raw["source"] as? String ?? "wy" }
+    var picUrl: String { raw["picUrl"] as? String ?? "" }
+    var interval: String { raw["interval"] as? String ?? "" }
+    var songCount: Int { songs.count }
+
+    func toPayload() -> [String: Any] { raw }
+}
+
 // 歌单广场 (online playlists from songList API)
 struct LXOnlinePlaylist: Identifiable {
     let raw: [String: Any]

@@ -193,6 +193,64 @@ final class LXAPIClient {
         try ensureOK(response)
     }
 
+    // MARK: - Library (收藏歌手 / 收藏专辑)
+
+    func getLibraryArtists() async throws -> [[String: Any]] {
+        let cfg = AppConfigStore.shared.config
+        var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/user/library/artists")!
+        comps.queryItems = [URLQueryItem(name: "user", value: cfg.username)]
+        guard let url = comps.url else { throw LXAPIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.allHTTPHeaderFields = headers(cfg)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try ensureOK(response)
+        guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw LXAPIError.decoding("收藏歌手")
+        }
+        return arr
+    }
+
+    func getLibraryAlbums() async throws -> [[String: Any]] {
+        let cfg = AppConfigStore.shared.config
+        var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/user/library/albums")!
+        comps.queryItems = [URLQueryItem(name: "user", value: cfg.username)]
+        guard let url = comps.url else { throw LXAPIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.allHTTPHeaderFields = headers(cfg)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try ensureOK(response)
+        guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw LXAPIError.decoding("收藏专辑")
+        }
+        return arr
+    }
+
+    func saveLibraryArtists(_ artists: [[String: Any]]) async throws {
+        let cfg = AppConfigStore.shared.config
+        var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/user/library/artists")!
+        comps.queryItems = [URLQueryItem(name: "user", value: cfg.username)]
+        guard let url = comps.url else { throw LXAPIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.allHTTPHeaderFields = headers(cfg)
+        request.httpBody = try JSONSerialization.data(withJSONObject: artists)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try ensureOK(response)
+    }
+
+    func saveLibraryAlbums(_ albums: [[String: Any]]) async throws {
+        let cfg = AppConfigStore.shared.config
+        var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/user/library/albums")!
+        comps.queryItems = [URLQueryItem(name: "user", value: cfg.username)]
+        guard let url = comps.url else { throw LXAPIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.allHTTPHeaderFields = headers(cfg)
+        request.httpBody = try JSONSerialization.data(withJSONObject: albums)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try ensureOK(response)
+    }
+
     // MARK: - Browse
 
     func getLeaderBoards(source: String = "kg") async throws -> [[String: Any]] {
