@@ -5,58 +5,15 @@ struct PlayerView: View {
     @EnvironmentObject var playlistStore: PlaylistStore
     @Environment(\.dismiss) var dismiss
     @ObservedObject var recentStore = RecentStore.shared
-    @State private var showingLyrics = false
+    @State private var showInPlaceLyrics = false
     @State private var localTime: Double = 0
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
 
     var body: some View {
         ZStack {
-            // Background Blur
-            if let song = playerManager.currentSong {
-                GeometryReader { geo in
-                    AsyncImage(url: URL(string: song.imageURL)) { image in
-                        image.resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .blur(radius: 50)
-                            .opacity(0.5)
-                    } placeholder: {
-                        Color.black
-                    }
-                }
-                .ignoresSafeArea()
-            }
-
-            // Full-screen lyrics overlay
-            if showingLyrics {
-                lyricsView
-                    .gesture(
-                        DragGesture()
-                            .onEnded { value in
-                                if value.translation.width > 80 {
-                                    withAnimation { showingLyrics = false }
-                                }
-                            }
-                    )
-                    .transition(.move(edge: .trailing))
-                    .animation(.spring(), value: showingLyrics)
-                    .zIndex(2)
-            }
-
-            // Main player content
-            if !showingLyrics {
-                mainPlayerView
-                    .zIndex(1)
-                    .gesture(
-                        DragGesture()
-                            .onEnded { value in
-                                if value.translation.width < -80 {
-                                    withAnimation { showingLyrics = true }
-                                }
-                            }
-                    )
-            }
+            backgroundBlur
+            mainPlayerView
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingRecentList) {
@@ -68,79 +25,195 @@ struct PlayerView: View {
         }
     }
 
+    private var backgroundBlur: some View {
+        GeometryReader { geo in
+            AsyncImage(url: coverURL) { image in
+                image.resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .blur(radius: 50)
+                    .opacity(0.5)
+            } placeholder: {
+                Color.black
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private var coverURL: URL? {
+        guard let song = playerManager.currentSong, !song.imageURL.isEmpty else { return nil }
+        return URL(string: song.imageURL)
+    }
+
     // MARK: - Main Player View
 
     private var mainPlayerView: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
-                // Top Bar
-                HStack {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "chevron.down")
-                            .font(.title2.bold())
-                    }
-                    .frame(width: 44, height: 44)
-
-                    Spacer()
-
-                    Text("正在播放")
-                        .font(.headline)
-
-                    Spacer()
-
-                    Button(action: {
-                        withAnimation { showingLyrics = true }
-                    }) {
-                        Image(systemName: "text.quote")
-                            .font(.title2)
-                    }
-                    .frame(width: 44, height: 44)
-                }
-                .padding(.horizontal)
-                .foregroundColor(.white)
-                .padding(.top, 10)
+                topBar
 
                 Spacer()
 
-                // Album Art (CD rotation)
-                if let song = playerManager.currentSong {
-                    AsyncImage(url: URL(string: song.imageURL)) { image in
-                        image.resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .rotationEffect(.degrees(albumRotationAngle))
-                            .animation(.linear(duration: 0.5), value: playerManager.currentTime)
-                            .cornerRadius(20)
-                            .shadow(radius: 20)
-                    } placeholder: {
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(Color.gray.opacity(0.3))
-                            .overlay(Image(systemName: "music.note").font(.system(size: 80)))
-                    }
-                    .frame(width: geo.size.width * 0.8)
-                    .padding(20)
-
-                    // Single current-line lyric, tap to open full lyrics
-                    if let line = currentLyricLine {
-                        Button {
-                            withAnimation { showingLyrics = true }
-                        } label: {
-                            Text(line)
-                                .font(.subheadline.weight(.medium))
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                                .foregroundColor(.white.opacity(0.85))
-                                .padding(.horizontal, 40)
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity)
-                    }
-                }
+                centerArea(width: geo.size.width)
 
                 Spacer()
 
                 trackInfoAndControls
             }
         }
+    }
+
+    private var topBar: some View {
+        HStack {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.down")
+                    .font(.title2.bold())
+            }
+            .frame(width: 44, height: 44)
+
+            Spacer()
+
+            Text("正在播放")
+                .font(.headline)
+
+            Spacer()
+
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics.toggle() }
+                HapticManager.shared.selection()
+            }) {
+                Image(systemName: "text.quote")
+                    .font(.title2)
+            }
+            .frame(width: 44, height: 44)
+        }
+        .padding(.horizontal)
+        .foregroundColor(.white)
+        .padding(.top, 10)
+    }
+
+    // MARK: - Center Area (cover <-> lyrics in place)
+
+    private func centerArea(width: CGFloat) -> some View {
+        let cdSize = min(width * 0.72, 320)
+        return ZStack {
+            if showInPlaceLyrics {
+                inPlaceLyricsView
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.85)),
+                        removal: .opacity.combined(with: .scale(scale: 0.85))))
+            } else {
+                cdCoverView(size: cdSize)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.85)),
+                        removal: .opacity.combined(with: .scale(scale: 0.85))))
+            }
+        }
+        .frame(height: cdSize + 40)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics.toggle() }
+            HapticManager.shared.selection()
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    if value.translation.height < -60, !showInPlaceLyrics {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics = true }
+                        HapticManager.shared.selection()
+                    } else if value.translation.height > 60, showInPlaceLyrics {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics = false }
+                        HapticManager.shared.selection()
+                    }
+                }
+        )
+    }
+
+    // MARK: - CD Cover
+
+    private func cdCoverView(size: CGFloat) -> some View {
+        ZStack {
+            AsyncImage(url: coverURL) { image in
+                image.resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+                    .rotationEffect(.degrees(albumRotationAngle))
+                    .animation(.linear(duration: 0.5), value: playerManager.currentTime)
+            } placeholder: {
+                Circle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: size, height: size)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 60))
+                            .foregroundColor(.white.opacity(0.6))
+                    )
+            }
+            .overlay(
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 2)
+            )
+
+            Circle()
+                .fill(Color.black.opacity(0.55))
+                .frame(width: size * 0.16, height: size * 0.16)
+                .overlay(
+                    Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5)
+                )
+
+            Circle()
+                .fill(Color.gray.opacity(0.4))
+                .frame(width: size * 0.05, height: size * 0.05)
+        }
+        .shadow(color: Color.black.opacity(0.4), radius: 18, y: 8)
+    }
+
+    // MARK: - In-place Layered Lyrics (上一句 / 当前句 / 下一句)
+
+    private var inPlaceLyricsView: some View {
+        VStack(spacing: 14) {
+            if playerManager.parsedLyrics.isEmpty {
+                Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
+                    .font(.title3)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding(.horizontal, 24)
+            } else if playerManager.currentLyricIndex < 0 {
+                Text("正在加载歌词…")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.6))
+            } else {
+                ForEach(visibleLyrics) { item in
+                    Text(item.text)
+                        .font(item.diff == 0 ? .title2.bold() : .callout)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .foregroundColor(item.diff == 0 ? .white : .white.opacity(0.35))
+                        .padding(.horizontal, 24)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)))
+                }
+            }
+        }
+        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: playerManager.currentLyricIndex)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var visibleLyrics: [VisibleLyric] {
+        let lines = playerManager.parsedLyrics
+        let idx = playerManager.currentLyricIndex
+        guard !lines.isEmpty, idx >= 0, idx < lines.count else { return [] }
+        var out: [VisibleLyric] = []
+        for offset in -1...1 {
+            let li = idx + offset
+            if lines.indices.contains(li) {
+                out.append(VisibleLyric(id: li, diff: offset, text: lines[li].text))
+            }
+        }
+        return out
     }
 
     // MARK: - Track Info & Controls
@@ -288,113 +361,7 @@ struct PlayerView: View {
         }
     }
 
-    // MARK: - Lyrics Full-Screen View
-
-    private var lyricsView: some View {
-        ZStack {
-            if let song = playerManager.currentSong {
-                GeometryReader { bg in
-                    AsyncImage(url: URL(string: song.imageURL)) { image in
-                        image.resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: bg.size.width, height: bg.size.height)
-                            .blur(radius: 50)
-                            .opacity(0.5)
-                    } placeholder: {
-                        Color.black
-                    }
-                }
-                .ignoresSafeArea()
-            }
-
-                VStack {
-                    HStack {
-                        Button(action: {
-                            withAnimation { showingLyrics = false }
-                        }) {
-                            Image(systemName: "chevron.left")
-                                .font(.title2.bold())
-                        }
-                        .frame(width: 44, height: 44)
-
-                        Spacer()
-
-                        Text("歌词")
-                            .font(.headline)
-
-                        Spacer()
-
-                        Spacer().frame(width: 44)
-                    }
-                    .padding(.horizontal)
-                    .foregroundColor(.white)
-                    .padding(.top, 10)
-
-                    ScrollViewReader { proxy in
-                        ScrollView(showsIndicators: false) {
-                            VStack(spacing: 25) {
-                                if playerManager.parsedLyrics.isEmpty {
-                                    Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
-                                        .font(.title2)
-                                        .multilineTextAlignment(.center)
-                                        .foregroundColor(.white)
-                                } else {
-                                    ForEach(playerManager.parsedLyrics) { line in
-                                        let isActive = isCurrentLine(line)
-                                        Text(line.text)
-                                            .font(isActive ? .title2.bold() : .title3)
-                                            .multilineTextAlignment(.center)
-                                            .foregroundColor(isActive ? .white : .white.opacity(0.35))
-                                            .scaleEffect(isActive ? 1.15 : 1.0)
-                                            .shadow(color: isActive ? Color.black.opacity(0.6) : .clear, radius: isActive ? 4 : 0)
-                                            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isActive)
-                                            .id(line.id)
-                                            .padding(.horizontal)
-                                            .padding(.vertical, 4)
-                                            .contentShape(Rectangle())
-                                            .onTapGesture {
-                                                playerManager.seek(to: line.time)
-                                                HapticManager.shared.selection()
-                                            }
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 100)
-                        }
-                        .onChange(of: playerManager.currentTime) { _ in
-                            if let currentLineID = activeLineID() {
-                                withAnimation {
-                                    proxy.scrollTo(currentLineID, anchor: .center)
-                                }
-                            }
-                        }
-                        .overlay(
-                            VStack {
-                                LinearGradient(colors: [Color.black.opacity(0.8), .clear], startPoint: .top, endPoint: .bottom)
-                                    .frame(height: 70)
-                                Spacer()
-                                LinearGradient(colors: [.clear, Color.black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
-                                    .frame(height: 70)
-                            }
-                            .allowsHitTesting(false)
-                        )
-                    }
-
-                    HStack {
-                        Button(action: {
-                            withAnimation { showingLyrics = false }
-                        }) {
-                            HStack {
-                                Image(systemName: "chevron.left")
-                                Text("返回播放")
-                            }
-                            .foregroundColor(.white.opacity(0.6))
-                        }
-                    }
-                    .padding(.bottom, 30)
-                }
-        }
-    }
+    // MARK: - Actions
 
     private func toggleLove(_ song: LXSong) {
         if playlistStore.isLoved(song) {
@@ -417,28 +384,18 @@ struct PlayerView: View {
 
     // MARK: - Lyric Helpers
 
-    private var currentLyricLine: String? {
-        let idx = playerManager.currentLyricIndex
-        guard idx >= 0, idx < playerManager.parsedLyrics.count else { return nil }
-        return playerManager.parsedLyrics[idx].text
-    }
-
     /// CD-style rotation: 15°/s while playing, frozen when paused (derived from currentTime).
     private var albumRotationAngle: Double {
         (playerManager.currentTime * 15).truncatingRemainder(dividingBy: 360)
     }
+}
 
-    private func isCurrentLine(_ line: PlayerManager.LyricLine) -> Bool {
-        guard let index = playerManager.parsedLyrics.firstIndex(where: { $0.id == line.id }) else { return false }
-        let currentTime = playerManager.currentTime
-        let startTime = line.time
-        let endTime = index + 1 < playerManager.parsedLyrics.count ? playerManager.parsedLyrics[index + 1].time : Double.infinity
-        return currentTime >= startTime && currentTime < endTime
-    }
-
-    private func activeLineID() -> UUID? {
-        playerManager.parsedLyrics.last(where: { $0.time <= playerManager.currentTime })?.id
-    }
+/// A single lyric line shown in the in-place layered lyrics view.
+/// `id` is the absolute index in `parsedLyrics`, `diff` is distance from current line (-1/0/1).
+private struct VisibleLyric: Identifiable {
+    let id: Int
+    let diff: Int
+    let text: String
 }
 
 #Preview {
