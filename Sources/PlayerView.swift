@@ -3,12 +3,16 @@ import SwiftUI
 struct PlayerView: View {
     @EnvironmentObject var playerManager: PlayerManager
     @EnvironmentObject var playlistStore: PlaylistStore
+    @EnvironmentObject var downloader: DownloadService
     @Environment(\.dismiss) var dismiss
     @ObservedObject var recentStore = RecentStore.shared
     @State private var showInPlaceLyrics = false
     @State private var localTime: Double = 0
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
+    @State private var showPlaylistPicker = false
+
+    private let qualityOptions = ["128k", "320k", "flac"]
 
     var body: some View {
         ZStack {
@@ -19,6 +23,12 @@ struct PlayerView: View {
         .sheet(isPresented: $showingRecentList) {
             RecentPlaylistView()
                 .environmentObject(playerManager)
+        }
+        .sheet(isPresented: $showPlaylistPicker) {
+            if let song = playerManager.currentSong {
+                PlaylistPickerView(song: song)
+                    .environmentObject(playlistStore)
+            }
         }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
@@ -62,11 +72,7 @@ struct PlayerView: View {
                 topBar
                     .padding(.top, 8)
 
-                Spacer()
-
-                centerArea(width: geo.size.width)
-
-                Spacer()
+                bodyArea(width: geo.size.width)
 
                 trackInfoAndControls
                     .padding(.bottom, 40)
@@ -91,57 +97,103 @@ struct PlayerView: View {
                 Text(playerManager.sourceName.isEmpty ? " " : "\(playerManager.sourceName) · \(playerManager.qualityName)")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.55))
+                if playerManager.sleepTimerRemaining > 0 {
+                    Text("定时 \(playerManager.sleepTimerText) 后停止")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                }
             }
 
             Spacer()
 
-            Button(action: {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics.toggle() }
-                HapticManager.shared.selection()
-            }) {
-                Image(systemName: "text.quote")
-                    .font(.title2)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
+            topMenu
         }
         .padding(.horizontal)
         .foregroundColor(.white)
     }
 
-    // MARK: - Center Area (cover <-> lyrics in place)
+    private var topMenu: some View {
+        Menu {
+            Button {
+                showPlaylistPicker = true
+            } label: {
+                Label("添加到歌单", systemImage: "text.badge.plus")
+            }
+            .disabled(playerManager.currentSong == nil)
 
-    private func centerArea(width: CGFloat) -> some View {
+            Picker("音质", selection: qualityBinding) {
+                ForEach(qualityOptions, id: \.self) { q in
+                    Text(q).tag(q)
+                }
+            }
+
+            Button {
+                toggleLyrics()
+            } label: {
+                Label(showInPlaceLyrics ? "隐藏歌词" : "显示歌词", systemImage: "text.quote")
+            }
+
+            Menu("定时关闭") {
+                Button("关闭定时") { playerManager.setSleepTimer(minutes: nil) }
+                Button("5 分钟") { playerManager.setSleepTimer(minutes: 5) }
+                Button("10 分钟") { playerManager.setSleepTimer(minutes: 10) }
+                Button("30 分钟") { playerManager.setSleepTimer(minutes: 30) }
+                Button("1 小时") { playerManager.setSleepTimer(minutes: 60) }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title2)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+    }
+
+    private var qualityBinding: Binding<String> {
+        Binding(
+            get: { playerManager.quality },
+            set: { playerManager.setQuality($0) }
+        )
+    }
+
+    private func toggleLyrics() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics.toggle() }
+        HapticManager.shared.selection()
+    }
+
+    // MARK: - Body Area (cover <-> full-height lyrics)
+
+    private func bodyArea(width: CGFloat) -> some View {
         let coverSize = min(width * 0.74, 320)
         return ZStack {
             if showInPlaceLyrics {
-                inPlaceLyricsView(coverSize: coverSize)
+                fullLyricsView
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.9)),
                         removal: .opacity.combined(with: .scale(scale: 0.9))))
             } else {
-                coverCard(size: coverSize)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.9)),
-                        removal: .opacity.combined(with: .scale(scale: 0.9))))
+                VStack(spacing: 0) {
+                    Spacer(minLength: 8)
+                    coverCard(size: coverSize)
+                    Spacer(minLength: 8)
+                }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                    removal: .opacity.combined(with: .scale(scale: 0.9))))
             }
         }
-        .frame(height: coverSize + 20)
         .frame(maxWidth: .infinity)
+        .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics.toggle() }
-            HapticManager.shared.selection()
+            toggleLyrics()
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 20)
                 .onEnded { value in
                     if value.translation.height < -60, !showInPlaceLyrics {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics = true }
-                        HapticManager.shared.selection()
+                        toggleLyrics()
                     } else if value.translation.height > 60, showInPlaceLyrics {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics = false }
-                        HapticManager.shared.selection()
+                        toggleLyrics()
                     }
                 }
         )
@@ -168,21 +220,28 @@ struct PlayerView: View {
         .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
     }
 
-    // MARK: - In-place Layered Lyrics (上一句 / 当前句 / 下一句)
+    // MARK: - Full-height Layered Lyrics
+    // 顶部从「正在播放」下方开始，底部到歌名/控制区为止，铺满整块区域。
 
-    private func inPlaceLyricsView(coverSize: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+    private var fullLyricsView: some View {
+        VStack(alignment: .center, spacing: 0) {
             if playerManager.parsedLyrics.isEmpty {
+                Spacer(minLength: 0)
                 Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Spacer(minLength: 0)
             } else if playerManager.currentLyricIndex < 0 {
+                Spacer(minLength: 0)
                 Text("正在加载歌词…")
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.6))
+                Spacer(minLength: 0)
             } else {
-                VStack(alignment: .center, spacing: 14) {
-                    Spacer(minLength: 0)
+                Spacer(minLength: 0)
+                VStack(spacing: 18) {
                     ForEach(visibleLyrics) { item in
                         Text(item.text)
                             .font(.body)
@@ -195,11 +254,12 @@ struct PlayerView: View {
                                 insertion: .move(edge: .bottom).combined(with: .opacity),
                                 removal: .move(edge: .top).combined(with: .opacity)))
                     }
-                    Spacer(minLength: 0)
                 }
+                Spacer(minLength: 0)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: coverSize)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 20)
         .animation(.spring(response: 0.45, dampingFraction: 0.8), value: playerManager.currentLyricIndex)
     }
 
@@ -208,7 +268,7 @@ struct PlayerView: View {
         let idx = playerManager.currentLyricIndex
         guard !lines.isEmpty, idx >= 0, idx < lines.count else { return [] }
         var out: [VisibleLyric] = []
-        for offset in -3...3 {
+        for offset in -2...2 {
             let li = idx + offset
             if lines.indices.contains(li) {
                 out.append(VisibleLyric(id: li, diff: offset, text: lines[li].text))
@@ -223,7 +283,7 @@ struct PlayerView: View {
 
     private var trackInfoAndControls: some View {
         VStack(spacing: 26) {
-            // 歌名 / 歌手（左对齐）+ 收藏按钮
+            // 歌名 / 歌手（左对齐）+ 收藏 + 下载
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(playerManager.currentSong?.name ?? "未知歌曲")
@@ -237,16 +297,8 @@ struct PlayerView: View {
 
                 Spacer()
 
-                Button(action: {
-                    if let song = playerManager.currentSong { toggleLove(song) }
-                }) {
-                    let isLoved = playerManager.currentSong.map { playlistStore.isLoved($0) } ?? false
-                    Image(systemName: isLoved ? "heart.fill" : "heart")
-                        .font(.title3)
-                        .foregroundColor(isLoved ? .red : .white.opacity(0.85))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
+                downloadButton
+                loveButton
             }
             .padding(.horizontal, 24)
 
@@ -262,6 +314,59 @@ struct PlayerView: View {
             progressSection
 
             controlsSection
+        }
+    }
+
+    private var loveButton: some View {
+        Button(action: {
+            if let song = playerManager.currentSong { toggleLove(song) }
+        }) {
+            let isLoved = playerManager.currentSong.map { playlistStore.isLoved($0) } ?? false
+            Image(systemName: isLoved ? "heart.fill" : "heart")
+                .font(.title3)
+                .foregroundColor(isLoved ? .red : .white.opacity(0.85))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+    }
+
+    private var downloadButton: some View {
+        Button(action: {
+            guard let song = playerManager.currentSong, !downloader.isDownloaded(song) else { return }
+            downloader.download(song, quality: playerManager.quality)
+            HapticManager.shared.selection()
+        }) {
+            if let song = playerManager.currentSong {
+                if let progress = downloader.activeTasks[song.id + "_" + playerManager.quality] {
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.25), lineWidth: 2)
+                        Circle()
+                            .trim(from: 0, to: progress)
+                            .stroke(Color.white, lineWidth: 2)
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 20, height: 20)
+                    .padding(12)
+                } else if downloader.isDownloaded(song) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.green)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                } else {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.title3)
+                        .foregroundColor(.white.opacity(0.85))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+            } else {
+                Image(systemName: "arrow.down.circle")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.4))
+                    .frame(width: 44, height: 44)
+            }
         }
     }
 
@@ -428,4 +533,6 @@ private struct VisibleLyric: Identifiable {
 #Preview {
     PlayerView()
         .environmentObject(PlayerManager.shared)
+        .environmentObject(PlaylistStore.shared)
+        .environmentObject(DownloadService.shared)
 }

@@ -6,10 +6,9 @@ struct LibraryView: View {
     @StateObject private var cacheManager = MusicCacheManager.shared
 
     @State private var showNewPlaylist = false
-    @State private var newName = ""
+    @State private var createdPlaylist: LXPlaylist?
     @State private var showRename = false
     @State private var renameTarget: LXPlaylist?
-    @State private var renameText = ""
 
     var body: some View {
         Group {
@@ -42,19 +41,35 @@ struct LibraryView: View {
                 }
             }
         }
-        .alert("新建歌单", isPresented: $showNewPlaylist) {
-            TextField("名称", text: $newName)
-            Button("创建") { create() }
-            Button("取消", role: .cancel) {}
+        .sheet(isPresented: $showNewPlaylist) {
+            NewPlaylistSheetView { created in
+                createdPlaylist = created
+            }
+            .environmentObject(playlistStore)
         }
-        .alert("重命名", isPresented: $showRename) {
-            TextField("名称", text: $renameText)
-            Button("保存") { rename() }
-            Button("取消", role: .cancel) {}
+        .sheet(isPresented: $showRename) {
+            if let target = renameTarget {
+                NewPlaylistSheetView(renameID: target.id, initialName: target.name)
+                    .environmentObject(playlistStore)
+            }
         }
         .refreshable {
             await playlistStore.refresh()
         }
+        .background(
+            NavigationLink(
+                destination: Group {
+                    if let pl = createdPlaylist {
+                        ServerPlaylistDetailView(kind: .user, playlistID: pl.id)
+                    }
+                },
+                isActive: Binding(
+                    get: { createdPlaylist != nil },
+                    set: { if !$0 { createdPlaylist = nil } }
+                )
+            )
+            .hidden()
+        )
         .onAppear {
             if playlistStore.listData == nil {
                 Task { await playlistStore.refresh() }
@@ -81,7 +96,6 @@ struct LibraryView: View {
                                 .contextMenu {
                                     Button("重命名") {
                                         renameTarget = pl
-                                        renameText = pl.name
                                         showRename = true
                                     }
                                     Button("删除", role: .destructive) {
@@ -226,24 +240,6 @@ struct LibraryView: View {
             }
         }
         .padding(.vertical, 2)
-    }
-
-    private func create() {
-        let name = newName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        Task {
-            try? await playlistStore.createPlaylist(name: name)
-            newName = ""
-        }
-    }
-
-    private func rename() {
-        guard let target = renameTarget else { return }
-        let name = renameText.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        Task {
-            try? await playlistStore.renamePlaylist(id: target.id, newName: name)
-        }
     }
 
     private func deletePlaylist(_ pl: LXPlaylist) {

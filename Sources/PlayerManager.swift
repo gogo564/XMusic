@@ -40,6 +40,8 @@ final class PlayerManager: ObservableObject {
     @Published var localPlaybackTitle = ""
     @Published var localPlaybackArtist = ""
     @Published var showPlayer = false
+    @Published var sleepTimerRemaining: TimeInterval = 0
+    private var sleepTask: Task<Void, Never>?
 
     struct LyricLine: Identifiable {
         let id = UUID()
@@ -288,6 +290,40 @@ final class PlayerManager: ObservableObject {
         if currentSong != nil {
             resolveAndPlay(currentQueueSong)
         }
+    }
+
+    // MARK: - Sleep timer
+
+    func setSleepTimer(minutes: Int?) {
+        sleepTask?.cancel()
+        guard let minutes = minutes, minutes > 0 else {
+            sleepTimerRemaining = 0
+            return
+        }
+        sleepTimerRemaining = TimeInterval(minutes * 60)
+        sleepTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled { break }
+                await MainActor.run {
+                    guard let self = self else { return }
+                    guard self.sleepTimerRemaining > 0 else { return }
+                    self.sleepTimerRemaining -= 1
+                    if self.sleepTimerRemaining <= 0 {
+                        self.sleepTimerRemaining = 0
+                        self.sleepTask?.cancel()
+                        self.player.pause()
+                        self.isPlaying = false
+                        self.updateNowPlaying()
+                    }
+                }
+            }
+        }
+    }
+
+    var sleepTimerText: String {
+        let total = Int(sleepTimerRemaining)
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     func playLocalFile(url: URL, title: String, artist: String) {

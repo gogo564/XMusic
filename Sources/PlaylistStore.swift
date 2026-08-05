@@ -113,6 +113,53 @@ final class PlaylistStore: ObservableObject {
         try await push(raw)
     }
 
+    /// 批量从「我喜欢的音乐」移除（按索引，倒序删除）。
+    func removeSongsFromLove(at indices: [Int]) async throws {
+        guard !indices.isEmpty else { return }
+        var raw = try await freshRaw()
+        var list = raw["loveList"] as? [[String: Any]] ?? []
+        let sorted = indices.sorted(by: >)
+        for i in sorted where list.indices.contains(i) {
+            list.remove(at: i)
+        }
+        raw["loveList"] = list
+        try await push(raw)
+    }
+
+    /// 批量从「默认列表」移除（按索引，倒序删除）。
+    func removeSongsFromDefault(at indices: [Int]) async throws {
+        guard !indices.isEmpty else { return }
+        var raw = try await freshRaw()
+        var list = raw["defaultList"] as? [[String: Any]] ?? []
+        let sorted = indices.sorted(by: >)
+        for i in sorted where list.indices.contains(i) {
+            list.remove(at: i)
+        }
+        raw["defaultList"] = list
+        try await push(raw)
+    }
+
+    /// 批量从用户歌单移除（按索引，倒序删除）。
+    func removeSongs(at indices: [Int], fromPlaylistID pid: String) async throws {
+        guard !indices.isEmpty else { return }
+        var raw = try await freshRaw()
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        var found = false
+        for i in userLists.indices where userLists[i]["id"] as? String == pid {
+            var existing = userLists[i]["list"] as? [[String: Any]] ?? []
+            let sorted = indices.sorted(by: >)
+            for j in sorted where existing.indices.contains(j) {
+                existing.remove(at: j)
+            }
+            userLists[i]["list"] = existing
+            raw["userList"] = userLists
+            found = true
+            break
+        }
+        if !found { throw LXAPIError.decoding("歌单不存在") }
+        try await push(raw)
+    }
+
     func isLoved(_ song: LXSong) -> Bool {
         listData?.loveSongs.contains { $0.id == song.id } ?? false
     }

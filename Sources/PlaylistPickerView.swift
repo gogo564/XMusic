@@ -5,7 +5,6 @@ struct PlaylistPickerView: View {
     @EnvironmentObject private var playlistStore: PlaylistStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var newPlaylistName = ""
     @State private var showNewPlaylist = false
     @State private var message: String?
     @State private var isError = false
@@ -63,10 +62,20 @@ struct PlaylistPickerView: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .alert("新建歌单", isPresented: $showNewPlaylist) {
-                TextField("歌单名称", text: $newPlaylistName)
-                Button("创建") { create() }
-                Button("取消", role: .cancel) {}
+            .sheet(isPresented: $showNewPlaylist) {
+                NewPlaylistSheetView { created in
+                    Task {
+                        do {
+                            try await playlistStore.addSong(song, toPlaylistID: created.id)
+                            message = "已创建并添加"
+                            isError = false
+                        } catch {
+                            message = error.localizedDescription
+                            isError = true
+                        }
+                    }
+                }
+                .environmentObject(playlistStore)
             }
         }
         .navigationViewStyle(.stack)
@@ -103,24 +112,6 @@ struct PlaylistPickerView: View {
             do {
                 try await playlistStore.addSong(song, toPlaylistID: pid)
                 message = "已添加"
-                isError = false
-            } catch {
-                message = error.localizedDescription
-                isError = true
-            }
-        }
-    }
-
-    private func create() {
-        let name = newPlaylistName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        Task {
-            do {
-                try await playlistStore.createPlaylist(name: name)
-                if let newList = playlistStore.playlists.first(where: { $0.name == name }) {
-                    try await playlistStore.addSong(song, toPlaylistID: newList.id)
-                }
-                message = "已创建并添加"
                 isError = false
             } catch {
                 message = error.localizedDescription

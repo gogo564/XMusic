@@ -180,6 +180,17 @@ final class DownloadService: NSObject, ObservableObject {
         saveIndex()
     }
 
+    func deleteMany(_ items: [DownloadedSong]) {
+        guard !items.isEmpty else { return }
+        let ids = Set(items.map { $0.id })
+        for d in items {
+            let url = downloadsDir.appendingPathComponent(d.localFile)
+            try? FileManager.default.removeItem(at: url)
+        }
+        downloadedSongs.removeAll { ids.contains($0.id) }
+        saveIndex()
+    }
+
     private func loadIndex() {
         let url = downloadsDir.appendingPathComponent("index.json")
         guard let data = try? Data(contentsOf: url),

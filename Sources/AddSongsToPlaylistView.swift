@@ -7,7 +7,6 @@ struct AddSongsToPlaylistView: View {
     @EnvironmentObject private var playlistStore: PlaylistStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var newPlaylistName = ""
     @State private var showNewPlaylist = false
     @State private var message: String?
     @State private var isError = false
@@ -89,10 +88,14 @@ struct AddSongsToPlaylistView: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .alert("新建歌单", isPresented: $showNewPlaylist) {
-                TextField("歌单名称", text: $newPlaylistName)
-                Button("创建") { create() }
-                Button("取消", role: .cancel) {}
+            .sheet(isPresented: $showNewPlaylist) {
+                NewPlaylistSheetView { created in
+                    run {
+                        try await playlistStore.addSongsToPlaylist(songs, toPlaylistID: created.id)
+                        return "已创建并添加 \(songs.count) 首"
+                    }
+                }
+                .environmentObject(playlistStore)
             }
         }
         .navigationViewStyle(.stack)
@@ -123,18 +126,6 @@ struct AddSongsToPlaylistView: View {
         run {
             try await playlistStore.addSongsToPlaylist(songs, toPlaylistID: pid)
             return "已添加 \(songs.count) 首"
-        }
-    }
-
-    private func create() {
-        let name = newPlaylistName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        run {
-            try await playlistStore.createPlaylist(name: name)
-            if let newList = playlistStore.playlists.first(where: { $0.name == name }) {
-                try await playlistStore.addSongsToPlaylist(songs, toPlaylistID: newList.id)
-            }
-            return "已创建并添加 \(songs.count) 首"
         }
     }
 
