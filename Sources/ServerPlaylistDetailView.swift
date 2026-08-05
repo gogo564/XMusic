@@ -47,36 +47,10 @@ struct ServerPlaylistDetailView: View {
                         selectedIDs.removeAll()
                     }
                 }
-                if isEditing {
-                    ToolbarItemGroup(placement: .bottomBar) {
-                        Button {
-                            let allSelected = selectedIDs.count == songs.count
-                            if allSelected {
-                                selectedIDs.removeAll()
-                            } else {
-                                selectedIDs = Set(songs.map { $0.id })
-                            }
-                        } label: {
-                            Label(selectedIDs.count == songs.count ? "取消全选" : "全选", systemImage: "checklist")
-                        }
-                        Spacer()
-                        if !songs.isEmpty {
-                            Text("\(selectedIDs.count)/\(songs.count)")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Button(role: .destructive) {
-                            deleteSelected()
-                        } label: {
-                            Text("删除 (\(selectedIDs.count))")
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .disabled(selectedIDs.isEmpty || isDeleting)
-                        .overlay {
-                            if isDeleting {
-                                ProgressView()
-                            }
+                ToolbarItem(placement: .bottomBar) {
+                    Group {
+                        if isEditing {
+                            editBottomBar
                         }
                     }
                 }
@@ -85,6 +59,42 @@ struct ServerPlaylistDetailView: View {
                 NewPlaylistSheetView(renameID: playlistID, initialName: title)
                     .environmentObject(playlistStore)
             }
+    }
+
+    private var editBottomBar: some View {
+        HStack {
+            Button {
+                let allSelected = selectedIDs.count == songs.count
+                if allSelected {
+                    selectedIDs.removeAll()
+                } else {
+                    selectedIDs = Set(songs.map { $0.id })
+                }
+            } label: {
+                Label(selectedIDs.count == songs.count ? "取消全选" : "全选", systemImage: "checklist")
+            }
+            Spacer()
+            if !songs.isEmpty {
+                Text("\(selectedIDs.count)/\(songs.count)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive) {
+                deleteSelected()
+            } label: {
+                Text("删除 (\(selectedIDs.count))")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .disabled(selectedIDs.isEmpty || isDeleting)
+            .overlay {
+                if isDeleting {
+                    ProgressView()
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
     }
 
     // MARK: - 同一个列表（编辑模式就地加复选框，不做整页替换）
