@@ -456,6 +456,7 @@ final class LXAPIClient {
 
     /// 歌手歌曲（服务器循环拉取全部）
     func getArtistSongs(source: String, artistID: String, order: String = "hot") async throws -> [LXSong] {
+        let cfg = AppConfigStore.shared.config
         var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/artistSongs")!
         comps.queryItems = [
             URLQueryItem(name: "id", value: artistID),
@@ -469,6 +470,7 @@ final class LXAPIClient {
 
     /// 歌手专辑列表
     func getArtistAlbums(source: String, artistID: String, page: Int = 1) async throws -> [[String: Any]] {
+        let cfg = AppConfigStore.shared.config
         var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/artistAlbums")!
         comps.queryItems = [
             URLQueryItem(name: "id", value: artistID),
@@ -482,6 +484,7 @@ final class LXAPIClient {
 
     /// 专辑歌曲
     func getAlbumSongs(source: String, albumID: String) async throws -> [LXSong] {
+        let cfg = AppConfigStore.shared.config
         var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/albumSongs")!
         comps.queryItems = [
             URLQueryItem(name: "id", value: albumID),

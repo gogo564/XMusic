@@ -6,6 +6,7 @@ struct LXCachedImage: View {
     let urlString: String
     var placeholder: String = "music.note"
     var size: CGFloat
+    var cornerRadius: CGFloat = 8
 
     @StateObject private var loader = ImageLoader()
 
@@ -17,7 +18,7 @@ struct LXCachedImage: View {
                     .scaledToFill()
             } else {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill(Color(.systemGray5))
                     Image(systemName: placeholder)
                         .font(.system(size: size * 0.35))
@@ -26,7 +27,7 @@ struct LXCachedImage: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .onAppear { loader.load(urlString) }
         .onChange(of: urlString) { newURL in loader.load(newURL) }
     }
