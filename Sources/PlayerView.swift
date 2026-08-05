@@ -181,13 +181,15 @@ struct PlayerView: View {
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.6))
             } else {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .center, spacing: 14) {
                     Spacer(minLength: 0)
                     ForEach(visibleLyrics) { item in
                         Text(item.text)
-                            .font(item.diff == 0 ? .title2.bold() : .subheadline)
+                            .font(.body)
+                            .fontWeight(item.diff == 0 ? .bold : .regular)
+                            .multilineTextAlignment(.center)
                             .lineLimit(2)
-                            .foregroundColor(item.text.isEmpty ? .clear : (item.diff == 0 ? .white : .white.opacity(0.35)))
+                            .foregroundColor(item.text.isEmpty ? .clear : (item.diff == 0 ? .white : .white.opacity(0.45)))
                             .shadow(color: Color.black.opacity(0.5), radius: 6)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -206,7 +208,7 @@ struct PlayerView: View {
         let idx = playerManager.currentLyricIndex
         guard !lines.isEmpty, idx >= 0, idx < lines.count else { return [] }
         var out: [VisibleLyric] = []
-        for offset in -2...2 {
+        for offset in -3...3 {
             let li = idx + offset
             if lines.indices.contains(li) {
                 out.append(VisibleLyric(id: li, diff: offset, text: lines[li].text))
