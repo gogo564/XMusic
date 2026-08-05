@@ -31,6 +31,11 @@ struct ServerPlaylistDetailView: View {
 
     var body: some View {
         songList
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isEditing {
+                    editBottomBar
+                }
+            }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -43,15 +48,8 @@ struct ServerPlaylistDetailView: View {
                         }
                     }
                     Button(isEditing ? "完成" : "编辑") {
-                        withAnimation(.easeInOut(duration: 0.2)) { isEditing.toggle() }
+                        isEditing.toggle()
                         selectedIDs.removeAll()
-                    }
-                }
-                ToolbarItem(placement: .bottomBar) {
-                    Group {
-                        if isEditing {
-                            editBottomBar
-                        }
                     }
                 }
             }
@@ -95,6 +93,11 @@ struct ServerPlaylistDetailView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(Color(.systemBackground))
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 
     // MARK: - 同一个列表（编辑模式就地加复选框，不做整页替换）

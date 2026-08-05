@@ -22,12 +22,17 @@ struct DownloadsView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isEditing {
+                editBottomBar
+            }
+        }
         .navigationTitle("下载")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if !downloader.downloadedSongs.isEmpty {
                     Button(isEditing ? "完成" : "编辑") {
-                        withAnimation(.easeInOut(duration: 0.2)) { isEditing.toggle() }
+                        isEditing.toggle()
                         selectedIDs.removeAll()
                     }
                 }
@@ -148,6 +153,11 @@ struct DownloadsView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(Color(.systemBackground))
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 
     private func downloadedRow(_ d: DownloadedSong) -> some View {
