@@ -104,25 +104,23 @@ struct ServerPlaylistDetailView: View {
 
     private var songList: some View {
         List {
-            if !isEditing {
-                Section {
-                    Button {
-                        playAll()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "play.fill")
-                            Text("播放全部")
-                        }
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity, alignment: .center)
+            Section {
+                Button {
+                    playAll()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill")
+                        Text("播放全部")
                     }
-                    .buttonStyle(.borderedProminent)
-                    if let msg = message {
-                        Text(msg)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .buttonStyle(.borderedProminent)
+                if let msg = message {
+                    Text(msg)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
                 }
             }
             Section {
@@ -132,13 +130,20 @@ struct ServerPlaylistDetailView: View {
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
-                        if isEditing {
-                            selectableRow(song)
-                        } else {
-                            SongRow(song: song, showSource: false) { s in
+                        SongRow(
+                            song: song,
+                            showSource: false,
+                            isEditing: isEditing,
+                            isSelected: selectedIDs.contains(song.id),
+                            onPlay: { s in
                                 player.play(song: s, in: songs, index: idx)
+                            },
+                            onToggleSelect: {
+                                toggleSelection(song.id)
                             }
-                            .swipeActions(edge: .trailing) {
+                        )
+                        .swipeActions(edge: .trailing) {
+                            if !isEditing {
                                 Button(role: .destructive) {
                                     remove(at: idx)
                                 } label: {
@@ -151,32 +156,6 @@ struct ServerPlaylistDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
-    }
-
-    private func selectableRow(_ song: LXSong) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: selectedIDs.contains(song.id) ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 20))
-                .foregroundColor(selectedIDs.contains(song.id) ? .accentColor : .secondary)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-            LXCachedImage(urlString: song.imageURL, size: 48)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(song.name)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                Text(song.singer)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            toggleSelection(song.id)
-        }
     }
 
     // MARK: - Actions

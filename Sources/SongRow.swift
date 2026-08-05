@@ -6,7 +6,10 @@ struct SongRow: View {
 
     let song: LXSong
     let showSource: Bool
+    var isEditing: Bool = false
+    var isSelected: Bool = false
     var onPlay: ((LXSong) -> Void)?
+    var onToggleSelect: (() -> Void)?
 
     @State private var showMenu = false
     @State private var showPlaylistPicker = false
@@ -14,6 +17,16 @@ struct SongRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if isEditing {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(isSelected ? .accentColor : .secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onToggleSelect?()
+                    }
+            }
             LXCachedImage(urlString: song.imageURL, size: 48)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -48,7 +61,13 @@ struct SongRow: View {
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture {
-            if let onPlay = onPlay { onPlay(song) } else { player.play(song: song) }
+            if isEditing {
+                onToggleSelect?()
+            } else if let onPlay = onPlay {
+                onPlay(song)
+            } else {
+                player.play(song: song)
+            }
         }
         .confirmationDialog(song.name, isPresented: $showMenu, titleVisibility: .visible) {
             Button("立即播放") { player.play(song: song) }
@@ -73,6 +92,14 @@ struct SongRow: View {
 
     @ViewBuilder
     private var trailingView: some View {
+        if isEditing {
+            EmptyView()
+        } else {
+            trailingActionView
+        }
+    }
+
+    private var trailingActionView: some View {
         let key = song.id + "_320k"
         let downloading = downloader.activeTasks[key]
         if let progress = downloading {
