@@ -292,6 +292,8 @@ final class PlayerManager: ObservableObject {
         localPlaybackTitle = title
         localPlaybackArtist = artist
         currentSong = LXSong(["name": title, "singer": artist])
+        sourceName = ""
+        qualityName = ""
         queue = []
         currentIndex = -1
         currentTime = 0
