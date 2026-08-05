@@ -9,7 +9,8 @@ struct PlaylistDetailView: View {
     @State private var songs: [LXSong] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var showAddToPlaylist = false
+    @State private var isCollected = false
+    @State private var collectBusy = false
 
     var body: some View {
         List {
@@ -49,12 +50,14 @@ struct PlaylistDetailView: View {
                             .font(.system(size: 15, weight: .medium))
                     }
                     Button {
-                        showAddToPlaylist = true
+                        toggleCollect()
                     } label: {
-                        Label("添加到我的歌单", systemImage: "plus.circle")
+                        Label(isCollected ? "已收藏歌单" : "收藏歌单",
+                              systemImage: isCollected ? "heart.fill" : "heart")
                             .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(isCollected ? .red : .accentColor)
                     }
-                    .disabled(songs.isEmpty)
+                    .disabled(songs.isEmpty || collectBusy)
                 }
                 .padding(.vertical, 4)
             }
@@ -90,10 +93,6 @@ struct PlaylistDetailView: View {
         }
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showAddToPlaylist) {
-            AddSongsToPlaylistView(songs: songs, playlistName: playlist.name)
-                .environmentObject(playlistStore)
-        }
         .onAppear {
             load()
         }
@@ -104,12 +103,32 @@ struct PlaylistDetailView: View {
         player.play(song: songs[0], in: songs, index: 0)
     }
 
+    private func toggleCollect() {
+        guard !songs.isEmpty, !collectBusy else { return }
+        collectBusy = true
+        Task {
+            do {
+                if isCollected {
+                    _ = try await playlistStore.uncollectOnlinePlaylist(playlistID: playlist.id, source: source)
+                    isCollected = false
+                } else {
+                    _ = try await playlistStore.collectOnlinePlaylist(playlist: playlist, source: source, songs: songs)
+                    isCollected = true
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            collectBusy = false
+        }
+    }
+
     private func load() {
         guard songs.isEmpty else { return }
         isLoading = true
         Task {
             do {
                 songs = try await LXAPIClient.shared.getSongListDetail(source: source, playlistID: playlist.id)
+                isCollected = playlistStore.isOnlinePlaylistCollected(playlistID: playlist.id, source: source)
             } catch {
                 errorMessage = error.localizedDescription
             }

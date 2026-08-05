@@ -219,6 +219,54 @@ final class PlaylistStore: ObservableObject {
         return pid
     }
 
+    /// 一键收藏在线歌单（红心收藏）。已收藏则直接返回 true，否则新建带
+    /// sourceListId + Album 封面的 userList 项（与 web player 收藏格式一致）。
+    /// 返回是否处于已收藏状态。
+    @discardableResult
+    func collectOnlinePlaylist(playlist: LXOnlinePlaylist, source: String, songs: [LXSong]) async throws -> Bool {
+        var raw = try await freshRaw()
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        let onlineID = String(describing: playlist.id)
+        if let existing = userLists.first(where: { String(describing: $0["sourceListId"] ?? "") == onlineID && ($0["source"] as? String) == source }) {
+            return true
+        }
+        let randomHex = { String(format: "%08x", UInt32.random(in: 0...UInt32.max)) }
+        let newID = "\(source)_\(randomHex())\(randomHex())\(randomHex())\(randomHex())"
+        let payloads = songs.map { $0.songInfoPayload }
+        let newList: [String: Any] = [
+            "id": newID,
+            "name": playlist.name,
+            "source": source,
+            "sourceListId": onlineID,
+            "Album": playlist.imageURL,
+            "locationUpdateTime": NSNull(),
+            "list": payloads,
+        ]
+        userLists.insert(newList, at: 0)
+        raw["userList"] = userLists
+        try await push(raw)
+        return true
+    }
+
+    /// 取消收藏在线歌单（红心取消），按 sourceListId+source 匹配。
+    @discardableResult
+    func uncollectOnlinePlaylist(playlistID: String, source: String) async throws -> Bool {
+        var raw = try await freshRaw()
+        var userLists = raw["userList"] as? [[String: Any]] ?? []
+        let onlineID = String(describing: playlistID)
+        userLists.removeAll { String(describing: $0["sourceListId"] ?? "") == onlineID && ($0["source"] as? String) == source }
+        raw["userList"] = userLists
+        try await push(raw)
+        return false
+    }
+
+    /// 在线歌单是否已收藏（红心状态）
+    func isOnlinePlaylistCollected(playlistID: String, source: String) -> Bool {
+        guard let listData = listData else { return false }
+        let onlineID = String(describing: playlistID)
+        return listData.userList.contains { String(describing: $0.raw["sourceListId"] ?? "") == onlineID && ($0.raw["source"] as? String) == source }
+    }
+
     func renamePlaylist(id pid: String, newName: String) async throws {
         var raw = try await freshRaw()
         var userLists = raw["userList"] as? [[String: Any]] ?? []
