@@ -11,99 +11,115 @@ struct DownloadsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            List {
-                if !downloader.activeSongs.isEmpty {
-                    Section(header: Text("正在下载")) {
-                        ForEach(Array(downloader.activeSongs.keys.sorted()), id: \.self) { key in
-                            if let song = downloader.activeSongs[key] {
-                                HStack(spacing: 12) {
-                                    LXCachedImage(urlString: song.imageURL, size: 44)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(song.name)
-                                            .font(.system(size: 14, weight: .medium))
-                                            .lineLimit(1)
-                                        Text(song.singer)
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    Spacer()
-                                    let progress = downloader.activeTasks[key] ?? 0
-                                    Text("\(Int(progress * 100))%")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(.accentColor)
-                                    Button {
-                                        downloader.cancel(songID: key)
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .buttonStyle(.borderless)
+        List {
+            if !downloader.activeSongs.isEmpty {
+                Section(header: Text("正在下载")) {
+                    ForEach(Array(downloader.activeSongs.keys.sorted()), id: \.self) { key in
+                        if let song = downloader.activeSongs[key] {
+                            HStack(spacing: 12) {
+                                LXCachedImage(urlString: song.imageURL, size: 44)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(song.name)
+                                        .font(.system(size: 14, weight: .medium))
+                                        .lineLimit(1)
+                                    Text(song.singer)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
                                 }
-                                .padding(.vertical, 2)
+                                Spacer()
+                                let progress = downloader.activeTasks[key] ?? 0
+                                Text("\(Int(progress * 100))%")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.accentColor)
+                                Button {
+                                    downloader.cancel(songID: key)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.borderless)
                             }
-                        }
-                    }
-                }
-
-                if downloader.downloadedSongs.isEmpty && downloader.activeSongs.isEmpty {
-                    Section {
-                        VStack(spacing: 12) {
-                            Image(systemName: "arrow.down.to.line")
-                                .font(.system(size: 36))
-                                .foregroundColor(.secondary)
-                            Text("暂无下载。\n在歌曲行点 ↓ 图标即可下载。")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 30)
-                    }
-                } else if !downloader.downloadedSongs.isEmpty {
-                    Section(header: Text("已下载 (\(downloader.downloadedSongs.count))")) {
-                        ForEach(downloadedSorted) { d in
-                            downloadedRow(d)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if isEditing {
-                                        toggleSelection(d.id)
-                                    } else {
-                                        downloader.playDownloaded(d)
-                                    }
-                                }
-                                .swipeActions(edge: .trailing) {
-                                    if !isEditing {
-                                        Button(role: .destructive) {
-                                            downloader.delete(d)
-                                        } label: {
-                                            Label("删除", systemImage: "trash")
-                                        }
-                                    }
-                                }
+                            .padding(.vertical, 2)
                         }
                     }
                 }
             }
-            .listStyle(.insetGrouped)
 
-            if isEditing {
-                editBottomBar
-            } else {
-                Color.clear
-                    .frame(height: 80)
-                    .allowsHitTesting(false)
+            if downloader.downloadedSongs.isEmpty && downloader.activeSongs.isEmpty {
+                Section {
+                    VStack(spacing: 12) {
+                        Image(systemName: "arrow.down.to.line")
+                            .font(.system(size: 36))
+                            .foregroundColor(.secondary)
+                        Text("暂无下载。\n在歌曲行点 ↓ 图标即可下载。")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 30)
+                }
+            } else if !downloader.downloadedSongs.isEmpty {
+                Section(header: Text("已下载 (\(downloader.downloadedSongs.count))")) {
+                    ForEach(downloadedSorted) { d in
+                        downloadedRow(d)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if isEditing {
+                                    toggleSelection(d.id)
+                                } else {
+                                    downloader.playDownloaded(d)
+                                }
+                            }
+                            .swipeActions(edge: .trailing) {
+                                if !isEditing {
+                                    Button(role: .destructive) {
+                                        downloader.delete(d)
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
+                                }
+                            }
+                    }
+                }
             }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle("下载")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if !downloader.downloadedSongs.isEmpty {
-                    Button(isEditing ? "完成" : "选择") {
+                    Button(isEditing ? "完成" : "编辑") {
                         withAnimation(.easeInOut(duration: 0.2)) { isEditing.toggle() }
                         selectedIDs.removeAll()
                     }
+                }
+            }
+            if isEditing {
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button {
+                        let allSelected = selectedIDs.count == downloader.downloadedSongs.count
+                        if allSelected {
+                            selectedIDs.removeAll()
+                        } else {
+                            selectedIDs = Set(downloadedSorted.map { $0.id })
+                        }
+                    } label: {
+                        Label(selectedIDs.count == downloader.downloadedSongs.count ? "取消全选" : "全选", systemImage: "checklist")
+                    }
+                    Spacer()
+                    Text("\(selectedIDs.count)/\(downloader.downloadedSongs.count)")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button(role: .destructive) {
+                        deleteSelected()
+                    } label: {
+                        Text("删除 (\(selectedIDs.count))")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .disabled(selectedIDs.isEmpty)
                 }
             }
         }
@@ -148,38 +164,6 @@ struct DownloadsView: View {
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
             }
-        }
-    }
-
-    private var editBottomBar: some View {
-        HStack {
-            Button {
-                let allSelected = selectedIDs.count == downloader.downloadedSongs.count
-                if allSelected {
-                    selectedIDs.removeAll()
-                } else {
-                    selectedIDs = Set(downloadedSorted.map { $0.id })
-                }
-            } label: {
-                Label(selectedIDs.count == downloader.downloadedSongs.count ? "取消全选" : "全选", systemImage: "checklist")
-            }
-            Spacer()
-            Text("\(selectedIDs.count)/\(downloader.downloadedSongs.count)")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.secondary)
-            Button(role: .destructive) {
-                deleteSelected()
-            } label: {
-                Text("删除 (\(selectedIDs.count))")
-                    .font(.system(size: 15, weight: .semibold))
-            }
-            .disabled(selectedIDs.isEmpty)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
-        .overlay(alignment: .top) {
-            Divider()
         }
     }
 
