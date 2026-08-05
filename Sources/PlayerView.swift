@@ -112,21 +112,21 @@ struct PlayerView: View {
     // MARK: - Center Area (cover <-> lyrics in place)
 
     private func centerArea(width: CGFloat) -> some View {
-        let cdSize = min(width * 0.74, 320)
+        let coverSize = min(width * 0.74, 320)
         return ZStack {
             if showInPlaceLyrics {
-                inPlaceLyricsView
+                inPlaceLyricsView(coverSize: coverSize)
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.9)),
                         removal: .opacity.combined(with: .scale(scale: 0.9))))
             } else {
-                cdCoverView(size: cdSize)
+                coverCard(size: coverSize)
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.9)),
                         removal: .opacity.combined(with: .scale(scale: 0.9))))
             }
         }
-        .frame(height: cdSize + 20)
+        .frame(height: coverSize + 20)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -147,78 +147,35 @@ struct PlayerView: View {
         )
     }
 
-    // MARK: - CD Cover
+    // MARK: - Cover Card (square, rounded)
 
-    private func cdCoverView(size: CGFloat) -> some View {
-        ZStack {
-            // 唱片外圈渐变环
-            Circle()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.55), Color.white.opacity(0.08), Color.white.opacity(0.4)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 3
-                )
-
-            // 封面
-            AsyncImage(url: coverURL) { image in
-                image.resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: size - 12, height: size - 12)
-                    .clipShape(Circle())
-                    .rotationEffect(.degrees(albumRotationAngle))
-                    .animation(.linear(duration: 0.5), value: playerManager.currentTime)
-            } placeholder: {
-                Circle()
-                    .fill(Color.gray.opacity(0.35))
-                    .frame(width: size - 12, height: size - 12)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 54))
-                            .foregroundColor(.white.opacity(0.55))
-                    )
-            }
-
-            // 静态高光（不随封面旋转）
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.16), .clear],
-                        startPoint: .topLeading,
-                        endPoint: .center
-                    )
-                )
-                .frame(width: size - 12, height: size - 12)
-                .clipShape(Circle())
-                .allowsHitTesting(false)
-
-            // 中心轴心
-            Circle()
-                .fill(Color.black.opacity(0.55))
-                .frame(width: size * 0.15, height: size * 0.15)
+    private func coverCard(size: CGFloat) -> some View {
+        AsyncImage(url: coverURL) { image in
+            image.resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+        } placeholder: {
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color.gray.opacity(0.35))
+                .frame(width: size, height: size)
                 .overlay(
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5)
+                    Image(systemName: "music.note")
+                        .font(.system(size: 54))
+                        .foregroundColor(.white.opacity(0.55))
                 )
-            Circle()
-                .fill(Color.white.opacity(0.85))
-                .frame(width: size * 0.04, height: size * 0.04)
         }
         .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
     }
 
     // MARK: - In-place Layered Lyrics (上一句 / 当前句 / 下一句)
 
-    private var inPlaceLyricsView: some View {
-        VStack(spacing: 18) {
+    private func inPlaceLyricsView(coverSize: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
             if playerManager.parsedLyrics.isEmpty {
                 Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
                     .font(.title3)
-                    .multilineTextAlignment(.center)
                     .foregroundColor(.white.opacity(0.75))
-                    .padding(.horizontal, 24)
             } else if playerManager.currentLyricIndex < 0 {
                 Text("正在加载歌词…")
                     .font(.title3)
@@ -227,19 +184,17 @@ struct PlayerView: View {
                 ForEach(visibleLyrics) { item in
                     Text(item.text)
                         .font(item.diff == 0 ? .title2.bold() : .subheadline)
-                        .multilineTextAlignment(.center)
                         .lineLimit(2)
-                        .foregroundColor(item.diff == 0 ? .white : .white.opacity(0.3))
+                        .foregroundColor(item.diff == 0 ? .white : .white.opacity(0.35))
                         .shadow(color: Color.black.opacity(0.5), radius: 6)
-                        .padding(.horizontal, 24)
                         .transition(.asymmetric(
                             insertion: .move(edge: .bottom).combined(with: .opacity),
                             removal: .move(edge: .top).combined(with: .opacity)))
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: coverSize, alignment: .topLeading)
         .animation(.spring(response: 0.45, dampingFraction: 0.8), value: playerManager.currentLyricIndex)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var visibleLyrics: [VisibleLyric] {
@@ -260,22 +215,9 @@ struct PlayerView: View {
 
     private var trackInfoAndControls: some View {
         VStack(spacing: 26) {
-            // 歌名 / 歌手（居中）+ 收藏按钮（左对齐占位）
+            // 歌名 / 歌手（左对齐）+ 收藏按钮
             HStack(spacing: 0) {
-                Button(action: {
-                    if let song = playerManager.currentSong { toggleLove(song) }
-                }) {
-                    let isLoved = playerManager.currentSong.map { playlistStore.isLoved($0) } ?? false
-                    Image(systemName: isLoved ? "heart.fill" : "heart")
-                        .font(.title3)
-                        .foregroundColor(isLoved ? .red : .white.opacity(0.85))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-
-                Spacer()
-
-                VStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(playerManager.currentSong?.name ?? "未知歌曲")
                         .font(.title2.bold())
                         .lineLimit(1)
@@ -287,9 +229,16 @@ struct PlayerView: View {
 
                 Spacer()
 
-                // 右侧占位保持居中
-                Color.clear
-                    .frame(width: 44, height: 44)
+                Button(action: {
+                    if let song = playerManager.currentSong { toggleLove(song) }
+                }) {
+                    let isLoved = playerManager.currentSong.map { playlistStore.isLoved($0) } ?? false
+                    Image(systemName: isLoved ? "heart.fill" : "heart")
+                        .font(.title3)
+                        .foregroundColor(isLoved ? .red : .white.opacity(0.85))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
             }
             .padding(.horizontal, 24)
 
@@ -457,13 +406,6 @@ struct PlayerView: View {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return String(format: "%d:%02d", mins, secs)
-    }
-
-    // MARK: - Lyric Helpers
-
-    /// CD-style rotation: 15°/s while playing, frozen when paused (derived from currentTime).
-    private var albumRotationAngle: Double {
-        (playerManager.currentTime * 15).truncatingRemainder(dividingBy: 360)
     }
 }
 
