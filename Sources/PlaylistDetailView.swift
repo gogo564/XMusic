@@ -43,21 +43,29 @@ struct PlaylistDetailView: View {
                             .foregroundColor(.secondary)
                             .lineLimit(3)
                     }
-                    Button {
-                        playAll()
-                    } label: {
-                        Label("播放全部", systemImage: "play.circle.fill")
-                            .font(.system(size: 15, weight: .medium))
+                    HStack(spacing: 12) {
+                        Button {
+                            playAll()
+                        } label: {
+                            Label("播放全部", systemImage: "play.circle.fill")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(songs.isEmpty)
+
+                        Button {
+                            toggleCollect()
+                        } label: {
+                            Label(isCollected ? "已收藏" : "收藏歌单",
+                                  systemImage: isCollected ? "heart.fill" : "heart")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .foregroundColor(isCollected ? .red : .accentColor)
+                        .disabled(songs.isEmpty || collectBusy)
                     }
-                    Button {
-                        toggleCollect()
-                    } label: {
-                        Label(isCollected ? "已收藏歌单" : "收藏歌单",
-                              systemImage: isCollected ? "heart.fill" : "heart")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(isCollected ? .red : .accentColor)
-                    }
-                    .disabled(songs.isEmpty || collectBusy)
                 }
                 .padding(.vertical, 4)
             }
