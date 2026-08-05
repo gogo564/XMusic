@@ -181,19 +181,23 @@ struct PlayerView: View {
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.6))
             } else {
-                ForEach(visibleLyrics) { item in
-                    Text(item.text)
-                        .font(item.diff == 0 ? .title2.bold() : .subheadline)
-                        .lineLimit(2)
-                        .foregroundColor(item.diff == 0 ? .white : .white.opacity(0.35))
-                        .shadow(color: Color.black.opacity(0.5), radius: 6)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .move(edge: .top).combined(with: .opacity)))
+                VStack(alignment: .leading, spacing: 16) {
+                    Spacer(minLength: 0)
+                    ForEach(visibleLyrics) { item in
+                        Text(item.text)
+                            .font(item.diff == 0 ? .title2.bold() : .subheadline)
+                            .lineLimit(2)
+                            .foregroundColor(item.text.isEmpty ? .clear : (item.diff == 0 ? .white : .white.opacity(0.35)))
+                            .shadow(color: Color.black.opacity(0.5), radius: 6)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .move(edge: .top).combined(with: .opacity)))
+                    }
+                    Spacer(minLength: 0)
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: coverSize, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: coverSize)
         .animation(.spring(response: 0.45, dampingFraction: 0.8), value: playerManager.currentLyricIndex)
     }
 
@@ -202,10 +206,12 @@ struct PlayerView: View {
         let idx = playerManager.currentLyricIndex
         guard !lines.isEmpty, idx >= 0, idx < lines.count else { return [] }
         var out: [VisibleLyric] = []
-        for offset in -1...1 {
+        for offset in -2...2 {
             let li = idx + offset
             if lines.indices.contains(li) {
                 out.append(VisibleLyric(id: li, diff: offset, text: lines[li].text))
+            } else {
+                out.append(VisibleLyric(id: li, diff: offset, text: ""))
             }
         }
         return out
