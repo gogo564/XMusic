@@ -48,6 +48,7 @@ struct ServerPlaylistDetailView: View {
             }
         }
         .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 if kind == .user {

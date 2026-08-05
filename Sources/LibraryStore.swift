@@ -7,9 +7,18 @@ final class LibraryStore: ObservableObject {
 
     @Published private(set) var artists: [LXLibraryArtist] = []
     @Published private(set) var albums: [LXLibraryAlbum] = []
+    @Published private(set) var playlistKeys: Set<String> = []
     @Published private(set) var isLoaded = false
 
-    private init() {}
+    private var cancellable: AnyCancellable?
+
+    private init() {
+        cancellable = PlaylistStore.shared.$listData
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshPlaylistKeys()
+            }
+    }
 
     @MainActor
     func loadIfNeeded() async {
@@ -29,6 +38,26 @@ final class LibraryStore: ObservableObject {
         } catch {
             isLoaded = true
         }
+        refreshPlaylistKeys()
+    }
+
+    private func playlistKey(_ playlist: LXOnlinePlaylist) -> String {
+        "\(playlist.source):\(playlist.id)"
+    }
+
+    /// 从 PlaylistStore 已加载的 userList 中收集已收藏的在线歌单 key（source:sourceListId）。
+    func refreshPlaylistKeys() {
+        var keys = Set<String>()
+        if let userList = PlaylistStore.shared.listData?.userList {
+            for pl in userList {
+                let source = pl.raw["source"] as? String ?? ""
+                let sourceListId = String(describing: pl.raw["sourceListId"] ?? "")
+                if !sourceListId.isEmpty {
+                    keys.insert("\(source):\(sourceListId)")
+                }
+            }
+        }
+        playlistKeys = keys
     }
 
     func isArtistLoved(_ artist: LXArtist) -> Bool {
@@ -40,7 +69,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func isPlaylistLoved(_ playlist: LXOnlinePlaylist) -> Bool {
-        PlaylistStore.shared.isOnlinePlaylistCollected(playlistID: playlist.id, source: playlist.source)
+        playlistKeys.contains(playlistKey(playlist))
     }
 
     func toggleArtist(_ artist: LXArtist) {
@@ -64,6 +93,12 @@ final class LibraryStore: ObservableObject {
     }
 
     func togglePlaylist(_ playlist: LXOnlinePlaylist) {
+        let key = playlistKey(playlist)
+        if isPlaylistLoved(playlist) {
+            playlistKeys.remove(key)
+        } else {
+            playlistKeys.insert(key)
+        }
         Task {
             let collected = PlaylistStore.shared.isOnlinePlaylistCollected(playlistID: playlist.id, source: playlist.source)
             if collected {
@@ -75,6 +110,7 @@ final class LibraryStore: ObservableObject {
                 }
             }
             await PlaylistStore.shared.refresh()
+            await MainActor.run { refreshPlaylistKeys() }
         }
     }
 

@@ -452,9 +452,11 @@ struct SearchView: View {
                 }
                 Spacer(minLength: 120)
             }
-            .onTapGesture {
-                searchFocused = false
-            }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    searchFocused = false
+                }
+            )
         }
         .navigationTitle("搜索")
         .toolbar {
@@ -464,6 +466,15 @@ struct SearchView: View {
                     searchFocused = false
                     Task { await performSearch() }
                 }
+            }
+        }
+        .onChange(of: searchText) { _ in
+            if hasSearched && trimmedText.isEmpty {
+                hasSearched = false
+                songResults = []
+                artistResults = []
+                albumResults = []
+                playlistResults = []
             }
         }
         .onChange(of: source) { _ in
