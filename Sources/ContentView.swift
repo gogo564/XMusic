@@ -214,6 +214,7 @@ struct HomeView: View {
                 .padding(.horizontal)
             }
             .frame(height: 36)
+            .padding(.bottom, 14)
 
             if squareLoading {
                 HStack {
