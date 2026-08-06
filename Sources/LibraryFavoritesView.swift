@@ -77,7 +77,7 @@ struct LibraryFavoritesView: View {
                                             Text(album.name)
                                                 .font(.system(size: 15, weight: .medium))
                                                 .lineLimit(1)
-                                            Text("\(album.artistName) · \(album.songCount) 首")
+                                            Text(album.songCount > 0 ? "\(album.artistName) · \(album.songCount) 首" : "\(album.artistName) · 专辑")
                                                 .font(.system(size: 12))
                                                 .foregroundColor(.secondary)
                                         }
@@ -137,83 +137,125 @@ struct LibraryFavoritesView: View {
     }
 }
 
-// 收藏专辑详情：播放专辑内曲目
+// 收藏专辑详情：播放专辑内曲目（打开时动态拉取歌曲，收藏数据仅存专辑元信息）
 struct LibraryAlbumDetailView: View {
     @EnvironmentObject var player: PlayerManager
     let album: LXLibraryAlbum
+    @State private var songs: [LXSong] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
 
     var body: some View {
-        List {
-            Section {
-                HStack(spacing: 12) {
-                    AsyncImage(url: URL(string: album.picUrl)) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Image(systemName: "music.note.list")
-                            .foregroundColor(.secondary)
+        Group {
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = errorMessage, songs.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 40))
+                        .foregroundColor(.secondary)
+                    Text(error)
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 30)
+                    Button("重试") {
+                        Task { await loadSongs() }
                     }
-                    .frame(width: 88, height: 88)
-                    .cornerRadius(12)
-                    .clipped()
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(album.name)
-                            .font(.system(size: 17, weight: .bold))
-                            .lineLimit(2)
-                        Text(album.artistName)
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                        Text("\(album.songCount) 首")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
+                    .buttonStyle(.bordered)
                 }
-                .padding(.vertical, 6)
-                Button {
-                    playAll()
-                } label: {
-                    Label("播放全部", systemImage: "play.circle.fill")
-                        .font(.system(size: 15, weight: .medium))
-                }
-            }
-            Section {
-                ForEach(Array(album.songs.enumerated()), id: \.element.id) { idx, song in
-                    Button {
-                        player.play(song: song, in: album.songs, index: idx)
-                    } label: {
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    Section {
                         HStack(spacing: 12) {
-                            Text("\(idx + 1)")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .frame(width: 24, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(song.name)
-                                    .font(.system(size: 15))
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-                                Text(song.singer)
-                                    .font(.system(size: 12))
+                            AsyncImage(url: URL(string: album.picUrl)) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Image(systemName: "music.note.list")
                                     .foregroundColor(.secondary)
-                                    .lineLimit(1)
+                            }
+                            .frame(width: 88, height: 88)
+                            .cornerRadius(12)
+                            .clipped()
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(album.name)
+                                    .font(.system(size: 17, weight: .bold))
+                                    .lineLimit(2)
+                                Text(album.artistName)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.secondary)
+                                Text("\(songs.count) 首")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
                             }
                             Spacer()
-                            if !song.interval.isEmpty {
-                                Text(song.interval)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 6)
+                        if !songs.isEmpty {
+                            Button {
+                                playAll()
+                            } label: {
+                                Label("播放全部", systemImage: "play.circle.fill")
+                                    .font(.system(size: 15, weight: .medium))
+                            }
+                        }
+                    }
+                    Section {
+                        ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
+                            Button {
+                                player.play(song: song, in: songs, index: idx)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Text("\(idx + 1)")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 24, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(song.name)
+                                            .font(.system(size: 15))
+                                            .foregroundColor(.primary)
+                                            .lineLimit(1)
+                                        Text(song.singer)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    if !song.interval.isEmpty {
+                                        Text(song.interval)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
                             }
                         }
                     }
                 }
+                .listStyle(.insetGrouped)
             }
         }
-        .listStyle(.insetGrouped)
         .navigationTitle(album.name)
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await loadSongs()
+        }
+    }
+
+    private func loadSongs() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            songs = try await LXAPIClient.shared.getAlbumSongs(source: album.source, albumID: album.albumID)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
     }
 
     private func playAll() {
-        guard !album.songs.isEmpty else { return }
-        player.play(song: album.songs[0], in: album.songs, index: 0)
+        guard !songs.isEmpty else { return }
+        player.play(song: songs[0], in: songs, index: 0)
     }
 }

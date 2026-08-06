@@ -62,6 +62,7 @@ final class PlayerManager: ObservableObject {
     private var statusObserver: NSKeyValueObservation?
     private var lrc = LRC.parse(nil)
     private var shuffledIndices: [Int] = []
+    private var prefetchTask: Task<Void, Never>?
 
     private init() {
         self.quality = AppConfigStore.shared.config.defaultQuality
@@ -431,6 +432,31 @@ final class PlayerManager: ObservableObject {
         updateNowPlaying()
         saveLastPlayed()
         saveRecent(song: song)
+        prefetchNext()
+    }
+
+    /// 预解析+预缓存队列下一首：当前曲开始播放后，后台解析下一首的播放地址并下载到缓存，
+    /// 使 4G 弱网下切歌时命中缓存秒开（跳过服务器解析 + 首包缓冲）。
+    private func prefetchNext() {
+        prefetchTask?.cancel()
+        guard queue.count > 1, currentIndex >= 0 else { return }
+        let nextIndex = (currentIndex + 1) % queue.count
+        if nextIndex == currentIndex { return }
+        guard queue.indices.contains(nextIndex) else { return }
+        let next = queue[nextIndex]
+        if MusicCacheManager.shared.isCached(id: next.id) { return }
+        prefetchTask = Task { [weak self] in
+            guard let self = self else { return }
+            let prefetchQuality = self.quality
+            let autoSwitch = AppConfigStore.shared.config.autoSwitchSource
+            do {
+                let result = try await LXAPIClient.shared.getPlaybackURL(for: next, quality: prefetchQuality, autoSwitch: autoSwitch)
+                guard !Task.isCancelled else { return }
+                MusicCacheManager.shared.startCaching(url: result.url, id: next.id)
+            } catch {
+                // 预取失败不影响当前播放，静默忽略
+            }
+        }
     }
 
     private func observeItemStatus(_ item: AVPlayerItem) {
