@@ -506,8 +506,9 @@ final class LXAPIClient {
         return (json as? [[String: Any]]) ?? []
     }
 
-    /// 专辑歌曲（服务器返回 { "list": [...] }）
-    func getAlbumSongs(source: String, albumID: String) async throws -> [LXSong] {
+    /// 专辑歌曲（服务器返回 { "list": [...] }）。服务器该接口不返回歌曲封面，
+    /// 传入专辑封面 cover 补到每首歌的 img 字段，保证播放器能显示封面。
+    func getAlbumSongs(source: String, albumID: String, cover: String = "") async throws -> [LXSong] {
         let cfg = AppConfigStore.shared.config
         var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/albumSongs")!
         comps.queryItems = [
@@ -517,10 +518,25 @@ final class LXAPIClient {
         guard let url = comps.url else { return [] }
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let json = (try? JSONSerialization.jsonObject(with: data)) else { return [] }
-        if let dict = json as? [String: Any], let list = dict["list"] as? [[String: Any]] {
-            return list.map(LXSong.init)
+        var list: [[String: Any]]
+        if let dict = json as? [String: Any], let arr = dict["list"] as? [[String: Any]] {
+            list = arr
+        } else {
+            list = (json as? [[String: Any]]) ?? []
         }
-        return (json as? [[String: Any]])?.map(LXSong.init) ?? []
+        if !cover.isEmpty {
+            list = list.map { raw in
+                var d = raw
+                let hasCover = (d["img"] as? String)?.isEmpty == false
+                    || (d["picUrl"] as? String)?.isEmpty == false
+                    || (d["albumImg"] as? String)?.isEmpty == false
+                if !hasCover {
+                    d["img"] = cover
+                }
+                return d
+            }
+        }
+        return list.map(LXSong.init)
     }
 
     // MARK: - Download

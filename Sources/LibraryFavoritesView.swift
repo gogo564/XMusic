@@ -257,7 +257,7 @@ struct LibraryAlbumDetailView: View {
         isLoading = true
         errorMessage = nil
         do {
-            songs = try await LXAPIClient.shared.getAlbumSongs(source: album.source, albumID: album.albumID)
+            songs = try await LXAPIClient.shared.getAlbumSongs(source: album.source, albumID: album.albumID, cover: album.picUrl)
         } catch {
             errorMessage = error.localizedDescription
         }

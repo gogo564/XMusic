@@ -212,6 +212,7 @@ struct HomeView: View {
                 }
                 .padding(.horizontal)
             }
+            .simultaneousGesture(DragGesture())
 
             if squareLoading {
                 HStack {
@@ -1005,7 +1006,7 @@ struct AlbumDetailView: View {
     @MainActor
     private func load() async {
         isLoading = true
-        songs = (try? await LXAPIClient.shared.getAlbumSongs(source: source, albumID: album.id)) ?? []
+        songs = (try? await LXAPIClient.shared.getAlbumSongs(source: source, albumID: album.id, cover: album.picUrl)) ?? []
         isLoading = false
     }
 
