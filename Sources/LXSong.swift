@@ -216,7 +216,9 @@ struct LXAlbum: Identifiable {
 
     var id: String { String(describing: raw["id"] ?? "") }
     var name: String { raw["name"] as? String ?? "" }
-    var picUrl: String { raw["picUrl"] as? String ?? "" }
+    var picUrl: String {
+        raw["picUrl"] as? String ?? (raw["img"] as? String) ?? ""
+    }
     var artistName: String { raw["artistName"] as? String ?? "" }
     var artistId: String { String(describing: raw["artistId"] ?? "") }
     var size: Int {
