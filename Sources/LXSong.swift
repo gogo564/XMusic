@@ -219,7 +219,12 @@ struct LXAlbum: Identifiable {
     var picUrl: String { raw["picUrl"] as? String ?? "" }
     var artistName: String { raw["artistName"] as? String ?? "" }
     var artistId: String { String(describing: raw["artistId"] ?? "") }
-    var size: Int { (raw["size"] as? Int) ?? 0 }
+    var size: Int {
+        if let v = raw["size"] as? Int { return v }
+        if let v = raw["total"] as? Int { return v }
+        if let v = raw["total"] as? String { return Int(v) ?? 0 }
+        return 0
+    }
     var publishTime: Int64 { (raw["publishTime"] as? Int64) ?? 0 }
     var source: String { raw["source"] as? String ?? "wy" }
 

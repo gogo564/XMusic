@@ -485,10 +485,14 @@ final class LXAPIClient {
         ]
         guard let url = comps.url else { return [] }
         let (data, _) = try await URLSession.shared.data(from: url)
-        return (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+        let json = (try? JSONSerialization.jsonObject(with: data)) ?? nil
+        if let dict = json as? [String: Any], let list = dict["list"] as? [[String: Any]] {
+            return list
+        }
+        return (json as? [[String: Any]]) ?? []
     }
 
-    /// 专辑歌曲
+    /// 专辑歌曲（服务器返回 { "list": [...] }）
     func getAlbumSongs(source: String, albumID: String) async throws -> [LXSong] {
         let cfg = AppConfigStore.shared.config
         var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/albumSongs")!
@@ -498,7 +502,11 @@ final class LXAPIClient {
         ]
         guard let url = comps.url else { return [] }
         let (data, _) = try await URLSession.shared.data(from: url)
-        return ((try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []).map(LXSong.init)
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) else { return [] }
+        if let dict = json as? [String: Any], let list = dict["list"] as? [[String: Any]] {
+            return list.map(LXSong.init)
+        }
+        return (json as? [[String: Any]])?.map(LXSong.init) ?? []
     }
 
     // MARK: - Download
