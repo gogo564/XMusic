@@ -271,20 +271,19 @@ struct HomeView: View {
     }
 
     private func tagChip(_ name: String, id: String?) -> some View {
-        Button {
-            guard selectedTagID != id else { return }
-            selectedTagID = id
-            Task { await loadSquare(tagID: id) }
-        } label: {
-            Text(name)
-                .font(.system(size: 13, weight: .medium))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(selectedTagID == id ? Color.accentColor : Color(.systemGray5))
-                .foregroundColor(selectedTagID == id ? .white : .primary)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
+        Text(name)
+            .font(.system(size: 13, weight: .medium))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(selectedTagID == id ? Color.accentColor : Color(.systemGray5))
+            .foregroundColor(selectedTagID == id ? .white : .primary)
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+            .highPriorityGesture(TapGesture().onEnded {
+                guard selectedTagID != id else { return }
+                selectedTagID = id
+                Task { await loadSquare(tagID: id) }
+            })
     }
 
     // MARK: 热搜
