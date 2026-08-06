@@ -177,8 +177,13 @@ struct LXOnlinePlaylist: Identifiable {
     var name: String { raw["name"] as? String ?? "" }
     var author: String { raw["author"] as? String ?? "" }
     var imageURL: String { raw["picUrl"] as? String ?? (raw["img"] as? String) ?? "" }
-    var playCount: String { raw["playCount"] as? String ?? "" }
-    var songCount: Int { (raw["trackCount"] as? Int) ?? (raw["total"] as? Int) ?? 0 }
+    var playCount: String { raw["playCount"] as? String ?? (raw["play_count"] as? String) ?? "" }
+    var songCount: Int {
+        if let v = raw["trackCount"] as? Int { return v }
+        if let v = raw["total"] as? Int { return v }
+        if let s = raw["total"] as? String { return Int(s) ?? 0 }
+        return 0
+    }
     var desc: String { raw["desc"] as? String ?? "" }
     var source: String { raw["source"] as? String ?? "wy" }
 }

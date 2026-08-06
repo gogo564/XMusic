@@ -710,7 +710,7 @@ struct SearchView: View {
             let arr = (try? await LXAPIClient.shared.searchMulti(name: text, source: source, type: "album")) ?? []
             albumResults = arr.map(LXAlbum.init)
         default:
-            playlistResults = (try? await LXAPIClient.shared.searchPlaylistsMulti(name: text, source: source)) ?? []
+            playlistResults = (try? await LXAPIClient.shared.searchPlaylists(name: text, source: source)) ?? []
         }
         isLoading = false
     }

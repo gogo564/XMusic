@@ -371,7 +371,13 @@ final class LXAPIClient {
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let list = obj["list"] as? [[String: Any]] else { return [] }
-        return list.map(LXOnlinePlaylist.init)
+        return list.map { item -> LXOnlinePlaylist in
+            var item = item
+            if item["source"] == nil {
+                item["source"] = source
+            }
+            return LXOnlinePlaylist(item)
+        }
     }
 
     // tagGroup: [[name, id]...] flattened from the first-level category list
