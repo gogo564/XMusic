@@ -54,7 +54,7 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
                 withHorizontalFittingPriority: .fittingSizeLevel,
                 verticalFittingPriority: .required
             )
-            let contentWidth = max(fittingSize.width, scrollView.bounds.width)
+            let contentWidth = fittingSize.width > 0 ? fittingSize.width : scrollView.bounds.width
             let contentHeight = max(fittingSize.height, height)
             host.view.frame = CGRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
             scrollView.contentSize = CGSize(width: contentWidth, height: contentHeight)
