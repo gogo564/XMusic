@@ -7,6 +7,7 @@ struct XmusicApp: App {
     @StateObject private var downloader = DownloadService.shared
     @StateObject private var recentStore = RecentStore.shared
     @StateObject private var libraryStore = LibraryStore.shared
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @State private var needsConfig = false
 
     var body: some Scene {
@@ -17,6 +18,7 @@ struct XmusicApp: App {
                 .environmentObject(downloader)
                 .environmentObject(recentStore)
                 .environmentObject(libraryStore)
+                .environmentObject(networkMonitor)
                 .onAppear {
                     needsConfig = AppConfigStore.shared.token == nil
                     if !needsConfig {
@@ -33,6 +35,7 @@ struct XmusicApp: App {
 
 struct RootView: View {
     @Binding var needsConfig: Bool
+    @EnvironmentObject var networkMonitor: NetworkMonitor
 
     var body: some View {
         if needsConfig {
@@ -40,7 +43,7 @@ struct RootView: View {
                 SettingsView(needsConfig: $needsConfig)
             }
             .navigationViewStyle(.stack)
-        } else {
+        } else if networkMonitor.isConnected {
             ContentView()
                 .sheet(isPresented: $needsConfig) {
                     NavigationView {
@@ -48,6 +51,8 @@ struct RootView: View {
                     }
                     .navigationViewStyle(.stack)
                 }
+        } else {
+            OfflineView()
         }
     }
 }
