@@ -12,50 +12,51 @@ struct PlaylistListView: View {
     @State private var hasMore = true
 
     var body: some View {
-        List {
-            Section {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        tagChip("推荐", id: nil)
-                        ForEach(tags, id: \.id) { tag in
-                            tagChip(tag.name, id: tag.id)
+        VStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    tagChip("推荐", id: nil)
+                    ForEach(tags, id: \.id) { tag in
+                        tagChip(tag.name, id: tag.id)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+            }
+            .background(Color(.systemGroupedBackground))
+
+            List {
+                if isLoading {
+                    Section {
+                        HStack { Spacer(); ProgressView(); Spacer() }.padding(30)
+                    }
+                } else if playlists.isEmpty {
+                    Section {
+                        Text("暂无歌单")
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(30)
+                    }
+                } else {
+                    Section {
+                        ForEach(playlists) { pl in
+                            NavigationLink(destination: PlaylistDetailView(playlist: pl, source: source)) {
+                                OnlinePlaylistRow(playlist: pl)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if isLoadingMore {
+                            HStack { Spacer(); ProgressView(); Spacer() }
+                        } else if hasMore {
+                            Color.clear
+                                .frame(height: 1)
+                                .onAppear { loadMore() }
                         }
                     }
-                    .padding(.vertical, 6)
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-            }
-            if isLoading {
-                Section {
-                    HStack { Spacer(); ProgressView(); Spacer() }.padding(30)
-                }
-            } else if playlists.isEmpty {
-                Section {
-                    Text("暂无歌单")
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(30)
-                }
-            } else {
-                Section {
-                    ForEach(playlists) { pl in
-                        NavigationLink(destination: PlaylistDetailView(playlist: pl, source: source)) {
-                            OnlinePlaylistRow(playlist: pl)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if isLoadingMore {
-                        HStack { Spacer(); ProgressView(); Spacer() }
-                    } else if hasMore {
-                        Color.clear
-                            .frame(height: 1)
-                            .onAppear { loadMore() }
-                    }
                 }
             }
+            .listStyle(.insetGrouped)
         }
-        .listStyle(.insetGrouped)
         .safeAreaInset(edge: .bottom) {
             Color.clear
                 .frame(height: 120)
