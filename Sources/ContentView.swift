@@ -117,7 +117,7 @@ struct HomeView: View {
 
     // MARK: 音源选择
     private var sourcePicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        UIKitHorizontalScrollView {
             HStack(spacing: 8) {
                 ForEach(MusicSources.all, id: \.id) { s in
                     Button {
@@ -136,6 +136,7 @@ struct HomeView: View {
             }
             .padding(.horizontal)
         }
+        .frame(height: 34)
     }
 
     // MARK: 热门榜单
@@ -203,7 +204,7 @@ struct HomeView: View {
             }
             .padding(.horizontal)
 
-            ScrollView(.horizontal, showsIndicators: false) {
+            UIKitHorizontalScrollView {
                 HStack(spacing: 8) {
                     tagChip("推荐", id: nil)
                     ForEach(squareTags, id: \.id) { tag in
@@ -212,7 +213,7 @@ struct HomeView: View {
                 }
                 .padding(.horizontal)
             }
-            .simultaneousGesture(DragGesture())
+            .frame(height: 36)
 
             if squareLoading {
                 HStack {
@@ -487,7 +488,7 @@ struct SearchView: View {
     }
 
     private var sourcePicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        UIKitHorizontalScrollView {
             HStack(spacing: 8) {
                 ForEach(MusicSources.all, id: \.id) { s in
                     Button {
@@ -507,6 +508,7 @@ struct SearchView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
+        .frame(height: 42)
     }
 
     private var searchField: some View {

@@ -13,7 +13,7 @@ struct PlaylistListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            UIKitHorizontalScrollView {
                 HStack(spacing: 8) {
                     tagChip("推荐", id: nil)
                     ForEach(tags, id: \.id) { tag in
@@ -23,6 +23,7 @@ struct PlaylistListView: View {
                 .padding(.horizontal)
                 .padding(.vertical, 6)
             }
+            .frame(height: 40)
             .background(Color(.systemGroupedBackground))
 
             List {
