@@ -3,7 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @State private var selectedTab = 0
     @State private var isKeyboardVisible = false
-    @EnvironmentObject var player: PlayerManager
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -34,13 +33,7 @@ struct ContentView: View {
             }
 
             if !isKeyboardVisible {
-                MiniPlayerView()
-                    .offset(y: -48)
-                    .onTapGesture {
-                        if player.currentSong != nil {
-                            player.showPlayer = true
-                        }
-                    }
+                MiniPlayerLayer()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -53,18 +46,37 @@ struct ContentView: View {
                 isKeyboardVisible = false
             }
         }
-        .alert("播放错误", isPresented: Binding(
-            get: { player.playbackError != nil },
-            set: { if !$0 { player.playbackError = nil } }
-        )) {
-            Button("确定", role: .cancel) { player.playbackError = nil }
-        } message: {
-            Text(player.playbackError ?? "")
-        }
-        .fullScreenCover(isPresented: $player.showPlayer) {
-            PlayerView()
-                .environmentObject(player)
-        }
+    }
+}
+
+/// 迷你播放器 + 与播放器相关的全局弹层。
+///
+/// 单独持有 PlayerManager 的观察，避免播放进度（currentTime 每 0.5s 变化）
+/// 触发 ContentView 整棵视图树重绘——否则 LibraryView 的 List 会被重建，
+/// 导致播放时左滑删除弹回、点不到删除按钮。
+struct MiniPlayerLayer: View {
+    @EnvironmentObject var player: PlayerManager
+
+    var body: some View {
+        MiniPlayerView()
+            .offset(y: -48)
+            .onTapGesture {
+                if player.currentSong != nil {
+                    player.showPlayer = true
+                }
+            }
+            .alert("播放错误", isPresented: Binding(
+                get: { player.playbackError != nil },
+                set: { if !$0 { player.playbackError = nil } }
+            )) {
+                Button("确定", role: .cancel) { player.playbackError = nil }
+            } message: {
+                Text(player.playbackError ?? "")
+            }
+            .fullScreenCover(isPresented: $player.showPlayer) {
+                PlayerView()
+                    .environmentObject(player)
+            }
     }
 }
 
