@@ -39,18 +39,20 @@ struct PlaylistListView: View {
                     }
                 } else {
                     Section {
-                        ForEach(playlists) { pl in
+                        ForEach(Array(playlists.enumerated()), id: \.element.id) { idx, pl in
                             NavigationLink(destination: PlaylistDetailView(playlist: pl, source: source)) {
                                 OnlinePlaylistRow(playlist: pl)
                             }
                             .buttonStyle(.plain)
+                            .onAppear {
+                                // 预加载：滚到倒数第 4 行就开始加载下一页，避免到底部闪一下
+                                if idx >= playlists.count - 4 && hasMore {
+                                    loadMore()
+                                }
+                            }
                         }
                         if isLoadingMore {
                             HStack { Spacer(); ProgressView(); Spacer() }
-                        } else if hasMore {
-                            Color.clear
-                                .frame(height: 1)
-                                .onAppear { loadMore() }
                         }
                     }
                 }

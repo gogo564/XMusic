@@ -22,6 +22,11 @@ struct DownloadsView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear
+                .frame(height: 120)
+                .allowsHitTesting(false)
+        }
         .navigationTitle("下载")
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarLeading) {

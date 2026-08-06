@@ -423,7 +423,7 @@ struct SearchView: View {
             if hasSearched {
                 modePicker
             }
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 if !hasSearched {
                     VStack(spacing: 10) {
                         Image(systemName: "magnifyingglass")
@@ -842,6 +842,11 @@ struct ArtistDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear
+                .frame(height: 120)
+                .allowsHitTesting(false)
+        }
         .navigationTitle(artist.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -985,6 +990,11 @@ struct AlbumDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear
+                .frame(height: 120)
+                .allowsHitTesting(false)
+        }
         .navigationTitle(album.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {

@@ -145,6 +145,11 @@ struct ServerPlaylistDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear
+                .frame(height: 120)
+                .allowsHitTesting(false)
+        }
     }
 
     // MARK: - Actions

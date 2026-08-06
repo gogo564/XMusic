@@ -92,6 +92,11 @@ struct LibraryFavoritesView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear
+                        .frame(height: 120)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .navigationTitle("收藏")
@@ -234,6 +239,11 @@ struct LibraryAlbumDetailView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear
+                        .frame(height: 120)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .navigationTitle(album.name)
