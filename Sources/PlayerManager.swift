@@ -63,6 +63,7 @@ final class PlayerManager: ObservableObject {
     private var lrc = LRC.parse(nil)
     private var shuffledIndices: [Int] = []
     private var prefetchTask: Task<Void, Never>?
+    private var prefetchedURLs: [String: String] = [:]
 
     private init() {
         self.quality = AppConfigStore.shared.config.defaultQuality
@@ -381,6 +382,9 @@ final class PlayerManager: ObservableObject {
         parsedLyrics = []
         currentLyricIndex = -1
 
+        // 预取下一首：与当前曲解析并行，切歌时下一首 URL 已就绪，省去解析等待
+        prefetchNext()
+
         // 0. Downloaded-file first (Documents/Downloads/) - instant playback
         if let localURL = DownloadService.shared.localURL(for: song) {
             startPlayback(url: localURL, song: song, sourceName: "下载", qualityName: "本地")
@@ -391,6 +395,13 @@ final class PlayerManager: ObservableObject {
         // 1. Cache-first
         if MusicCacheManager.shared.isCached(id: song.id), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id) {
             startPlayback(url: cachedURL, song: song, sourceName: "缓存", qualityName: qualityName.isEmpty ? "缓存" : qualityName)
+            Task { await loadLyric(for: song) }
+            return
+        }
+
+        // 1.5 Prefetched URL：上一首播放时已预取好的下一首地址，直接起播省一次服务器往返
+        if let preURL = prefetchedURLs.removeValue(forKey: song.id), let url = URL(string: preURL) {
+            startPlayback(url: url, song: song, sourceName: song.source, qualityName: qualityName)
             Task { await loadLyric(for: song) }
             return
         }
@@ -419,7 +430,10 @@ final class PlayerManager: ObservableObject {
 
     private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String) {
         let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 4
+        item.preferredPeakBitRate = 0
         player.replaceCurrentItem(with: item)
+        player.automaticallyWaitsToMinimizeStalling = false
         observeItemStatus(item)
         self.sourceName = sourceName
         self.qualityName = qualityName
@@ -432,7 +446,6 @@ final class PlayerManager: ObservableObject {
         updateNowPlaying()
         saveLastPlayed()
         saveRecent(song: song)
-        prefetchNext()
     }
 
     /// 预解析+预缓存队列下一首：当前曲开始播放后，后台解析下一首的播放地址并下载到缓存，
@@ -452,6 +465,7 @@ final class PlayerManager: ObservableObject {
             do {
                 let result = try await LXAPIClient.shared.getPlaybackURL(for: next, quality: prefetchQuality, autoSwitch: autoSwitch)
                 guard !Task.isCancelled else { return }
+                self.prefetchedURLs[next.id] = result.url
                 MusicCacheManager.shared.startCaching(url: result.url, id: next.id)
             } catch {
                 // 预取失败不影响当前播放，静默忽略
