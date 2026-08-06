@@ -727,6 +727,8 @@ struct ArtistDetailView: View {
     @State private var songs: [LXSong] = []
     @State private var albums: [LXAlbum] = []
     @State private var isLoading = true
+    @State private var isLoadingSongs = true
+    @State private var isLoadingAlbums = true
     @State private var showAlbums = false
 
     var body: some View {
@@ -761,7 +763,15 @@ struct ArtistDetailView: View {
             }
             if showAlbums {
                 Section(header: Text("专辑")) {
-                    if albums.isEmpty {
+                    if isLoadingAlbums {
+                        HStack {
+                            ProgressView()
+                            Text("加载中…")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 6)
+                    } else if albums.isEmpty {
                         Text("暂无专辑")
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
@@ -786,7 +796,15 @@ struct ArtistDetailView: View {
                 }
             } else {
                 Section(header: Text("热门歌曲")) {
-                    if songs.isEmpty {
+                    if isLoadingSongs {
+                        HStack {
+                            ProgressView()
+                            Text("加载中…")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 6)
+                    } else if songs.isEmpty {
                         Text("暂无歌曲")
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
@@ -841,11 +859,39 @@ struct ArtistDetailView: View {
     @MainActor
     private func load() async {
         isLoading = true
-        async let songsTask = LXAPIClient.shared.getArtistSongs(source: source, artistID: artist.id)
-        async let albumsTask = LXAPIClient.shared.getArtistAlbums(source: source, artistID: artist.id)
-        songs = await (try? songsTask) ?? []
-        albums = ((try? await albumsTask) ?? []).map(LXAlbum.init)
+        isLoadingSongs = true
+        isLoadingAlbums = true
+        // 专辑独立加载
+        Task {
+            let arr = ((try? await LXAPIClient.shared.getArtistAlbums(source: source, artistID: artist.id)) ?? [])
+            await MainActor.run {
+                albums = arr.map(LXAlbum.init)
+                isLoadingAlbums = false
+            }
+        }
+        // 歌曲先拉第 1 页立即展示，剩余页后台合并
+        let first = (try? await LXAPIClient.shared.getArtistSongs(source: source, artistID: artist.id, page: 1)) ?? ArtistSongsPage(list: [], total: 0)
+        songs = first.list
+        isLoadingSongs = false
         isLoading = false
+        let total = first.total
+        let totalPages = max(1, Int(ceil(Double(total) / 100.0)))
+        if totalPages > 1 && first.list.count < total {
+            var extra: [LXSong] = []
+            for p in 2...totalPages {
+                if let page = try? await LXAPIClient.shared.getArtistSongs(source: source, artistID: artist.id, page: p) {
+                    extra.append(contentsOf: page.list)
+                    if page.list.isEmpty { break }
+                }
+            }
+            await MainActor.run {
+                var merged = first.list
+                for s in extra where !merged.contains(where: { $0.id == s.id }) {
+                    merged.append(s)
+                }
+                songs = merged
+            }
+        }
     }
 
     private func playAll() {

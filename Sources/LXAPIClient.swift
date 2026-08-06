@@ -23,6 +23,11 @@ struct PlaybackURLResult {
     let requestedSource: String
 }
 
+struct ArtistSongsPage {
+    let list: [LXSong]
+    let total: Int
+}
+
 struct LyricResult {
     let lyric: String?
     let translated: String?
@@ -460,8 +465,8 @@ final class LXAPIClient {
         return arr.map(LXOnlinePlaylist.init)
     }
 
-    /// 歌手歌曲（服务器循环拉取全部）
-    func getArtistSongs(source: String, artistID: String, order: String = "hot") async throws -> [LXSong] {
+    /// 歌手歌曲分页拉取：page>0 返回 {list, total}；page=0 走服务器全量模式（向后兼容）
+    func getArtistSongs(source: String, artistID: String, order: String = "hot", page: Int = 0) async throws -> ArtistSongsPage {
         let cfg = AppConfigStore.shared.config
         var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/artistSongs")!
         comps.queryItems = [
@@ -469,9 +474,18 @@ final class LXAPIClient {
             URLQueryItem(name: "source", value: source),
             URLQueryItem(name: "order", value: order),
         ]
-        guard let url = comps.url else { return [] }
+        if page > 0 {
+            comps.queryItems!.append(URLQueryItem(name: "page", value: "\(page)"))
+        }
+        guard let url = comps.url else { return ArtistSongsPage(list: [], total: 0) }
         let (data, _) = try await URLSession.shared.data(from: url)
-        return ((try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []).map(LXSong.init)
+        if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let list = (dict["list"] as? [[String: Any]] ?? []).map(LXSong.init)
+            let total = (dict["total"] as? Int) ?? (dict["total"] as? String).flatMap(Int.init) ?? 0
+            return ArtistSongsPage(list: list, total: total)
+        }
+        let arr = ((try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? [])
+        return ArtistSongsPage(list: arr.map(LXSong.init), total: arr.count)
     }
 
     /// 歌手专辑列表
