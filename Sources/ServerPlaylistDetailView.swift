@@ -30,27 +30,56 @@ struct ServerPlaylistDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            songList
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if isEditing {
-                editBottomBar
-            }
-        }
-        .navigationTitle(title)
+        songList
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItemGroup(placement: .navigationBarLeading) {
+                    if isEditing {
+                        Button {
+                            let allSelected = selectedIDs.count == songs.count
+                            if allSelected {
+                                selectedIDs.removeAll()
+                            } else {
+                                selectedIDs = Set(songs.map { $0.id })
+                            }
+                        } label: {
+                            Text(selectedIDs.count == songs.count ? "取消全选" : "全选")
+                        }
+                        if !songs.isEmpty {
+                            Text("\(selectedIDs.count)/\(songs.count)")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    if kind == .user {
+                    if kind == .user && !isEditing {
                         Button {
                             showRename = true
                         } label: {
                             Image(systemName: "pencil")
                         }
                     }
-                    Button(isEditing ? "完成" : "编辑") {
-                        isEditing.toggle()
-                        selectedIDs.removeAll()
+                    if isEditing {
+                        Button(role: .destructive) {
+                            deleteSelected()
+                        } label: {
+                            Text("删除 (\(selectedIDs.count))")
+                                .fontWeight(.semibold)
+                        }
+                        .disabled(selectedIDs.isEmpty || isDeleting)
+                        .overlay {
+                            if isDeleting {
+                                ProgressView()
+                            }
+                        }
+                    } else {
+                        Button(isEditing ? "完成" : "编辑") {
+                            isEditing.toggle()
+                            selectedIDs.removeAll()
+                        }
                     }
                 }
             }
@@ -58,47 +87,6 @@ struct ServerPlaylistDetailView: View {
                 NewPlaylistSheetView(renameID: playlistID, initialName: title)
                     .environmentObject(playlistStore)
             }
-    }
-
-    private var editBottomBar: some View {
-        HStack {
-            Button {
-                let allSelected = selectedIDs.count == songs.count
-                if allSelected {
-                    selectedIDs.removeAll()
-                } else {
-                    selectedIDs = Set(songs.map { $0.id })
-                }
-            } label: {
-                Label(selectedIDs.count == songs.count ? "取消全选" : "全选", systemImage: "checklist")
-            }
-            Spacer()
-            if !songs.isEmpty {
-                Text("\(selectedIDs.count)/\(songs.count)")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            Button(role: .destructive) {
-                deleteSelected()
-            } label: {
-                Text("删除 (\(selectedIDs.count))")
-                    .font(.system(size: 15, weight: .semibold))
-            }
-            .disabled(selectedIDs.isEmpty || isDeleting)
-            .overlay {
-                if isDeleting {
-                    ProgressView()
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
-        .overlay(alignment: .top) {
-            Divider()
-        }
     }
 
     // MARK: - 同一个列表（编辑模式就地加复选框，不做整页替换）

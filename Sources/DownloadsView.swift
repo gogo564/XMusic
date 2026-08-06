@@ -11,30 +11,51 @@ struct DownloadsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            List {
-                if !downloader.activeSongs.isEmpty {
-                    activeSection
-                }
-                if downloader.downloadedSongs.isEmpty && downloader.activeSongs.isEmpty {
-                    emptySection
-                } else if !downloader.downloadedSongs.isEmpty {
-                    downloadedSection
-                }
+        List {
+            if !downloader.activeSongs.isEmpty {
+                activeSection
             }
-            .listStyle(.insetGrouped)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if isEditing {
-                editBottomBar
+            if downloader.downloadedSongs.isEmpty && downloader.activeSongs.isEmpty {
+                emptySection
+            } else if !downloader.downloadedSongs.isEmpty {
+                downloadedSection
             }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle("下载")
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarLeading) {
+                if isEditing {
+                    Button {
+                        let allSelected = selectedIDs.count == downloader.downloadedSongs.count
+                        if allSelected {
+                            selectedIDs.removeAll()
+                        } else {
+                            selectedIDs = Set(downloadedSorted.map { $0.id })
+                        }
+                    } label: {
+                        Text(selectedIDs.count == downloader.downloadedSongs.count ? "取消全选" : "全选")
+                    }
+                    Text("\(selectedIDs.count)/\(downloader.downloadedSongs.count)")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+            }
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
                 if !downloader.downloadedSongs.isEmpty {
-                    Button(isEditing ? "完成" : "编辑") {
-                        isEditing.toggle()
-                        selectedIDs.removeAll()
+                    if isEditing {
+                        Button(role: .destructive) {
+                            deleteSelected()
+                        } label: {
+                            Text("删除 (\(selectedIDs.count))")
+                                .fontWeight(.semibold)
+                        }
+                        .disabled(selectedIDs.isEmpty)
+                    } else {
+                        Button(isEditing ? "完成" : "编辑") {
+                            isEditing.toggle()
+                            selectedIDs.removeAll()
+                        }
                     }
                 }
             }
@@ -117,40 +138,6 @@ struct DownloadsView: View {
                         }
                     }
             }
-        }
-    }
-
-    private var editBottomBar: some View {
-        HStack {
-            Button {
-                let allSelected = selectedIDs.count == downloader.downloadedSongs.count
-                if allSelected {
-                    selectedIDs.removeAll()
-                } else {
-                    selectedIDs = Set(downloadedSorted.map { $0.id })
-                }
-            } label: {
-                Label(selectedIDs.count == downloader.downloadedSongs.count ? "取消全选" : "全选", systemImage: "checklist")
-            }
-            Spacer()
-            Text("\(selectedIDs.count)/\(downloader.downloadedSongs.count)")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.secondary)
-            Spacer()
-            Button(role: .destructive) {
-                deleteSelected()
-            } label: {
-                Text("删除 (\(selectedIDs.count))")
-                    .font(.system(size: 15, weight: .semibold))
-            }
-            .disabled(selectedIDs.isEmpty)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
-        .overlay(alignment: .top) {
-            Divider()
         }
     }
 
