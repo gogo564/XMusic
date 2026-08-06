@@ -30,13 +30,14 @@ struct ServerPlaylistDetailView: View {
     }
 
     var body: some View {
-        songList
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if isEditing {
-                    editBottomBar
-                }
+        VStack(spacing: 0) {
+            songList
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if isEditing {
+                editBottomBar
             }
-            .navigationTitle(title)
+        }
+        .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {

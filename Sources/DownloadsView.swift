@@ -11,18 +11,19 @@ struct DownloadsView: View {
     }
 
     var body: some View {
-        List {
-            if !downloader.activeSongs.isEmpty {
-                activeSection
+        VStack(spacing: 0) {
+            List {
+                if !downloader.activeSongs.isEmpty {
+                    activeSection
+                }
+                if downloader.downloadedSongs.isEmpty && downloader.activeSongs.isEmpty {
+                    emptySection
+                } else if !downloader.downloadedSongs.isEmpty {
+                    downloadedSection
+                }
             }
-            if downloader.downloadedSongs.isEmpty && downloader.activeSongs.isEmpty {
-                emptySection
-            } else if !downloader.downloadedSongs.isEmpty {
-                downloadedSection
-            }
-        }
-        .listStyle(.insetGrouped)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .listStyle(.insetGrouped)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             if isEditing {
                 editBottomBar
             }
@@ -34,13 +35,6 @@ struct DownloadsView: View {
                     Button(isEditing ? "完成" : "编辑") {
                         isEditing.toggle()
                         selectedIDs.removeAll()
-                    }
-                }
-            }
-            ToolbarItem(placement: .bottomBar) {
-                Group {
-                    if isEditing {
-                        editBottomBar
                     }
                 }
             }
