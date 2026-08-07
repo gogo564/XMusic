@@ -104,6 +104,7 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 25) {
                 sourcePicker
+                recommendSection
                 rankSection
                 squareSection
                 if !hotKeywords.isEmpty {
@@ -149,6 +150,22 @@ struct HomeView: View {
             .padding(.horizontal)
         }
         .frame(height: 34)
+    }
+
+    // MARK: 猜你喜欢（汽水式竖滑推荐）
+    private var recommendSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("🎧 猜你喜欢")
+                    .font(.title2.bold())
+                Spacer()
+                Text("竖滑切换 · 自动预播")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal)
+            RecommendFeedView(pageHeight: 460)
+        }
     }
 
     // MARK: 热门榜单

@@ -133,7 +133,7 @@ final class PlayerManager: ObservableObject {
 
     // MARK: - Public playback API
 
-    func play(song: LXSong, in newQueue: [LXSong]? = nil, index: Int? = nil) {
+    func play(song: LXSong, in newQueue: [LXSong]? = nil, index: Int? = nil, presentPlayer: Bool = true) {
         if let newQueue = newQueue {
             queue = newQueue
             currentIndex = index ?? (newQueue.firstIndex(where: { $0.id == song.id }) ?? 0)
@@ -147,7 +147,7 @@ final class PlayerManager: ObservableObject {
         }
         saveLastPlayed()
         resolveAndPlay(song)
-        showPlayer = true
+        showPlayer = presentPlayer
     }
 
     func play(song: LXSong, atQuality q: String) {
