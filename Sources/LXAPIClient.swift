@@ -385,7 +385,7 @@ final class LXAPIClient {
         }
     }
 
-    // tagGroup: [[name, id]...] flattened from the first-level category list
+    // 返回所有分组下的标签（tx 等平台的 id 可能是数字，需转成 String）
     func getSongListTags(source: String = "wy") async throws -> [(name: String, id: String)] {
         let cfg = AppConfigStore.shared.config
         var comps = URLComponents(string: cfg.normalizedBaseURL + "/api/music/songList/tags")!
@@ -393,15 +393,24 @@ final class LXAPIClient {
         guard let url = comps.url else { return [] }
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tags = obj["tags"] as? [[String: Any]],
-              let first = tags.first,
-              let list = first["list"] as? [[String: Any]] else { return [] }
-        return list.compactMap { tag in
-            if let id = tag["id"] as? String, let name = tag["name"] as? String {
-                return (name, id)
+              let groups = obj["tags"] as? [[String: Any]] else { return [] }
+        var result: [(name: String, id: String)] = []
+        for group in groups {
+            guard let list = group["list"] as? [[String: Any]] else { continue }
+            for tag in list {
+                guard let name = tag["name"] as? String else { continue }
+                let id: String
+                if let s = tag["id"] as? String {
+                    id = s
+                } else if let n = tag["id"] as? NSNumber {
+                    id = n.stringValue
+                } else {
+                    continue
+                }
+                result.append((name, id))
             }
-            return nil
         }
+        return result
     }
 
     func getSongListByTag(source: String = "wy", tagId: String?, page: Int = 1) async throws -> [LXOnlinePlaylist] {
