@@ -34,6 +34,21 @@ struct LyricResult {
     let lxlyric: String?
 }
 
+struct MusicComment {
+    let user: String
+    let avatar: String?
+    let content: String
+    let time: String
+    let likedCount: Int
+    let from: String
+}
+
+struct CommentResult {
+    let comments: [MusicComment]
+    let total: Int
+    let maxPage: Int
+}
+
 final class LXAPIClient {
     static let shared = LXAPIClient()
 
@@ -176,6 +191,42 @@ final class LXAPIClient {
             lyric: obj["lyric"] as? String,
             translated: obj["tlyric"] as? String,
             lxlyric: obj["lxlyric"] as? String
+        )
+    }
+
+    /// 获取歌曲评论（后端聚合各平台）：POST /api/music/comment
+    func getComments(for song: LXSong, type: String = "hot", page: Int = 1, limit: Int = 20) async throws -> CommentResult {
+        let cfg = AppConfigStore.shared.config
+        guard let url = cfg.resolvedURL("/api/music/comment") else { throw LXAPIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "songInfo": song.songInfoPayload,
+            "type": type,
+            "page": page,
+            "limit": limit,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try ensureOK(response)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw LXAPIError.decoding("评论")
+        }
+        let comments: [MusicComment] = (obj["comments"] as? [[String: Any]] ?? []).map { c in
+            MusicComment(
+                user: c["userName"] as? String ?? "",
+                avatar: c["avatar"] as? String,
+                content: c["text"] as? String ?? "",
+                time: c["timeStr"] as? String ?? "",
+                likedCount: c["likedCount"] as? Int ?? 0,
+                from: c["location"] as? String ?? ""
+            )
+        }
+        return CommentResult(
+            comments: comments,
+            total: obj["total"] as? Int ?? 0,
+            maxPage: obj["maxPage"] as? Int ?? 1
         )
     }
 

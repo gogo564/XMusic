@@ -22,6 +22,7 @@ struct PlayerView: View {
     @State private var feedActive = false
     @State private var feedLoaded = false
     @State private var showingFullLyrics = false
+    @State private var showingComments = false
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
@@ -43,6 +44,10 @@ struct PlayerView: View {
                 PlaylistPickerView(song: song)
                     .environmentObject(playlistStore)
             }
+        }
+        .sheet(isPresented: $showingComments) {
+            CommentsView(song: playerManager.currentSong)
+                .environmentObject(playerManager)
         }
         .onChange(of: playerManager.currentSong?.id) { _ in
             displaySong = playerManager.currentSong
@@ -489,6 +494,7 @@ struct PlayerView: View {
                 Spacer()
 
                 downloadButton
+                commentButton
                 loveButton
             }
             .padding(.horizontal, 24)
@@ -516,6 +522,20 @@ struct PlayerView: View {
             Image(systemName: isLoved ? "heart.fill" : "heart")
                 .font(.title3)
                 .foregroundColor(isLoved ? .red : .white.opacity(0.85))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+    }
+
+    private var commentButton: some View {
+        Button(action: {
+            guard playerManager.currentSong != nil else { return }
+            HapticManager.shared.selection()
+            showingComments = true
+        }) {
+            Image(systemName: "bubble.right")
+                .font(.title3)
+                .foregroundColor(.white.opacity(0.85))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -633,7 +653,7 @@ struct PlayerView: View {
     // MARK: - Controls Section
 
     private var controlsSection: some View {
-        HStack(spacing: 28) {
+        HStack(spacing: 48) {
             Button(action: {
                 playerManager.togglePlayMode()
                 HapticManager.shared.selection()
@@ -641,21 +661,9 @@ struct PlayerView: View {
                 Image(systemName: playerManager.playModeIcon)
                     .font(.body)
                     .foregroundColor(.white.opacity(0.75))
-                    .frame(width: 40, height: 40)
-                    .contentShape(Rectangle())
-            }
-
-            Button(action: {
-                playerManager.playPrevious()
-                HapticManager.shared.selection()
-            }) {
-                Image(systemName: "backward.fill")
-                    .font(.system(size: 26))
-                    .foregroundColor(playerManager.canPlayPrevious() ? .white : .gray)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .disabled(!playerManager.canPlayPrevious())
 
             Button(action: {
                 playerManager.togglePlayPause()
@@ -667,25 +675,13 @@ struct PlayerView: View {
             }
 
             Button(action: {
-                playerManager.playNext()
-                HapticManager.shared.selection()
-            }) {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 26))
-                    .foregroundColor(playerManager.canPlayNext() ? .white : .gray)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .disabled(!playerManager.canPlayNext())
-
-            Button(action: {
                 showingRecentList = true
                 HapticManager.shared.selection()
             }) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.body)
                     .foregroundColor(.white.opacity(0.75))
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
         }
