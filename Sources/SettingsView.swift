@@ -1,8 +1,11 @@
 import SwiftUI
+import SafariServices
 
 struct SettingsView: View {
     @Binding var needsConfig: Bool
     @EnvironmentObject private var playlistStore: PlaylistStore
+
+    @State private var showQRLogin = false
 
     @State private var baseURL = ""
     @State private var username = ""
@@ -39,6 +42,22 @@ struct SettingsView: View {
                 }
                 Toggle("源失效自动切换", isOn: $autoSwitch)
             }
+            Section(header: Text("QQ 音乐账号")) {
+                Button {
+                    showQRLogin = true
+                } label: {
+                    HStack {
+                        Label("扫码更换 QQ 音乐账号", systemImage: "qrcode")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Text("用手机 QQ 扫描二维码登录后立即生效，原账号将被替换。")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
             Section {
                 Button {
                     Task { await testConnection() }
@@ -71,6 +90,9 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showQRLogin) {
+            SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/tx")!)
         }
         .navigationTitle("设置")
         .safeAreaInset(edge: .bottom) {
@@ -146,4 +168,14 @@ struct SettingsView: View {
         }
         isTesting = false
     }
+}
+
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
