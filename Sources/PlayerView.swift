@@ -808,22 +808,18 @@ private struct DominantColorBackground: View {
         Task {
             let c = await Self.dominantColor(from: url)
             await MainActor.run {
-                if let c = c {
-                    color = Color(uiColor: c)
-                } else {
-                    color = .black
-                }
+                color = c.map { Color(uiColor: $0) } ?? .black
             }
         }
     }
 
-    private static func dominantColor(from url: URL) async -> Color? {
+    private static func dominantColor(from url: URL) async -> UIColor? {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
             let c = averageColor(of: cgImage)
             cache.setObject(c, forKey: url.absoluteString as NSString)
-            return Color(uiColor: c)
+            return c
         } catch {
             return nil
         }
