@@ -6,13 +6,14 @@ struct PlayerView: View {
     @EnvironmentObject var downloader: DownloadService
     @Environment(\.dismiss) var dismiss
     @ObservedObject var recentStore = RecentStore.shared
-    @State private var showInPlaceLyrics = false
+    @ObservedObject var engine = RecommendationEngine.shared
     @State private var localTime: Double = 0
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
-    @State private var showRecommend = false
-    @State private var presentMode: RecommendMode = .recommend
+    @State private var feedPage = 0
+    @State private var feedScrollTo: Int?
+    @State private var feedLoaded = false
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
@@ -32,14 +33,15 @@ struct PlayerView: View {
                     .environmentObject(playlistStore)
             }
         }
-        .fullScreenCover(isPresented: $showRecommend) {
-            RecommendFeedView(initialMode: presentMode, isFullScreen: true)
-                .environmentObject(playerManager)
-                .environmentObject(playlistStore)
-                .environmentObject(downloader)
+        .onChange(of: feedPage) { page in
+            playFeed(at: page)
         }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
+            if !feedLoaded {
+                feedLoaded = true
+                Task { await loadFeed() }
+            }
         }
     }
 
@@ -156,12 +158,6 @@ struct PlayerView: View {
                 }
             }
 
-            Button {
-                toggleLyrics()
-            } label: {
-                Label(showInPlaceLyrics ? "隐藏歌词" : "显示歌词", systemImage: "text.quote")
-            }
-
             Menu("定时关闭") {
                 Button("关闭定时") { playerManager.setSleepTimer(minutes: nil) }
                 Button("5 分钟") { playerManager.setSleepTimer(minutes: 5) }
@@ -184,48 +180,115 @@ struct PlayerView: View {
         )
     }
 
-    private func toggleLyrics() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics.toggle() }
-        HapticManager.shared.selection()
-    }
-
-    // MARK: - Body Area (cover <-> full-height lyrics)
+    // MARK: - Body Area（竖滑分页：第 0 页 = 当前歌曲封面+歌词；往下滑 = 推荐卡片，汽水音乐式）
 
     private func bodyArea(width: CGFloat) -> some View {
-        let coverSize = min(width * 0.74, 320)
-        return ZStack {
-            if showInPlaceLyrics {
-                fullLyricsView
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.9)),
-                        removal: .opacity.combined(with: .scale(scale: 0.9))))
-            } else {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 8)
-                    coverCard(size: coverSize)
-                    Spacer(minLength: 8)
-                }
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
-                    removal: .opacity.combined(with: .scale(scale: 0.9))))
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            toggleLyrics()
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { value in
-                    if value.translation.height < -60, !showInPlaceLyrics {
-                        toggleLyrics()
-                    } else if value.translation.height > 60, showInPlaceLyrics {
-                        toggleLyrics()
+        GeometryReader { geo in
+            let pageH = max(geo.size.height, 200)
+            let coverSize = min(width * 0.58, 260)
+            let pageCount = 1 + max(engine.recommendations.count, 0)
+            ZStack {
+                VerticalPager(
+                    pageHeight: pageH,
+                    pageCount: pageCount,
+                    currentPage: $feedPage,
+                    scrollTo: $feedScrollTo
+                ) {
+                    ForEach(0..<pageCount, id: \.self) { i in
+                        if i == 0 {
+                            coverPage(coverSize: coverSize)
+                        } else {
+                            FeedCard(
+                                song: engine.recommendations[i - 1],
+                                queue: engine.recommendations,
+                                index: i - 1,
+                                isActive: feedPage == i,
+                                onLove: { toggleLove(engine.recommendations[i - 1]) },
+                                onSkip: {
+                                    guard pageCount > 1 else { return }
+                                    feedScrollTo = (i + 1) % pageCount
+                                }
+                            )
+                        }
+                        .frame(height: pageH)
                     }
                 }
-        )
+                .frame(height: pageH)
+            }
+        }
+    }
+
+    private func playFeed(at page: Int) {
+        guard page > 0, engine.recommendations.indices.contains(page - 1) else { return }
+        let song = engine.recommendations[page - 1]
+        guard playerManager.currentSong?.id != song.id else { return }
+        playerManager.play(song: song, in: engine.recommendations, index: page - 1, presentPlayer: false)
+    }
+
+    private func loadFeed() async {
+        if playlistStore.listData == nil {
+            await playlistStore.refresh()
+        }
+        let loved = playlistStore.listData?.loveSongs ?? []
+        await engine.load(recent: RecentStore.shared.items, loved: loved)
+    }
+
+    private func selectFeedMode(_ m: RecommendMode) {
+        guard engine.mode != m else { return }
+        HapticManager.shared.selection()
+        engine.setMode(m)
+        Task {
+            await engine.loadCurrentMode()
+            await MainActor.run {
+                feedPage = 1
+                feedScrollTo = 1
+            }
+        }
+    }
+
+    // MARK: - 第 0 页：当前歌曲封面 + 封面下方交错歌词
+
+    private func coverPage(coverSize: CGFloat) -> some View {
+        VStack(spacing: 20) {
+            Spacer(minLength: 0)
+            coverCard(size: coverSize)
+            staggeredLyricsView
+                .padding(.horizontal, 32)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    // 歌词在封面下方：上下 2 行左右交错（当前行靠右、下一行靠左）
+    private var staggeredLyricsView: some View {
+        Group {
+            if playerManager.parsedLyrics.isEmpty {
+                Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
+            } else {
+                let lines = playerManager.parsedLyrics
+                let idx = max(playerManager.currentLyricIndex, 0)
+                let current = lines.indices.contains(idx) ? lines[idx].text : ""
+                let next = lines.indices.contains(idx + 1) ? lines[idx + 1].text : ""
+                VStack(spacing: 10) {
+                    Text(current.isEmpty ? " " : current)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .offset(x: 8)
+                    Text(next.isEmpty ? " " : next)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .offset(x: -8)
+                }
+            }
+        }
     }
 
     // MARK: - Cover Card (square, rounded)
@@ -247,65 +310,6 @@ struct PlayerView: View {
                 )
         }
         .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
-    }
-
-    // MARK: - Full-height Layered Lyrics
-    // 顶部从「正在播放」下方开始，底部到歌名/控制区为止，铺满整块区域。
-
-    private var fullLyricsView: some View {
-        VStack(alignment: .center, spacing: 0) {
-            if playerManager.parsedLyrics.isEmpty {
-                Spacer(minLength: 0)
-                Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
-                    .font(.title3)
-                    .foregroundColor(.white.opacity(0.75))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Spacer(minLength: 0)
-            } else if playerManager.currentLyricIndex < 0 {
-                Spacer(minLength: 0)
-                Text("正在加载歌词…")
-                    .font(.title3)
-                    .foregroundColor(.white.opacity(0.6))
-                Spacer(minLength: 0)
-            } else {
-                Spacer(minLength: 0)
-                VStack(spacing: 18) {
-                    ForEach(visibleLyrics) { item in
-                        Text(item.text)
-                            .font(.body)
-                            .fontWeight(item.diff == 0 ? .bold : .regular)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .foregroundColor(item.text.isEmpty ? .clear : (item.diff == 0 ? .white : .white.opacity(0.45)))
-                            .shadow(color: Color.black.opacity(0.5), radius: 6)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .bottom).combined(with: .opacity),
-                                removal: .move(edge: .top).combined(with: .opacity)))
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 20)
-        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: playerManager.currentLyricIndex)
-    }
-
-    private var visibleLyrics: [VisibleLyric] {
-        let lines = playerManager.parsedLyrics
-        let idx = playerManager.currentLyricIndex
-        guard !lines.isEmpty, idx >= 0, idx < lines.count else { return [] }
-        var out: [VisibleLyric] = []
-        for offset in -2...2 {
-            let li = idx + offset
-            if lines.indices.contains(li) {
-                out.append(VisibleLyric(id: li, diff: offset, text: lines[li].text))
-            } else {
-                out.append(VisibleLyric(id: li, diff: offset, text: ""))
-            }
-        }
-        return out
     }
 
     // MARK: - Track Info & Controls
@@ -348,7 +352,7 @@ struct PlayerView: View {
         }
     }
 
-    // MARK: - 猜你喜欢（播放页入口：弹出菜单选模式，不知道听什么时点这里）
+    // MARK: - 猜你喜欢（播放页入口：弹出菜单切换模式，刷新下方滑屏推荐；不知道听什么时往下滑即可）
 
     private var recommendEntry: some View {
         HStack {
@@ -356,17 +360,20 @@ struct PlayerView: View {
             Menu {
                 ForEach(RecommendMode.allCases) { m in
                     Button {
-                        presentMode = m
-                        showRecommend = true
-                        HapticManager.shared.selection()
+                        selectFeedMode(m)
                     } label: {
-                        Label(m.rawValue, systemImage: m.icon)
+                        if engine.mode == m {
+                            Label(m.rawValue, systemImage: "checkmark")
+                        } else {
+                            Label(m.rawValue, systemImage: m.icon)
+                        }
                     }
                 }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "music.note.list")
-                    Text("🎧 猜你喜欢")
+                    Text("🎧 猜你喜欢 · \(engine.mode.rawValue)")
+                        .lineLimit(1)
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                 }
@@ -585,14 +592,6 @@ struct PlayerView: View {
         let secs = Int(seconds) % 60
         return String(format: "%d:%02d", mins, secs)
     }
-}
-
-/// A single lyric line shown in the in-place layered lyrics view.
-/// `id` is the absolute index in `parsedLyrics`, `diff` is distance from current line (-1/0/1).
-private struct VisibleLyric: Identifiable {
-    let id: Int
-    let diff: Int
-    let text: String
 }
 
 #Preview {

@@ -112,7 +112,6 @@ struct HomeView: View {
                 if !recentStore.items.isEmpty {
                     recentPlayedSection
                 }
-                recommendSection
                 Spacer(minLength: 120)
             }
             .padding(.top)
@@ -150,13 +149,6 @@ struct HomeView: View {
             .padding(.horizontal)
         }
         .frame(height: 34)
-    }
-
-    // MARK: 猜你喜欢（汽水式竖滑推荐）—— 内嵌在首页，三个模式入口；播放页也有独立入口
-    private var recommendSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            RecommendFeedView(initialMode: .recommend, isFullScreen: false, pageHeight: 460)
-        }
     }
 
     // MARK: 热门榜单
