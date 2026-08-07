@@ -265,20 +265,15 @@ final class RecommendationEngine: ObservableObject {
             .map { $0.song }
     }
 
-    private static let allowedSources = ["tx", "wy"] // 推荐只用 QQ + 网易（QQ 有会员，优先）
+    private static let allowedSources = ["tx", "wy", "kw"] // 推荐只用 QQ + 网易 + 酷我（QQ 有会员，优先）
 
     // MARK: - 工具
 
     private func preferredSources(limit: Int) -> [String] {
-        let ranked = profile.topSources.sorted { $0.value > $1.value }.map { $0.key }.filter { Self.allowedSources.contains($0) }
-        let base = ranked.isEmpty ? Self.allowedSources : ranked
+        // 固定优先级：QQ → 网易 → 酷我（QQ 有会员，优先）
         var result: [String] = []
-        for s in base where result.count < limit {
-            result.append(s)
-        }
-        // 兜底补齐：QQ 优先
         for s in Self.allowedSources where result.count < limit {
-            if !result.contains(s) { result.append(s) }
+            result.append(s)
         }
         return result
     }
