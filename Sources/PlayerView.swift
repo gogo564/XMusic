@@ -14,9 +14,8 @@ struct PlayerView: View {
     @State private var showPlaylistPicker = false
     // 滑动换歌：displaySong 为"页面当前展示的歌曲"，起播成功前页面先切，音频起播后再同步
     @State private var displaySong: LXSong?
-    // 拖动跟手用 @GestureState（不触发整个 songPage 重算），复位无动画（由 pageOffset 接管回弹/翻页）
-    @GestureState private var dragOffset: CGFloat = 0
-    @State private var pageOffset: CGFloat = 0
+    // 滑动偏移：拖动跟手、翻页动画、回弹全部用它连续驱动（无跳变）
+    @State private var dragOffset: CGFloat = 0
     @State private var dragTarget: LXSong?
     @State private var dragTargetDirection: CGFloat = 1 // +1=下一页在下方，-1=上一页在上方
     @State private var feedQueue: [LXSong] = []
@@ -81,31 +80,26 @@ struct PlayerView: View {
     private var swipeablePage: some View {
         GeometryReader { geo in
             let pageHeight = geo.size.height
-            // 拖动中跟手用 dragOffset；翻页动画中由 pageOffset 接管
-            let currentOffset = isSwitching ? pageOffset : dragOffset
             ZStack {
                 // 当前页（完整内容）
                 songPage(song: displaySong, width: geo.size.width)
-                    .offset(y: currentOffset)
+                    .offset(y: dragOffset)
 
-                // 目标预览页（仅封面+背景），跟随拖动滑入
+                // 目标预览页（整页布局，跟随拖动滑入）
                 if let target = dragTarget {
                     coverPreview(song: target, width: geo.size.width)
-                        .offset(y: dragTargetDirection * pageHeight + currentOffset)
+                        .offset(y: dragTargetDirection * pageHeight + dragOffset)
                 }
             }
             .background(Color.black)
             .clipped()
             .contentShape(Rectangle())
+            .ignoresSafeArea()
             .gesture(
                 DragGesture(minimumDistance: 20)
-                    .updating($dragOffset) { value, state, _ in
-                        // 拖动跟手（@GestureState 更新不触发整页重算）
-                        state = value.translation.height
-                    }
                     .onChanged { value in
                         guard !isSwitching else { return }
-                        // 只在拖动方向首次确定时设置预览目标，拖动中不重复更新（避免 body 重算）
+                        dragOffset = value.translation.height
                         let newDirection: CGFloat = value.translation.height > 0 ? -1 : 1
                         if newDirection != dragTargetDirection || dragTarget == nil {
                             dragTargetDirection = newDirection
@@ -113,23 +107,24 @@ struct PlayerView: View {
                         }
                     }
                     .onEnded { value in
-                        let predicted = value.predictedEndTranslation.height
+                        guard !isSwitching else { return }
+                        let threshold = pageHeight * 0.22
                         let moved = value.translation.height
-                        // 快速滑动（预测位移远超实际）或位移足够 → 翻页
-                        if predicted < -40 || moved < -80 {
+                        let predicted = value.predictedEndTranslation.height
+                        if moved < -threshold || predicted < -pageHeight * 0.5 {
                             if feedIndex < feedQueue.count - 1 {
-                                commitSwipe(.next, pageHeight: pageHeight, fromOffset: value.translation.height)
+                                commitSwipe(.next, pageHeight: pageHeight)
                             } else {
-                                bounceBack(fromOffset: value.translation.height)
+                                bounceBack()
                             }
-                        } else if predicted > 40 || moved > 80 {
+                        } else if moved > threshold || predicted > pageHeight * 0.5 {
                             if feedIndex > 0 {
-                                commitSwipe(.prev, pageHeight: pageHeight, fromOffset: value.translation.height)
+                                commitSwipe(.prev, pageHeight: pageHeight)
                             } else {
-                                bounceBack(fromOffset: value.translation.height)
+                                bounceBack()
                             }
                         } else {
-                            bounceBack(fromOffset: value.translation.height)
+                            bounceBack()
                         }
                     }
             )
@@ -141,7 +136,8 @@ struct PlayerView: View {
     }
 
     private func updateDragTarget() {
-        if dragTargetDirection < 0 {
+        // direction +1=上滑看下一页（从下方进入）；-1=下滑看上一页（从上方进入）
+        if dragTargetDirection > 0 {
             if feedIndex < feedQueue.count - 1 {
                 dragTarget = feedQueue[feedIndex + 1]
             } else {
@@ -156,26 +152,22 @@ struct PlayerView: View {
         }
     }
 
-    private func bounceBack(fromOffset: CGFloat = 0) {
-        // 把跟手位置快照交给 pageOffset 做回弹动画，避免 @GestureState 瞬时归零跳变
+    private func bounceBack() {
         if isSwitching { return }
         isSwitching = true
-        withAnimation(.none) {
-            pageOffset = fromOffset
-        }
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-            pageOffset = 0
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+            dragOffset = 0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             isSwitching = false
             dragTarget = nil
-            pageOffset = 0
+            dragOffset = 0
         }
     }
 
-    private func commitSwipe(_ direction: SwipeDirection, pageHeight: CGFloat, fromOffset: CGFloat) {
+    private func commitSwipe(_ direction: SwipeDirection, pageHeight: CGFloat) {
         guard !feedQueue.isEmpty else {
-            bounceBack(fromOffset: fromOffset)
+            bounceBack()
             return
         }
         guard !isSwitching else { return }
@@ -188,21 +180,20 @@ struct PlayerView: View {
         let song = feedQueue[targetIndex]
         guard playerManager.currentSong?.id != song.id else {
             isSwitching = false
-            bounceBack(fromOffset: fromOffset)
+            bounceBack()
             return
         }
-        // 抖音式翻页：从当前跟手位置平滑滑出（目标页滑入到位），动画结束后才真正切歌
+        // 抖音式翻页：当前页从跟手位置继续滑出，预览页随之滑入到位，动画结束后切歌
         let targetOffset = direction == .next ? -pageHeight : pageHeight
-        pageOffset = fromOffset
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-            pageOffset = targetOffset
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+            dragOffset = targetOffset
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
             isSwitching = false
             feedIndex = targetIndex
             displaySong = song
             dragTarget = nil
-            pageOffset = 0
+            dragOffset = 0
             playerManager.play(song: song, in: feedQueue, index: targetIndex, presentPlayer: false)
         }
     }
@@ -212,12 +203,14 @@ struct PlayerView: View {
         let coverSize = width - 60
         return ZStack {
             DominantColorBackground(url: coverURL(for: song))
+                .ignoresSafeArea()
 
             LinearGradient(
                 colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.6)],
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer(minLength: 100)
@@ -238,21 +231,44 @@ struct PlayerView: View {
         }
     }
 
-    // 目标预览页：仅封面+背景，滑动过程中显示
+    // 目标预览页：整页布局（铺满背景 + 封面 + 歌名/歌手），跟随拖动滑入
     private func coverPreview(song: LXSong?, width: CGFloat) -> some View {
         let coverSize = width - 60
         return ZStack {
             DominantColorBackground(url: coverURL(for: song))
+                .ignoresSafeArea()
 
             LinearGradient(
                 colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.6)],
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .ignoresSafeArea()
 
-            coverCard(song: song, size: coverSize)
+            VStack(spacing: 0) {
+                Spacer(minLength: 100)
+
+                coverCard(song: song, size: coverSize)
+
+                Spacer(minLength: 40)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(song?.name ?? "未知歌曲")
+                        .font(.title2.bold())
+                        .lineLimit(1)
+                    Text(song?.singer ?? "未知歌手")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.7))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+
+                Spacer(minLength: 0)
+                Spacer(minLength: 16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - 全屏歌词（点击封面进入，抖音式覆盖层）：当前行高亮居中，可滚动，点击/下滑退出
@@ -267,6 +283,7 @@ struct PlayerView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .ignoresSafeArea()
 
             if playerManager.parsedLyrics.isEmpty {
                 VStack(spacing: 10) {
