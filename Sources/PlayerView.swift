@@ -19,6 +19,7 @@ struct PlayerView: View {
     @State private var dragTargetDirection: CGFloat = 1 // +1=下一页在下方，-1=上一页在上方
     @State private var feedQueue: [LXSong] = []
     @State private var feedIndex = 0
+    @State private var isSwitching = false
     @State private var feedActive = false
     @State private var feedLoaded = false
     @State private var showingFullLyrics = false
@@ -95,6 +96,7 @@ struct PlayerView: View {
             .gesture(
                 DragGesture(minimumDistance: 20)
                     .onChanged { value in
+                        guard !isSwitching else { return }
                         pageOffset = value.translation.height
                         updateDragTarget()
                     }
@@ -144,6 +146,8 @@ struct PlayerView: View {
             }
             return
         }
+        guard !isSwitching else { return }
+        isSwitching = true
         let targetIndex: Int
         switch direction {
         case .next: targetIndex = min(feedIndex + 1, feedQueue.count - 1)
@@ -151,20 +155,26 @@ struct PlayerView: View {
         }
         let song = feedQueue[targetIndex]
         guard playerManager.currentSong?.id != song.id else {
+            isSwitching = false
             withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
                 pageOffset = 0
                 dragTarget = nil
             }
             return
         }
-        feedIndex = targetIndex
-        // 页面先切到目标（displaySong），音频异步起播后 currentSong 再同步
-        displaySong = song
-        dragTarget = nil
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-            pageOffset = 0
+        // 抖音式翻页：先让整页继续滑出（目标页滑入到位），动画结束后才真正切歌
+        let targetOffset = direction == .next ? -pageHeight : pageHeight
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
+            pageOffset = targetOffset
         }
-        playerManager.play(song: song, in: feedQueue, index: targetIndex, presentPlayer: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            isSwitching = false
+            feedIndex = targetIndex
+            displaySong = song
+            dragTarget = nil
+            pageOffset = 0
+            playerManager.play(song: song, in: feedQueue, index: targetIndex, presentPlayer: false)
+        }
     }
 
     // 当前完整页：封面主色沉浸背景 + 大封面卡 + 一行歌词 + 底部控制区
