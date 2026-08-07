@@ -11,9 +11,8 @@ struct PlayerView: View {
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
-    @State private var feedPage = 0
-    @State private var feedScrollTo: Int?
-    @State private var feedLoaded = false
+    @State private var showRecommend = false
+    @State private var presentMode: RecommendMode = .recommend
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
@@ -33,15 +32,14 @@ struct PlayerView: View {
                     .environmentObject(playlistStore)
             }
         }
-        .onChange(of: feedPage) { page in
-            playFeed(at: page)
+        .fullScreenCover(isPresented: $showRecommend) {
+            RecommendFeedView(initialMode: presentMode, isFullScreen: true)
+                .environmentObject(playerManager)
+                .environmentObject(playlistStore)
+                .environmentObject(downloader)
         }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
-            if !feedLoaded {
-                feedLoaded = true
-                Task { await loadFeed() }
-            }
         }
     }
 
@@ -180,84 +178,11 @@ struct PlayerView: View {
         )
     }
 
-    // MARK: - Body Area（竖滑分页：第 0 页 = 当前歌曲封面+歌词；往下滑 = 推荐卡片，汽水音乐式）
+    // MARK: - Body Area（正常播放页：封面 + 封面下方交错歌词；整页上滑进入猜你喜欢）
 
     private func bodyArea(width: CGFloat) -> some View {
-        GeometryReader { geo in
-            let pageH = max(geo.size.height, 200)
-            let coverSize = min(width * 0.58, 260)
-            let pageCount = 1 + max(engine.recommendations.count, 0)
-            ZStack {
-                VerticalPager(
-                    pageHeight: pageH,
-                    pageCount: pageCount,
-                    currentPage: $feedPage,
-                    scrollTo: $feedScrollTo
-                ) {
-                    ForEach(0..<pageCount, id: \.self) { i in
-                        pageContent(i: i, coverSize: coverSize, pageH: pageH)
-                    }
-                }
-                .frame(height: pageH)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func pageContent(i: Int, coverSize: CGFloat, pageH: CGFloat) -> some View {
-        if i == 0 {
-            coverPage(coverSize: coverSize)
-                .frame(height: pageH)
-        } else {
-            FeedCard(
-                song: engine.recommendations[i - 1],
-                queue: engine.recommendations,
-                index: i - 1,
-                isActive: feedPage == i,
-                onLove: { toggleLove(engine.recommendations[i - 1]) },
-                onSkip: {
-                    guard pageH > 0 else { return }
-                    let total = 1 + max(engine.recommendations.count, 0)
-                    guard total > 1 else { return }
-                    feedScrollTo = (i + 1) % total
-                }
-            )
-            .frame(height: pageH)
-        }
-    }
-
-    private func playFeed(at page: Int) {
-        guard page > 0, engine.recommendations.indices.contains(page - 1) else { return }
-        let song = engine.recommendations[page - 1]
-        guard playerManager.currentSong?.id != song.id else { return }
-        playerManager.play(song: song, in: engine.recommendations, index: page - 1, presentPlayer: false)
-    }
-
-    private func loadFeed() async {
-        if playlistStore.listData == nil {
-            await playlistStore.refresh()
-        }
-        let loved = playlistStore.listData?.loveSongs ?? []
-        await engine.load(recent: RecentStore.shared.items, loved: loved)
-    }
-
-    private func selectFeedMode(_ m: RecommendMode) {
-        guard engine.mode != m else { return }
-        HapticManager.shared.selection()
-        engine.setMode(m)
-        Task {
-            await engine.loadCurrentMode()
-            await MainActor.run {
-                feedPage = 1
-                feedScrollTo = 1
-            }
-        }
-    }
-
-    // MARK: - 第 0 页：当前歌曲封面 + 封面下方交错歌词
-
-    private func coverPage(coverSize: CGFloat) -> some View {
-        VStack(spacing: 20) {
+        let coverSize = min(width * 0.72, 320)
+        return VStack(spacing: 22) {
             Spacer(minLength: 0)
             coverCard(size: coverSize)
             staggeredLyricsView
@@ -266,6 +191,22 @@ struct PlayerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    if value.translation.height < -70 {
+                        presentMode = engine.mode
+                        showRecommend = true
+                        HapticManager.shared.selection()
+                    }
+                }
+        )
+    }
+
+    private func presentRecommend(_ m: RecommendMode) {
+        HapticManager.shared.selection()
+        presentMode = m
+        showRecommend = true
     }
 
     // 歌词在封面下方：上下 2 行左右交错（当前行靠右、下一行靠左）
@@ -360,7 +301,7 @@ struct PlayerView: View {
         }
     }
 
-    // MARK: - 猜你喜欢（播放页入口：弹出菜单切换模式，刷新下方滑屏推荐；不知道听什么时往下滑即可）
+    // MARK: - 猜你喜欢（播放页入口：弹出菜单切换模式后进入推荐流；整页上滑也可进入）
 
     private var recommendEntry: some View {
         HStack {
@@ -368,7 +309,7 @@ struct PlayerView: View {
             Menu {
                 ForEach(RecommendMode.allCases) { m in
                     Button {
-                        selectFeedMode(m)
+                        presentRecommend(m)
                     } label: {
                         if engine.mode == m {
                             Label(m.rawValue, systemImage: "checkmark")
