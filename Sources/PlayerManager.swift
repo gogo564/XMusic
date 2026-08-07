@@ -147,7 +147,10 @@ final class PlayerManager: ObservableObject {
         }
         saveLastPlayed()
         resolveAndPlay(song)
-        showPlayer = presentPlayer
+        // 只有显式要求 present 才打开播放页；false 时不改动 showPlayer（滑动换歌等场景不能把它关掉）
+        if presentPlayer {
+            showPlayer = true
+        }
     }
 
     func play(song: LXSong, atQuality q: String) {

@@ -19,6 +19,7 @@ struct PlayerView: View {
     @State private var dragTargetDirection: CGFloat = 1 // +1=下一页在下方，-1=上一页在上方
     @State private var feedQueue: [LXSong] = []
     @State private var feedIndex = 0
+    @State private var feedActive = false
     @State private var feedLoaded = false
     @State private var showingFullLyrics = false
 
@@ -45,6 +46,11 @@ struct PlayerView: View {
         }
         .onChange(of: playerManager.currentSong?.id) { _ in
             displaySong = playerManager.currentSong
+            // 若当前歌不在推荐里（手动从歌单/搜索/榜单点的歌），自动退出推荐流回到歌单滑动
+            if feedActive, let cur = playerManager.currentSong,
+               !engine.recommendations.contains(where: { $0.id == cur.id }) {
+                feedActive = false
+            }
             rebuildFeedQueue()
         }
         .onAppear {
@@ -126,6 +132,13 @@ struct PlayerView: View {
     }
 
     private func commitSwipe(_ direction: SwipeDirection, pageHeight: CGFloat) {
+        guard !feedQueue.isEmpty else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                pageOffset = 0
+                dragTarget = nil
+            }
+            return
+        }
         let targetIndex: Int
         switch direction {
         case .next: targetIndex = min(feedIndex + 1, feedQueue.count - 1)
@@ -411,13 +424,16 @@ struct PlayerView: View {
                     Text(current.isEmpty ? " " : current)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(.white)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
                     Text(next.isEmpty ? " " : next)
                         .font(.system(size: 14, weight: .regular))
                         .foregroundColor(.white.opacity(0.55))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 74, alignment: .top)
             }
         }
         .padding(.horizontal, 20)
@@ -686,32 +702,37 @@ struct PlayerView: View {
         await MainActor.run { rebuildFeedQueue() }
     }
 
-    // 队列 = 当前歌曲（不在推荐里时置于开头）+ 推荐；当前歌在推荐里则用推荐本身
+    // 滑动队列：推荐流模式用推荐列表，否则用真实播放队列（歌单内切歌）
     private func rebuildFeedQueue() {
-        var q = engine.recommendations
-        if let cur = playerManager.currentSong, !q.contains(where: { $0.id == cur.id }) {
-            q.insert(cur, at: 0)
+        if feedActive {
+            var q = engine.recommendations
+            if let cur = playerManager.currentSong, !q.contains(where: { $0.id == cur.id }) {
+                q.insert(cur, at: 0)
+            }
+            feedQueue = q
+            feedIndex = q.firstIndex(where: { $0.id == playerManager.currentSong?.id }) ?? 0
+        } else {
+            feedQueue = playerManager.queue
+            feedIndex = max(playerManager.currentIndex, 0)
         }
-        feedQueue = q
-        feedIndex = q.firstIndex(where: { $0.id == playerManager.currentSong?.id }) ?? 0
     }
 
     private func selectFeedMode(_ m: RecommendMode) {
         guard engine.mode != m else { return }
         HapticManager.shared.selection()
         engine.setMode(m)
+        feedActive = true
         Task {
             await engine.loadCurrentMode()
             await MainActor.run { rebuildFeedQueue() }
         }
     }
 
-    // 退出推荐流：清空推荐，回到当前歌单队列（上下滑切歌在歌单内进行）
+    // 退出推荐流：滑动队列回到真实播放队列（上下滑切歌在歌单内进行）
     private func exitFeedMode() {
         HapticManager.shared.selection()
-        let current = playerManager.currentSong
-        feedQueue = current.map { [$0] } ?? []
-        feedIndex = 0
+        feedActive = false
+        rebuildFeedQueue()
     }
 
     private func toggleLove(_ song: LXSong) {
