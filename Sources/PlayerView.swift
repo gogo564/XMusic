@@ -20,6 +20,7 @@ struct PlayerView: View {
     @State private var feedQueue: [LXSong] = []
     @State private var feedIndex = 0
     @State private var feedLoaded = false
+    @State private var showingFullLyrics = false
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
@@ -27,6 +28,9 @@ struct PlayerView: View {
         ZStack {
             swipeablePage
             topOverlay
+            if showingFullLyrics {
+                fullLyricsView
+            }
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingRecentList) {
@@ -89,7 +93,7 @@ struct PlayerView: View {
                         } else if value.translation.height > 70, feedIndex > 0 {
                             commitSwipe(.prev, pageHeight: pageHeight)
                         } else {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
                                 pageOffset = 0
                                 dragTarget = nil
                             }
@@ -128,20 +132,21 @@ struct PlayerView: View {
         case .prev: targetIndex = max(feedIndex - 1, 0)
         }
         let song = feedQueue[targetIndex]
-        // 先落位动画：当前页滑出、目标页滑入
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-            pageOffset = direction == .next ? -pageHeight : pageHeight
-        }
-        // 动画结束后提交：页面先切到目标（displaySong），音频异步起播后 currentSong 再同步
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            feedIndex = targetIndex
-            displaySong = song
-            pageOffset = 0
-            dragTarget = nil
-            if playerManager.currentSong?.id != song.id {
-                playerManager.play(song: song, in: feedQueue, index: targetIndex, presentPlayer: false)
+        guard playerManager.currentSong?.id != song.id else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                pageOffset = 0
+                dragTarget = nil
             }
+            return
         }
+        feedIndex = targetIndex
+        // 页面先切到目标（displaySong），音频异步起播后 currentSong 再同步
+        displaySong = song
+        dragTarget = nil
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+            pageOffset = 0
+        }
+        playerManager.play(song: song, in: feedQueue, index: targetIndex, presentPlayer: false)
     }
 
     // 当前完整页：封面主色沉浸背景 + 大封面卡 + 一行歌词 + 底部控制区
@@ -164,7 +169,6 @@ struct PlayerView: View {
                 Spacer(minLength: 40)
 
                 currentLyricView
-                    .padding(.horizontal, 20)
 
                 Spacer(minLength: 0)
 
@@ -191,6 +195,90 @@ struct PlayerView: View {
             coverCard(song: song, size: coverSize)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - 全屏歌词（点击封面进入，抖音式覆盖层）：当前行高亮居中，可滚动，点击/下滑退出
+
+    private var fullLyricsView: some View {
+        ZStack {
+            DominantColorBackground(url: coverURL(for: playerManager.currentSong))
+                .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.6), .clear, .clear, Color.black.opacity(0.7)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            if playerManager.parsedLyrics.isEmpty {
+                VStack(spacing: 10) {
+                    Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
+                        .font(.title3)
+                        .foregroundColor(.white.opacity(0.75))
+                        .multilineTextAlignment(.center)
+                    Text("点击任意处返回")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.4))
+                }
+                .padding(32)
+            } else {
+                lyricsScroller
+            }
+
+            // 返回提示
+            VStack {
+                Spacer()
+                Text("下滑返回")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.bottom, 40)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            HapticManager.shared.selection()
+            showingFullLyrics = false
+        }
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    // 下滑退出全屏歌词
+                    if value.translation.height > 60 {
+                        HapticManager.shared.selection()
+                        showingFullLyrics = false
+                    }
+                }
+        )
+        .transition(.opacity)
+        .zIndex(10)
+    }
+
+    // 歌词滚动视图：当前行高亮居中，随时间自动滚动到当前行
+    private var lyricsScroller: some View {
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    Spacer(minLength: 140)
+                    ForEach(Array(playerManager.parsedLyrics.enumerated()), id: \.element.id) { index, line in
+                        let isCurrent = index == playerManager.currentLyricIndex
+                        Text(line.text.isEmpty ? " " : line.text)
+                            .font(.system(size: isCurrent ? 21 : 15, weight: isCurrent ? .semibold : .regular))
+                            .foregroundColor(isCurrent ? .white : .white.opacity(0.45))
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .id(index)
+                    }
+                    Spacer(minLength: 140)
+                }
+                .padding(.horizontal, 28)
+            }
+            .onChange(of: playerManager.currentLyricIndex) { _ in
+                guard playerManager.currentLyricIndex >= 0 else { return }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(playerManager.currentLyricIndex, anchor: .center)
+                }
+            }
+        }
     }
 
     // MARK: - 悬浮顶部 ActionBar（不随页滑动）
@@ -220,7 +308,7 @@ struct PlayerView: View {
         .foregroundColor(.white)
     }
 
-    // 模式选择（三模式切换）
+    // 模式选择（三模式切换）+ 播放来源信息
     private var modeMenu: some View {
         Menu {
             ForEach(RecommendMode.allCases) { m in
@@ -234,6 +322,12 @@ struct PlayerView: View {
                     }
                 }
             }
+            Divider()
+            Button(role: .destructive) {
+                exitFeedMode()
+            } label: {
+                Label("退出推荐流", systemImage: "xmark")
+            }
         } label: {
             VStack(spacing: 2) {
                 Text("模式选择")
@@ -245,6 +339,21 @@ struct PlayerView: View {
             .frame(width: 150)
             .contentShape(Rectangle())
         }
+    }
+
+    // 来源 · 音质 · 下载/缓存 信息（显示在封面下方歌名上方）
+    private var playbackInfoLine: String {
+        var parts: [String] = []
+        if !playerManager.sourceName.isEmpty {
+            parts.append(MusicSources.name(playerManager.sourceName))
+        }
+        if !playerManager.qualityName.isEmpty {
+            parts.append(MusicSources.qualityName(playerManager.qualityName))
+        }
+        if !playerManager.playbackOrigin.isEmpty {
+            parts.append(playerManager.playbackOrigin)
+        }
+        return parts.isEmpty ? "" : parts.joined(separator: " · ")
     }
 
     private var topMenu: some View {
@@ -284,32 +393,37 @@ struct PlayerView: View {
         )
     }
 
-    // MARK: - 歌词照搬 AiMusic：封面下方一行，当前行居中、单行省略
+    // MARK: - 歌词：封面下方上下 2 行左对齐（当前行 + 下一行），不截断完整显示
 
     private var currentLyricView: some View {
         Group {
             if playerManager.parsedLyrics.isEmpty {
                 Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
-                    .font(.title3)
+                    .font(.subheadline)
                     .foregroundColor(.white.opacity(0.6))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 let lines = playerManager.parsedLyrics
                 let idx = max(playerManager.currentLyricIndex, 0)
                 let current = lines.indices.contains(idx) ? lines[idx].text : ""
-                Text(current.isEmpty ? " " : current)
-                    .font(.title3)
-                    .fontWeight(.medium)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                let next = lines.indices.contains(idx + 1) ? lines[idx + 1].text : ""
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(current.isEmpty ? " " : current)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(next.isEmpty ? " " : next)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, 20)
     }
 
-    // MARK: - Cover Card (square, rounded, 屏宽-60)
+    // MARK: - Cover Card (square, rounded, 屏宽-60) 点击进入全屏歌词
 
     private func coverCard(song: LXSong?, size: CGFloat) -> some View {
         AsyncImage(url: coverURL(for: song)) { image in
@@ -328,6 +442,10 @@ struct PlayerView: View {
                 )
         }
         .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
+        .onTapGesture {
+            HapticManager.shared.selection()
+            showingFullLyrics = true
+        }
     }
 
     // MARK: - Track Info & Controls
@@ -344,6 +462,12 @@ struct PlayerView: View {
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
                         .lineLimit(1)
+                    if !playbackInfoLine.isEmpty {
+                        Text(playbackInfoLine)
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.55))
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer()
@@ -580,6 +704,14 @@ struct PlayerView: View {
             await engine.loadCurrentMode()
             await MainActor.run { rebuildFeedQueue() }
         }
+    }
+
+    // 退出推荐流：清空推荐，回到当前歌单队列（上下滑切歌在歌单内进行）
+    private func exitFeedMode() {
+        HapticManager.shared.selection()
+        let current = playerManager.currentSong
+        feedQueue = current.map { [$0] } ?? []
+        feedIndex = 0
     }
 
     private func toggleLove(_ song: LXSong) {
