@@ -11,8 +11,11 @@ struct PlayerView: View {
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
-    @State private var showRecommend = false
-    @State private var presentMode: RecommendMode = .recommend
+    @State private var coverOffset: CGFloat = 0
+    @State private var swipeEdge: Edge = .bottom
+    @State private var feedQueue: [LXSong] = []
+    @State private var feedIndex = 0
+    @State private var feedLoaded = false
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
@@ -32,14 +35,15 @@ struct PlayerView: View {
                     .environmentObject(playlistStore)
             }
         }
-        .fullScreenCover(isPresented: $showRecommend) {
-            RecommendFeedView(initialMode: presentMode, isFullScreen: true)
-                .environmentObject(playerManager)
-                .environmentObject(playlistStore)
-                .environmentObject(downloader)
+        .onChange(of: playerManager.currentSong?.id) { _ in
+            rebuildFeedQueue()
         }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
+            if !feedLoaded {
+                feedLoaded = true
+                Task { await loadFeedQueue() }
+            }
         }
     }
 
@@ -178,35 +182,105 @@ struct PlayerView: View {
         )
     }
 
-    // MARK: - Body Area（正常播放页：封面 + 封面下方交错歌词；整页上滑进入猜你喜欢）
+    // MARK: - Body Area（正常播放页：滑动封面换歌 + 封面下方交错歌词）
 
     private func bodyArea(width: CGFloat) -> some View {
         let coverSize = min(width * 0.72, 320)
-        return VStack(spacing: 22) {
-            Spacer(minLength: 0)
-            coverCard(size: coverSize)
+        return VStack(spacing: 18) {
+            swipeableCover(size: coverSize)
             staggeredLyricsView
                 .padding(.horizontal, 32)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // 滑动封面换歌（汽水式）：上滑下一首、下滑上一首，带滑动过渡
+    private func swipeableCover(size: CGFloat) -> some View {
+        ZStack {
+            coverCard(size: size)
+                .id(playerManager.currentSong?.id)
+                .transition(coverTransition)
+                .offset(y: coverOffset)
+        }
+        .frame(width: size, height: size)
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30)
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onChanged { value in
+                    coverOffset = value.translation.height
+                }
                 .onEnded { value in
                     if value.translation.height < -70 {
-                        presentMode = engine.mode
-                        showRecommend = true
-                        HapticManager.shared.selection()
+                        swipeNext()
+                    } else if value.translation.height > 70 {
+                        swipePrev()
+                    }
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        coverOffset = 0
                     }
                 }
         )
     }
 
-    private func presentRecommend(_ m: RecommendMode) {
+    private var coverTransition: AnyTransition {
+        let insertEdge: Edge = swipeEdge
+        let removeEdge: Edge = (swipeEdge == .top) ? .bottom : .top
+        return .asymmetric(
+            insertion: .move(edge: insertEdge).combined(with: .opacity),
+            removal: .move(edge: removeEdge).combined(with: .opacity)
+        )
+    }
+
+    private func swipeNext() {
+        guard !feedQueue.isEmpty else { return }
+        feedIndex = min(feedIndex + 1, feedQueue.count - 1)
+        swipeEdge = .bottom
+        let song = feedQueue[feedIndex]
+        if playerManager.currentSong?.id != song.id {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
+            }
+        }
+    }
+
+    private func swipePrev() {
+        guard feedIndex > 0 else { return }
+        feedIndex -= 1
+        swipeEdge = .top
+        let song = feedQueue[feedIndex]
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
+        }
+    }
+
+    private func loadFeedQueue() async {
+        if playlistStore.listData == nil {
+            await playlistStore.refresh()
+        }
+        let loved = playlistStore.listData?.loveSongs ?? []
+        await engine.load(recent: RecentStore.shared.items, loved: loved)
+        await MainActor.run { rebuildFeedQueue() }
+    }
+
+    // 队列 = 当前歌曲（不在推荐里时置于开头）+ 推荐；当前歌在推荐里则用推荐本身
+    private func rebuildFeedQueue() {
+        var q = engine.recommendations
+        if let cur = playerManager.currentSong, !q.contains(where: { $0.id == cur.id }) {
+            q.insert(cur, at: 0)
+        }
+        feedQueue = q
+        feedIndex = q.firstIndex(where: { $0.id == playerManager.currentSong?.id }) ?? 0
+    }
+
+    private func selectFeedMode(_ m: RecommendMode) {
+        guard engine.mode != m else { return }
         HapticManager.shared.selection()
-        presentMode = m
-        showRecommend = true
+        engine.setMode(m)
+        Task {
+            await engine.loadCurrentMode()
+            await MainActor.run { rebuildFeedQueue() }
+        }
     }
 
     // 歌词在封面下方：上下 2 行左右交错（当前行靠右、下一行靠左）
@@ -301,7 +375,7 @@ struct PlayerView: View {
         }
     }
 
-    // MARK: - 猜你喜欢（播放页入口：弹出菜单切换模式后进入推荐流；整页上滑也可进入）
+    // MARK: - 猜你喜欢（弹出菜单切换推荐模式，直接滑动封面换歌）
 
     private var recommendEntry: some View {
         HStack {
@@ -309,7 +383,7 @@ struct PlayerView: View {
             Menu {
                 ForEach(RecommendMode.allCases) { m in
                     Button {
-                        presentRecommend(m)
+                        selectFeedMode(m)
                     } label: {
                         if engine.mode == m {
                             Label(m.rawValue, systemImage: "checkmark")
