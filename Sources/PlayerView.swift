@@ -195,27 +195,34 @@ struct PlayerView: View {
                     scrollTo: $feedScrollTo
                 ) {
                     ForEach(0..<pageCount, id: \.self) { i in
-                        if i == 0 {
-                            coverPage(coverSize: coverSize)
-                        } else {
-                            FeedCard(
-                                song: engine.recommendations[i - 1],
-                                queue: engine.recommendations,
-                                index: i - 1,
-                                isActive: feedPage == i,
-                                onLove: { toggleLove(engine.recommendations[i - 1]) },
-                                onSkip: {
-                                    guard pageCount > 1 else { return }
-                                    feedScrollTo = (i + 1) % pageCount
-                                }
-                            )
-                        }
-                        .frame(height: pageH)
+                        pageContent(i: i, coverSize: coverSize, pageH: pageH)
                     }
                 }
                 .frame(height: pageH)
             }
         }
+    }
+
+    @ViewBuilder
+    private func pageContent(i: Int, coverSize: CGFloat, pageH: CGFloat) -> some View {
+        if i == 0 {
+            coverPage(coverSize: coverSize)
+        } else {
+            FeedCard(
+                song: engine.recommendations[i - 1],
+                queue: engine.recommendations,
+                index: i - 1,
+                isActive: feedPage == i,
+                onLove: { toggleLove(engine.recommendations[i - 1]) },
+                onSkip: {
+                    guard pageH > 0 else { return }
+                    let total = 1 + max(engine.recommendations.count, 0)
+                    guard total > 1 else { return }
+                    feedScrollTo = (i + 1) % total
+                }
+            )
+        }
+        .frame(height: pageH)
     }
 
     private func playFeed(at page: Int) {
