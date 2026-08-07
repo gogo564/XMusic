@@ -28,7 +28,6 @@ struct RecommendFeedView: View {
                 GeometryReader { geo in
                     VStack(spacing: 10) {
                         header
-                        modeChips
                         feedArea(pageHeight: max(geo.size.height - 120, 300))
                     }
                 }
@@ -38,12 +37,9 @@ struct RecommendFeedView: View {
                         Text("🎧 猜你喜欢")
                             .font(.title2.bold())
                         Spacer()
-                        Text("竖滑切换 · 自动预播")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        modeMenu
                     }
                     .padding(.horizontal)
-                    modeChips
                     feedArea(pageHeight: pageHeight)
                 }
             }
@@ -74,38 +70,42 @@ struct RecommendFeedView: View {
             Text("🎧 猜你喜欢")
                 .font(.headline)
             Spacer()
-            Color.clear
-                .frame(width: 22, height: 22)
+            modeMenu
         }
         .padding(.horizontal)
         .padding(.top, 4)
     }
 
-    // MARK: - 模式切换
+    // MARK: - 模式切换（弹出菜单）
 
-    private var modeChips: some View {
-        HStack(spacing: 8) {
+    private var modeMenu: some View {
+        Menu {
             ForEach(RecommendMode.allCases) { m in
                 Button {
                     selectMode(m)
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: m.icon)
-                            .font(.system(size: 11))
-                        Text(m.rawValue)
-                            .font(.system(size: 13, weight: .medium))
+                    if engine.mode == m {
+                        Label(m.rawValue, systemImage: "checkmark")
+                    } else {
+                        Label(m.rawValue, systemImage: m.icon)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(engine.mode == m ? Color.accentColor : Color(.systemGray5))
-                    .foregroundColor(engine.mode == m ? .white : .primary)
-                    .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
             }
-            Spacer()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: engine.mode.icon)
+                Text(engine.mode.rawValue)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundColor(.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color(.systemGray5))
+            .clipShape(Capsule())
         }
-        .padding(.horizontal)
     }
 
     private func selectMode(_ m: RecommendMode) {

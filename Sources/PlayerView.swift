@@ -348,39 +348,36 @@ struct PlayerView: View {
         }
     }
 
-    // MARK: - 猜你喜欢（播放页 3 模式入口，不知道听什么时点这里）
+    // MARK: - 猜你喜欢（播放页入口：弹出菜单选模式，不知道听什么时点这里）
 
     private var recommendEntry: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("🎧 猜你喜欢")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.white.opacity(0.9))
-                Text("不知道听什么？")
-                    .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.55))
+        HStack {
+            Spacer()
+            Menu {
+                ForEach(RecommendMode.allCases) { m in
+                    Button {
+                        presentMode = m
+                        showRecommend = true
+                        HapticManager.shared.selection()
+                    } label: {
+                        Label(m.rawValue, systemImage: m.icon)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "music.note.list")
+                    Text("🎧 猜你喜欢")
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.16))
+                .clipShape(Capsule())
             }
             Spacer()
-            ForEach(RecommendMode.allCases) { m in
-                Button {
-                    presentMode = m
-                    showRecommend = true
-                    HapticManager.shared.selection()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: m.icon)
-                            .font(.system(size: 11))
-                        Text(m.rawValue)
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Color.white.opacity(0.16))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
         }
         .padding(.horizontal, 24)
     }
