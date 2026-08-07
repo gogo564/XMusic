@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct PlayerView: View {
     @EnvironmentObject var playerManager: PlayerManager
@@ -11,8 +12,9 @@ struct PlayerView: View {
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
-    @State private var coverOffset: CGFloat = 0
+    @State private var pageOffset: CGFloat = 0
     @State private var swipeEdge: Edge = .bottom
+    @State private var coverDominantColor: Color = .black
     @State private var feedQueue: [LXSong] = []
     @State private var feedIndex = 0
     @State private var feedLoaded = false
@@ -21,8 +23,8 @@ struct PlayerView: View {
 
     var body: some View {
         ZStack {
-            backgroundBlur
-            mainPlayerView
+            swipeablePage
+            topOverlay
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingRecentList) {
@@ -37,9 +39,11 @@ struct PlayerView: View {
         }
         .onChange(of: playerManager.currentSong?.id) { _ in
             rebuildFeedQueue()
+            updateDominantColor()
         }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
+            updateDominantColor()
             if !feedLoaded {
                 feedLoaded = true
                 Task { await loadFeedQueue() }
@@ -47,102 +51,134 @@ struct PlayerView: View {
         }
     }
 
-    private var backgroundBlur: some View {
-        GeometryReader { geo in
-            ZStack {
-                AsyncImage(url: coverURL) { image in
-                    image.resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .blur(radius: 45)
-                        .opacity(0.6)
-                } placeholder: {
-                    Color.black
-                }
-
-                // 顶部 + 底部渐变遮罩，保证文字可读
-                LinearGradient(
-                    colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.65)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-        }
-        .ignoresSafeArea()
-    }
-
     private var coverURL: URL? {
         guard let song = playerManager.currentSong, !song.imageURL.isEmpty else { return nil }
         return URL(string: song.imageURL)
     }
 
-    private var playbackSubtitle: String {
-        var parts: [String] = []
-        if !playerManager.sourceName.isEmpty {
-            parts.append(MusicSources.name(playerManager.sourceName))
+    // MARK: - 整页跟手竖滑（汽水式）：整页 = 背景色 + 封面 + 歌词 + 控制区，上下滑动换歌
+
+    private var swipeablePage: some View {
+        GeometryReader { geo in
+            ZStack {
+                songPage(width: geo.size.width)
+                    .id(playerManager.currentSong?.id)
+                    .transition(pageTransition)
+                    .offset(y: pageOffset)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 20)
+                    .onChanged { value in
+                        pageOffset = value.translation.height
+                    }
+                    .onEnded { value in
+                        if value.translation.height < -70 {
+                            swipeNext()
+                        } else if value.translation.height > 70 {
+                            swipePrev()
+                        }
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            pageOffset = 0
+                        }
+                    }
+            )
         }
-        if !playerManager.qualityName.isEmpty {
-            parts.append(MusicSources.qualityName(playerManager.qualityName))
-        }
-        return parts.isEmpty ? " " : parts.joined(separator: " · ")
     }
 
-    // MARK: - Main Player View
+    // 每一页 = 一首歌：全屏封面主色背景 + 大封面卡 + 交错歌词 + 底部控制区
+    private func songPage(width: CGFloat) -> some View {
+        let coverSize = width - 60
+        return ZStack {
+            coverDominantColor
 
-    private var mainPlayerView: some View {
-        GeometryReader { geo in
+            LinearGradient(
+                colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.6)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
             VStack(spacing: 0) {
-                topBar
-                    .padding(.top, 8)
+                Spacer(minLength: 100)
 
-                bodyArea(width: geo.size.width)
+                coverCard(size: coverSize)
+
+                Spacer(minLength: 40)
+
+                currentLyricView
+                    .padding(.horizontal, 20)
+
+                Spacer(minLength: 0)
 
                 trackInfoAndControls
-                    .padding(.bottom, 40)
+
+                Spacer(minLength: 16)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var topBar: some View {
-        HStack {
-            Button(action: { dismiss() }) {
-                Image(systemName: "chevron.down")
-                    .font(.title2.bold())
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+    private var pageTransition: AnyTransition {
+        let insertEdge: Edge = swipeEdge
+        let removeEdge: Edge = (swipeEdge == .top) ? .bottom : .top
+        return .asymmetric(
+            insertion: .move(edge: insertEdge).combined(with: .opacity),
+            removal: .move(edge: removeEdge).combined(with: .opacity)
+        )
+    }
+
+    // MARK: - 悬浮顶部 ActionBar（不随页滑动）
+
+    private var topOverlay: some View {
+        VStack {
+            HStack {
+                Button(action: { dismiss() }) {
+                    Image(systemName: "chevron.down")
+                        .font(.title2.bold())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+
+                Spacer()
+
+                modeMenu
+
+                Spacer()
+
+                topMenu
             }
-
+            .padding(.horizontal)
+            .padding(.top, 8)
             Spacer()
+        }
+        .foregroundColor(.white)
+    }
 
-            VStack(spacing: 2) {
-                Text("正在播放")
-                    .font(.headline)
-                HStack(spacing: 4) {
-                    Text(playbackSubtitle)
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.55))
-                    if !playerManager.playbackOrigin.isEmpty {
-                        Text(playerManager.playbackOrigin)
-                            .font(.system(size: 9, weight: .medium))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.white.opacity(0.2))
-                            .clipShape(Capsule())
+    // 模式选择（三模式切换）
+    private var modeMenu: some View {
+        Menu {
+            ForEach(RecommendMode.allCases) { m in
+                Button {
+                    selectFeedMode(m)
+                } label: {
+                    if engine.mode == m {
+                        Label(m.rawValue, systemImage: "checkmark")
+                    } else {
+                        Label(m.rawValue, systemImage: m.icon)
                     }
                 }
-                if playerManager.sleepTimerRemaining > 0 {
-                    Text("定时 \(playerManager.sleepTimerText) 后停止")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
-                }
             }
-
-            Spacer()
-
-            topMenu
+        } label: {
+            VStack(spacing: 2) {
+                Text("模式选择")
+                    .font(.headline)
+                Text(engine.mode.rawValue)
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            .frame(width: 150)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal)
-        .foregroundColor(.white)
     }
 
     private var topMenu: some View {
@@ -182,148 +218,41 @@ struct PlayerView: View {
         )
     }
 
-    // MARK: - Body Area（正常播放页：滑动封面换歌 + 封面下方交错歌词）
+    // MARK: - 歌词照搬 AiMusic：封面下方一行，当前行居中、单行省略
 
-    private func bodyArea(width: CGFloat) -> some View {
-        let coverSize = min(width * 0.72, 320)
-        return VStack(spacing: 18) {
-            swipeableCover(size: coverSize)
-            staggeredLyricsView
-                .padding(.horizontal, 32)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // 滑动封面换歌（汽水式）：上滑下一首、下滑上一首，带滑动过渡
-    private func swipeableCover(size: CGFloat) -> some View {
-        ZStack {
-            coverCard(size: size)
-                .id(playerManager.currentSong?.id)
-                .transition(coverTransition)
-                .offset(y: coverOffset)
-        }
-        .frame(width: size, height: size)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 20)
-                .onChanged { value in
-                    coverOffset = value.translation.height
-                }
-                .onEnded { value in
-                    if value.translation.height < -70 {
-                        swipeNext()
-                    } else if value.translation.height > 70 {
-                        swipePrev()
-                    }
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                        coverOffset = 0
-                    }
-                }
-        )
-    }
-
-    private var coverTransition: AnyTransition {
-        let insertEdge: Edge = swipeEdge
-        let removeEdge: Edge = (swipeEdge == .top) ? .bottom : .top
-        return .asymmetric(
-            insertion: .move(edge: insertEdge).combined(with: .opacity),
-            removal: .move(edge: removeEdge).combined(with: .opacity)
-        )
-    }
-
-    private func swipeNext() {
-        guard !feedQueue.isEmpty else { return }
-        feedIndex = min(feedIndex + 1, feedQueue.count - 1)
-        swipeEdge = .bottom
-        let song = feedQueue[feedIndex]
-        if playerManager.currentSong?.id != song.id {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
-            }
-        }
-    }
-
-    private func swipePrev() {
-        guard feedIndex > 0 else { return }
-        feedIndex -= 1
-        swipeEdge = .top
-        let song = feedQueue[feedIndex]
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-            playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
-        }
-    }
-
-    private func loadFeedQueue() async {
-        if playlistStore.listData == nil {
-            await playlistStore.refresh()
-        }
-        let loved = playlistStore.listData?.loveSongs ?? []
-        await engine.load(recent: RecentStore.shared.items, loved: loved)
-        await MainActor.run { rebuildFeedQueue() }
-    }
-
-    // 队列 = 当前歌曲（不在推荐里时置于开头）+ 推荐；当前歌在推荐里则用推荐本身
-    private func rebuildFeedQueue() {
-        var q = engine.recommendations
-        if let cur = playerManager.currentSong, !q.contains(where: { $0.id == cur.id }) {
-            q.insert(cur, at: 0)
-        }
-        feedQueue = q
-        feedIndex = q.firstIndex(where: { $0.id == playerManager.currentSong?.id }) ?? 0
-    }
-
-    private func selectFeedMode(_ m: RecommendMode) {
-        guard engine.mode != m else { return }
-        HapticManager.shared.selection()
-        engine.setMode(m)
-        Task {
-            await engine.loadCurrentMode()
-            await MainActor.run { rebuildFeedQueue() }
-        }
-    }
-
-    // 歌词在封面下方：上下 2 行左右交错（当前行靠右、下一行靠左）
-    private var staggeredLyricsView: some View {
+    private var currentLyricView: some View {
         Group {
             if playerManager.parsedLyrics.isEmpty {
                 Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
-                    .font(.subheadline)
+                    .font(.title3)
                     .foregroundColor(.white.opacity(0.6))
                     .lineLimit(1)
+                    .truncationMode(.tail)
             } else {
                 let lines = playerManager.parsedLyrics
                 let idx = max(playerManager.currentLyricIndex, 0)
                 let current = lines.indices.contains(idx) ? lines[idx].text : ""
-                let next = lines.indices.contains(idx + 1) ? lines[idx + 1].text : ""
-                VStack(spacing: 10) {
-                    Text(current.isEmpty ? " " : current)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .offset(x: 8)
-                    Text(next.isEmpty ? " " : next)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundColor(.white.opacity(0.5))
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .offset(x: -8)
-                }
+                Text(current.isEmpty ? " " : current)
+                    .font(.title3)
+                    .fontWeight(.medium)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    // MARK: - Cover Card (square, rounded)
+    // MARK: - Cover Card (square, rounded, 屏宽-60)
 
     private func coverCard(size: CGFloat) -> some View {
         AsyncImage(url: coverURL) { image in
             image.resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .clipShape(RoundedRectangle(cornerRadius: 20))
         } placeholder: {
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 20)
                 .fill(Color.gray.opacity(0.35))
                 .frame(width: size, height: size)
                 .overlay(
@@ -338,8 +267,8 @@ struct PlayerView: View {
     // MARK: - Track Info & Controls
 
     private var trackInfoAndControls: some View {
-        VStack(spacing: 26) {
-            // 歌名 / 歌手（左对齐）+ 收藏 + 下载
+        VStack(spacing: 22) {
+            // 歌名 / 歌手（左对齐）+ 下载 + 收藏
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(playerManager.currentSong?.name ?? "未知歌曲")
@@ -370,46 +299,7 @@ struct PlayerView: View {
             progressSection
 
             controlsSection
-
-            recommendEntry
         }
-    }
-
-    // MARK: - 猜你喜欢（弹出菜单切换推荐模式，直接滑动封面换歌）
-
-    private var recommendEntry: some View {
-        HStack {
-            Spacer()
-            Menu {
-                ForEach(RecommendMode.allCases) { m in
-                    Button {
-                        selectFeedMode(m)
-                    } label: {
-                        if engine.mode == m {
-                            Label(m.rawValue, systemImage: "checkmark")
-                        } else {
-                            Label(m.rawValue, systemImage: m.icon)
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "music.note.list")
-                    Text("🎧 猜你喜欢 · \(engine.mode.rawValue)")
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.16))
-                .clipShape(Capsule())
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 24)
     }
 
     private var loveButton: some View {
@@ -595,7 +485,102 @@ struct PlayerView: View {
         }
     }
 
+    // MARK: - 背景主色提取（沉浸背景随歌变色）
+
+    private func updateDominantColor() {
+        guard let url = coverURL else {
+            coverDominantColor = .black
+            return
+        }
+        Task {
+            let color = await Self.dominantColor(from: url)
+            await MainActor.run { coverDominantColor = color ?? .black }
+        }
+    }
+
+    private static func dominantColor(from url: URL) async -> Color? {
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
+            return Color(uiColor: averageColor(of: cgImage))
+        } catch {
+            return nil
+        }
+    }
+
+    private static func averageColor(of image: CGImage) -> UIColor {
+        let width = 1
+        let height = 1
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 4 * width,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return .black }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let data = context.data else { return .black }
+        let bytes = data.assumingMemoryBound(to: UInt8.self)
+        let r = CGFloat(bytes[0]) / 255
+        let g = CGFloat(bytes[1]) / 255
+        let b = CGFloat(bytes[2]) / 255
+        return UIColor(red: r, green: g, blue: b, alpha: 1)
+    }
+
     // MARK: - Actions
+
+    private func swipeNext() {
+        guard !feedQueue.isEmpty else { return }
+        feedIndex = min(feedIndex + 1, feedQueue.count - 1)
+        swipeEdge = .bottom
+        let song = feedQueue[feedIndex]
+        if playerManager.currentSong?.id != song.id {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
+            }
+        }
+    }
+
+    private func swipePrev() {
+        guard feedIndex > 0 else { return }
+        feedIndex -= 1
+        swipeEdge = .top
+        let song = feedQueue[feedIndex]
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
+        }
+    }
+
+    private func loadFeedQueue() async {
+        if playlistStore.listData == nil {
+            await playlistStore.refresh()
+        }
+        let loved = playlistStore.listData?.loveSongs ?? []
+        await engine.load(recent: RecentStore.shared.items, loved: loved)
+        await MainActor.run { rebuildFeedQueue() }
+    }
+
+    // 队列 = 当前歌曲（不在推荐里时置于开头）+ 推荐；当前歌在推荐里则用推荐本身
+    private func rebuildFeedQueue() {
+        var q = engine.recommendations
+        if let cur = playerManager.currentSong, !q.contains(where: { $0.id == cur.id }) {
+            q.insert(cur, at: 0)
+        }
+        feedQueue = q
+        feedIndex = q.firstIndex(where: { $0.id == playerManager.currentSong?.id }) ?? 0
+    }
+
+    private func selectFeedMode(_ m: RecommendMode) {
+        guard engine.mode != m else { return }
+        HapticManager.shared.selection()
+        engine.setMode(m)
+        Task {
+            await engine.loadCurrentMode()
+            await MainActor.run { rebuildFeedQueue() }
+        }
+    }
 
     private func toggleLove(_ song: LXSong) {
         if playlistStore.isLoved(song) {
