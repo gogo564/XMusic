@@ -11,6 +11,8 @@ struct PlayerView: View {
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
+    @State private var showRecommend = false
+    @State private var presentMode: RecommendMode = .recommend
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
@@ -29,6 +31,12 @@ struct PlayerView: View {
                 PlaylistPickerView(song: song)
                     .environmentObject(playlistStore)
             }
+        }
+        .fullScreenCover(isPresented: $showRecommend) {
+            RecommendFeedView(initialMode: presentMode, isFullScreen: true)
+                .environmentObject(playerManager)
+                .environmentObject(playlistStore)
+                .environmentObject(downloader)
         }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
@@ -335,7 +343,46 @@ struct PlayerView: View {
             progressSection
 
             controlsSection
+
+            recommendEntry
         }
+    }
+
+    // MARK: - 猜你喜欢（播放页 3 模式入口，不知道听什么时点这里）
+
+    private var recommendEntry: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("🎧 猜你喜欢")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.white.opacity(0.9))
+                Text("不知道听什么？")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            Spacer()
+            ForEach(RecommendMode.allCases) { m in
+                Button {
+                    presentMode = m
+                    showRecommend = true
+                    HapticManager.shared.selection()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: m.icon)
+                            .font(.system(size: 11))
+                        Text(m.rawValue)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.16))
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 24)
     }
 
     private var loveButton: some View {

@@ -1,32 +1,84 @@
 import SwiftUI
 
-// 汽水音乐式竖滑推荐流：模式胶囊 + 全屏竖滑卡片，滑到自动预播
+// 汽水式竖滑推荐流：内嵌于首页（isFullScreen=false）或全屏模块（isFullScreen=true）
 struct RecommendFeedView: View {
     @ObservedObject var engine = RecommendationEngine.shared
     @EnvironmentObject var player: PlayerManager
     @EnvironmentObject var playlistStore: PlaylistStore
     @EnvironmentObject var downloader: DownloadService
+    @Environment(\.dismiss) private var dismiss
 
     @State private var currentIndex = 0
     @State private var scrollToPage: Int?
     @State private var hasLoaded = false
+    @State private var initialMode: RecommendMode
 
+    let isFullScreen: Bool
     let pageHeight: CGFloat
 
+    init(initialMode: RecommendMode, isFullScreen: Bool = false, pageHeight: CGFloat = 520) {
+        _initialMode = State(initialValue: initialMode)
+        self.isFullScreen = isFullScreen
+        self.pageHeight = pageHeight
+    }
+
     var body: some View {
-        VStack(spacing: 10) {
-            modeChips
-            feedArea
+        Group {
+            if isFullScreen {
+                GeometryReader { geo in
+                    VStack(spacing: 10) {
+                        header
+                        modeChips
+                        feedArea(pageHeight: max(geo.size.height - 120, 300))
+                    }
+                }
+            } else {
+                VStack(spacing: 10) {
+                    HStack {
+                        Text("🎧 猜你喜欢")
+                            .font(.title2.bold())
+                        Spacer()
+                        Text("竖滑切换 · 自动预播")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                    modeChips
+                    feedArea(pageHeight: pageHeight)
+                }
+            }
         }
         .onAppear {
             if !hasLoaded {
                 hasLoaded = true
+                engine.setMode(initialMode)
                 Task { await load() }
             }
         }
         .onChange(of: currentIndex) { idx in
             playCurrent(at: idx)
         }
+    }
+
+    private var header: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            Text("🎧 猜你喜欢")
+                .font(.headline)
+            Spacer()
+            Color.clear
+                .frame(width: 22, height: 22)
+        }
+        .padding(.horizontal)
+        .padding(.top, 4)
     }
 
     // MARK: - 模式切换
@@ -71,7 +123,7 @@ struct RecommendFeedView: View {
     // MARK: - 卡片流
 
     @ViewBuilder
-    private var feedArea: some View {
+    private func feedArea(pageHeight: CGFloat) -> some View {
         if engine.isLoading && engine.recommendations.isEmpty {
             VStack(spacing: 12) {
                 ProgressView()
