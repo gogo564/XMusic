@@ -14,6 +14,8 @@ struct PlayerView: View {
     @State private var showPlaylistPicker = false
     // 滑动换歌：displaySong 为"页面当前展示的歌曲"，起播成功前页面先切，音频起播后再同步
     @State private var displaySong: LXSong?
+    // 拖动跟手用 @GestureState（不触发整个 songPage 重算），复位无动画（由 pageOffset 接管回弹/翻页）
+    @GestureState private var dragOffset: CGFloat = 0
     @State private var pageOffset: CGFloat = 0
     @State private var dragTarget: LXSong?
     @State private var dragTargetDirection: CGFloat = 1 // +1=下一页在下方，-1=上一页在上方
@@ -79,15 +81,17 @@ struct PlayerView: View {
     private var swipeablePage: some View {
         GeometryReader { geo in
             let pageHeight = geo.size.height
+            // 拖动中跟手用 dragOffset；翻页动画中由 pageOffset 接管
+            let currentOffset = isSwitching ? pageOffset : dragOffset
             ZStack {
                 // 当前页（完整内容）
                 songPage(song: displaySong, width: geo.size.width)
-                    .offset(y: pageOffset)
+                    .offset(y: currentOffset)
 
                 // 目标预览页（仅封面+背景），跟随拖动滑入
                 if let target = dragTarget {
                     coverPreview(song: target, width: geo.size.width)
-                        .offset(y: dragTargetDirection * pageHeight + pageOffset)
+                        .offset(y: dragTargetDirection * pageHeight + currentOffset)
                 }
             }
             .background(Color.black)
@@ -95,21 +99,37 @@ struct PlayerView: View {
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 20)
+                    .updating($dragOffset) { value, state, _ in
+                        // 拖动跟手（@GestureState 更新不触发整页重算）
+                        state = value.translation.height
+                    }
                     .onChanged { value in
                         guard !isSwitching else { return }
-                        pageOffset = value.translation.height
-                        updateDragTarget()
+                        // 只在拖动方向首次确定时设置预览目标，拖动中不重复更新（避免 body 重算）
+                        let newDirection: CGFloat = value.translation.height > 0 ? -1 : 1
+                        if newDirection != dragTargetDirection || dragTarget == nil {
+                            dragTargetDirection = newDirection
+                            updateDragTarget()
+                        }
                     }
                     .onEnded { value in
-                        if value.translation.height < -70, feedIndex < feedQueue.count - 1 {
-                            commitSwipe(.next, pageHeight: pageHeight)
-                        } else if value.translation.height > 70, feedIndex > 0 {
-                            commitSwipe(.prev, pageHeight: pageHeight)
-                        } else {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                                pageOffset = 0
-                                dragTarget = nil
+                        let predicted = value.predictedEndTranslation.height
+                        let moved = value.translation.height
+                        // 快速滑动（预测位移远超实际）或位移足够 → 翻页
+                        if predicted < -40 || moved < -80 {
+                            if feedIndex < feedQueue.count - 1 {
+                                commitSwipe(.next, pageHeight: pageHeight, fromOffset: value.translation.height)
+                            } else {
+                                bounceBack(fromOffset: value.translation.height)
                             }
+                        } else if predicted > 40 || moved > 80 {
+                            if feedIndex > 0 {
+                                commitSwipe(.prev, pageHeight: pageHeight, fromOffset: value.translation.height)
+                            } else {
+                                bounceBack(fromOffset: value.translation.height)
+                            }
+                        } else {
+                            bounceBack(fromOffset: value.translation.height)
                         }
                     }
             )
@@ -121,29 +141,41 @@ struct PlayerView: View {
     }
 
     private func updateDragTarget() {
-        if pageOffset < 0 {
+        if dragTargetDirection < 0 {
             if feedIndex < feedQueue.count - 1 {
                 dragTarget = feedQueue[feedIndex + 1]
-                dragTargetDirection = 1
             } else {
                 dragTarget = nil
             }
-        } else if pageOffset > 0 {
+        } else {
             if feedIndex > 0 {
                 dragTarget = feedQueue[feedIndex - 1]
-                dragTargetDirection = -1
             } else {
                 dragTarget = nil
             }
         }
     }
 
-    private func commitSwipe(_ direction: SwipeDirection, pageHeight: CGFloat) {
+    private func bounceBack(fromOffset: CGFloat = 0) {
+        // 把跟手位置快照交给 pageOffset 做回弹动画，避免 @GestureState 瞬时归零跳变
+        if isSwitching { return }
+        isSwitching = true
+        withAnimation(.none) {
+            pageOffset = fromOffset
+        }
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            pageOffset = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            isSwitching = false
+            dragTarget = nil
+            pageOffset = 0
+        }
+    }
+
+    private func commitSwipe(_ direction: SwipeDirection, pageHeight: CGFloat, fromOffset: CGFloat) {
         guard !feedQueue.isEmpty else {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                pageOffset = 0
-                dragTarget = nil
-            }
+            bounceBack(fromOffset: fromOffset)
             return
         }
         guard !isSwitching else { return }
@@ -156,18 +188,16 @@ struct PlayerView: View {
         let song = feedQueue[targetIndex]
         guard playerManager.currentSong?.id != song.id else {
             isSwitching = false
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                pageOffset = 0
-                dragTarget = nil
-            }
+            bounceBack(fromOffset: fromOffset)
             return
         }
-        // 抖音式翻页：先让整页继续滑出（目标页滑入到位），动画结束后才真正切歌
+        // 抖音式翻页：从当前跟手位置平滑滑出（目标页滑入到位），动画结束后才真正切歌
         let targetOffset = direction == .next ? -pageHeight : pageHeight
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
+        pageOffset = fromOffset
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             pageOffset = targetOffset
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
             isSwitching = false
             feedIndex = targetIndex
             displaySong = song
@@ -457,26 +487,16 @@ struct PlayerView: View {
     // MARK: - Cover Card (square, rounded, 屏宽-60) 点击进入全屏歌词
 
     private func coverCard(song: LXSong?, size: CGFloat) -> some View {
-        AsyncImage(url: coverURL(for: song)) { image in
-            image.resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-        } placeholder: {
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.gray.opacity(0.35))
-                .frame(width: size, height: size)
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: 54))
-                        .foregroundColor(.white.opacity(0.55))
-                )
-        }
-        .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
-        .onTapGesture {
-            HapticManager.shared.selection()
-            showingFullLyrics = true
-        }
+        LXCachedImage(urlString: coverURL(for: song)?.absoluteString ?? "", size: size, cornerRadius: 20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
+            .onTapGesture {
+                HapticManager.shared.selection()
+                showingFullLyrics = true
+            }
     }
 
     // MARK: - Track Info & Controls
@@ -773,14 +793,27 @@ private struct DominantColorBackground: View {
             .onChange(of: url) { _ in load() }
     }
 
+    private static var cache = NSCache<NSString, UIColor>()
+
     private func load() {
         guard let url = url else {
             color = .black
             return
         }
+        let key = url.absoluteString as NSString
+        if let cached = Self.cache.object(forKey: key) {
+            color = Color(uiColor: cached)
+            return
+        }
         Task {
             let c = await Self.dominantColor(from: url)
-            await MainActor.run { color = c ?? .black }
+            await MainActor.run {
+                if let c = c {
+                    color = Color(uiColor: c)
+                } else {
+                    color = .black
+                }
+            }
         }
     }
 
@@ -788,7 +821,9 @@ private struct DominantColorBackground: View {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
-            return Color(uiColor: averageColor(of: cgImage))
+            let c = averageColor(of: cgImage)
+            cache.setObject(c, forKey: url.absoluteString as NSString)
+            return Color(uiColor: c)
         } catch {
             return nil
         }
