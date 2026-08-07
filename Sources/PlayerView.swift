@@ -207,6 +207,7 @@ struct PlayerView: View {
     private func pageContent(i: Int, coverSize: CGFloat, pageH: CGFloat) -> some View {
         if i == 0 {
             coverPage(coverSize: coverSize)
+                .frame(height: pageH)
         } else {
             FeedCard(
                 song: engine.recommendations[i - 1],
@@ -221,8 +222,8 @@ struct PlayerView: View {
                     feedScrollTo = (i + 1) % total
                 }
             )
+            .frame(height: pageH)
         }
-        .frame(height: pageH)
     }
 
     private func playFeed(at page: Int) {
