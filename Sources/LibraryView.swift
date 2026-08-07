@@ -143,6 +143,12 @@ struct LibraryView: View {
                             Text(cacheManager.cacheSizeString)
                                 .foregroundColor(.secondary)
                         }
+                        HStack {
+                            Text("缓存上限")
+                            Spacer()
+                            Text("2GB（超限自动清理最旧）")
+                                .foregroundColor(.secondary)
+                        }
                         Button {
                             cacheManager.clearCache()
                             HapticManager.shared.notification(type: .success)

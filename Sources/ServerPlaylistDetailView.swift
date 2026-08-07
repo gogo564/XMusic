@@ -121,7 +121,7 @@ struct ServerPlaylistDetailView: View {
                     ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
                         SongRow(
                             song: song,
-                            showSource: false,
+                            showSource: true,
                             isEditing: isEditing,
                             isSelected: selectedIDs.contains(song.id),
                             onPlay: { s in

@@ -64,6 +64,17 @@ struct PlayerView: View {
         return URL(string: song.imageURL)
     }
 
+    private var playbackSubtitle: String {
+        var parts: [String] = []
+        if !playerManager.sourceName.isEmpty {
+            parts.append(MusicSources.name(playerManager.sourceName))
+        }
+        if !playerManager.qualityName.isEmpty {
+            parts.append(MusicSources.qualityName(playerManager.qualityName))
+        }
+        return parts.isEmpty ? " " : parts.joined(separator: " · ")
+    }
+
     // MARK: - Main Player View
 
     private var mainPlayerView: some View {
@@ -94,9 +105,19 @@ struct PlayerView: View {
             VStack(spacing: 2) {
                 Text("正在播放")
                     .font(.headline)
-                Text(playerManager.sourceName.isEmpty ? " " : "\(playerManager.sourceName) · \(playerManager.qualityName)")
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.55))
+                HStack(spacing: 4) {
+                    Text(playbackSubtitle)
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.55))
+                    if !playerManager.playbackOrigin.isEmpty {
+                        Text(playerManager.playbackOrigin)
+                            .font(.system(size: 9, weight: .medium))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.white.opacity(0.2))
+                            .clipShape(Capsule())
+                    }
+                }
                 if playerManager.sleepTimerRemaining > 0 {
                     Text("定时 \(playerManager.sleepTimerText) 后停止")
                         .font(.caption2)

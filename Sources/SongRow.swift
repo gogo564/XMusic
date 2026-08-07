@@ -48,6 +48,33 @@ struct SongRow: View {
                             .padding(.vertical, 1)
                             .background(Color(.systemGray5))
                             .clipShape(Capsule())
+                        if !qualityBadge.isEmpty {
+                            Text(qualityBadge)
+                                .font(.system(size: 9))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(qualityBadgeColor.opacity(0.18))
+                                .foregroundColor(qualityBadgeColor)
+                                .clipShape(Capsule())
+                        }
+                        if isCached {
+                            Text("缓存")
+                                .font(.system(size: 9))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.blue.opacity(0.15))
+                                .foregroundColor(.blue)
+                                .clipShape(Capsule())
+                        }
+                        if isDownloaded {
+                            Text("已下载")
+                                .font(.system(size: 9))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.green.opacity(0.15))
+                                .foregroundColor(.green)
+                                .clipShape(Capsule())
+                        }
                     }
                     Text(song.singer)
                         .font(.system(size: 12))
@@ -152,6 +179,32 @@ struct SongRow: View {
         case "mg": return "咪咕"
         default: return s
         }
+    }
+
+    private var qualityBadge: String {
+        let qs = song.qualities.map { $0.type.lowercased() }
+        if qs.contains("flac24bit") { return "Hi-Res" }
+        if qs.contains("flac") { return "SQ" }
+        if qs.contains("320k") { return "HQ" }
+        if let first = song.qualities.first?.type, !first.isEmpty { return first }
+        return ""
+    }
+
+    private var qualityBadgeColor: Color {
+        switch qualityBadge {
+        case "Hi-Res": return .purple
+        case "SQ": return .blue
+        case "HQ": return .orange
+        default: return .gray
+        }
+    }
+
+    private var isCached: Bool {
+        MusicCacheManager.shared.isCached(id: song.id)
+    }
+
+    private var isDownloaded: Bool {
+        downloader.isDownloaded(song)
     }
 }
 

@@ -31,6 +31,7 @@ final class PlayerManager: ObservableObject {
     @Published var playbackError: String?
     @Published var sourceName = ""
     @Published var qualityName = ""
+    @Published var playbackOrigin = "" // "缓存" / "下载" / "本地" / ""（在线）
     @Published var quality: String {
         didSet {
             AppConfigStore.shared.config.defaultQuality = quality
@@ -41,6 +42,7 @@ final class PlayerManager: ObservableObject {
     @Published var localPlaybackArtist = ""
     @Published var showPlayer = false
     @Published var sleepTimerRemaining: TimeInterval = 0
+    @Published var currentPlaybackURL: URL? // 正在播放的本地文件（缓存/下载），供缓存清理时保护
     private var sleepTask: Task<Void, Never>?
 
     struct LyricLine: Identifiable {
@@ -334,6 +336,8 @@ final class PlayerManager: ObservableObject {
         currentSong = LXSong(["name": title, "singer": artist])
         sourceName = ""
         qualityName = ""
+        playbackOrigin = "本地"
+        currentPlaybackURL = url
         queue = []
         currentIndex = -1
         currentTime = 0
@@ -387,21 +391,22 @@ final class PlayerManager: ObservableObject {
 
         // 0. Downloaded-file first (Documents/Downloads/) - instant playback
         if let localURL = DownloadService.shared.localURL(for: song) {
-            startPlayback(url: localURL, song: song, sourceName: "下载", qualityName: "本地")
+            let dlQuality = DownloadService.shared.downloadedQuality(for: song) ?? quality
+            startPlayback(url: localURL, song: song, sourceName: song.source, qualityName: dlQuality, playbackOrigin: "下载")
             Task { await loadLyric(for: song) }
             return
         }
 
-        // 1. Cache-first
-        if MusicCacheManager.shared.isCached(id: song.id), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id) {
-            startPlayback(url: cachedURL, song: song, sourceName: "缓存", qualityName: qualityName.isEmpty ? "缓存" : qualityName)
+        // 1. Cache-first（缓存按 音质 区分，命中即所选音质）
+        if MusicCacheManager.shared.isCached(id: song.id, quality: quality), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id, quality: quality) {
+            startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: quality, playbackOrigin: "缓存")
             Task { await loadLyric(for: song) }
             return
         }
 
         // 1.5 Prefetched URL：上一首播放时已预取好的下一首地址，直接起播省一次服务器往返
-        if let preURL = prefetchedURLs.removeValue(forKey: song.id), let url = URL(string: preURL) {
-            startPlayback(url: url, song: song, sourceName: song.source, qualityName: qualityName)
+        if let preURL = prefetchedURLs.removeValue(forKey: song.id + "_" + quality), let url = URL(string: preURL) {
+            startPlayback(url: url, song: song, sourceName: song.source, qualityName: quality, playbackOrigin: "")
             Task { await loadLyric(for: song) }
             return
         }
@@ -415,8 +420,8 @@ final class PlayerManager: ObservableObject {
                         self.isResolving = false
                         return
                     }
-                    MusicCacheManager.shared.startCaching(url: result.url, id: song.id)
-                    self.startPlayback(url: url, song: song, sourceName: result.sourceName, qualityName: result.type)
+                    MusicCacheManager.shared.startCaching(url: result.url, quality: quality, id: song.id)
+                    self.startPlayback(url: url, song: song, sourceName: result.sourceName, qualityName: result.type, playbackOrigin: "")
                 }
                 await self.loadLyric(for: song)
             } catch {
@@ -428,7 +433,7 @@ final class PlayerManager: ObservableObject {
         }
     }
 
-    private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String) {
+    private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String = "") {
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 4
         item.preferredPeakBitRate = 0
@@ -437,6 +442,8 @@ final class PlayerManager: ObservableObject {
         observeItemStatus(item)
         self.sourceName = sourceName
         self.qualityName = qualityName
+        self.playbackOrigin = playbackOrigin
+        self.currentPlaybackURL = url.scheme == "file" ? url : nil
         currentTime = 0
         duration = 0
         bufferedTime = 0
@@ -457,16 +464,16 @@ final class PlayerManager: ObservableObject {
         if nextIndex == currentIndex { return }
         guard queue.indices.contains(nextIndex) else { return }
         let next = queue[nextIndex]
-        if MusicCacheManager.shared.isCached(id: next.id) { return }
+        let prefetchQuality = self.quality
+        if MusicCacheManager.shared.isCached(id: next.id, quality: prefetchQuality) { return }
         prefetchTask = Task { [weak self] in
             guard let self = self else { return }
-            let prefetchQuality = self.quality
             let autoSwitch = AppConfigStore.shared.config.autoSwitchSource
             do {
                 let result = try await LXAPIClient.shared.getPlaybackURL(for: next, quality: prefetchQuality, autoSwitch: autoSwitch)
                 guard !Task.isCancelled else { return }
-                self.prefetchedURLs[next.id] = result.url
-                MusicCacheManager.shared.startCaching(url: result.url, id: next.id)
+                self.prefetchedURLs[next.id + "_" + prefetchQuality] = result.url
+                MusicCacheManager.shared.startCaching(url: result.url, quality: prefetchQuality, id: next.id)
             } catch {
                 // 预取失败不影响当前播放，静默忽略
             }

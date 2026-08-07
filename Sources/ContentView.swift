@@ -1114,10 +1114,18 @@ struct MiniPlayerView: View {
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .fixedSize()
-                                Text("\(player.sourceName) \(player.qualityName)")
+                                Text(player.sourceName.isEmpty ? "" : "\(MusicSources.name(player.sourceName)) \(MusicSources.qualityName(player.qualityName))")
                                     .font(.system(size: 11))
                                     .foregroundColor(.secondary)
                                     .lineLimit(1)
+                                if !player.playbackOrigin.isEmpty {
+                                    Text(player.playbackOrigin)
+                                        .font(.system(size: 9, weight: .medium))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Color(.systemGray5))
+                                        .clipShape(Capsule())
+                                }
                             }
                         }
                     }

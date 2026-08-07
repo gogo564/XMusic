@@ -6,6 +6,7 @@ class MusicCacheManager: ObservableObject {
     
     private let fileManager = FileManager.default
     private let cacheDirectoryName = "MusicCache"
+    private let maxCacheBytes: Int64 = 2 * 1024 * 1024 * 1024 // 2GB
     
     // Publish cache size for UI updates
     @Published var cacheSizeString: String = "0.0 MB"
@@ -37,18 +38,26 @@ class MusicCacheManager: ObservableObject {
     
     // MARK: - Public API
     
+    /// 任意音质版本是否已缓存（用于列表展示/离线判断，只查文件存在性）。
     func isCached(id: String) -> Bool {
-        guard let fileURL = getFileURL(for: id) else { return false }
+        guard let cacheDirectory = cacheDirectory,
+              let names = try? fileManager.contentsOfDirectory(atPath: cacheDirectory.path) else { return false }
+        let prefix = "\(id)_"
+        return names.contains { $0.hasPrefix(prefix) }
+    }
+
+    func isCached(id: String, quality: String) -> Bool {
+        guard let fileURL = getFileURL(for: id, quality: quality) else { return false }
         guard fileManager.fileExists(atPath: fileURL.path) else { return false }
         // Validate the cached file is actually valid audio data
         return isValidAudioFile(at: fileURL)
     }
 
-    func cachedURL(for id: String) -> URL? {
-        guard let fileURL = getFileURL(for: id), fileManager.fileExists(atPath: fileURL.path) else { return nil }
+    func cachedURL(for id: String, quality: String) -> URL? {
+        guard let fileURL = getFileURL(for: id, quality: quality), fileManager.fileExists(atPath: fileURL.path) else { return nil }
         // Validate the cached file is actually valid audio data
         guard isValidAudioFile(at: fileURL) else {
-            print("⚠️ [Cache] Cached file is invalid, removing: \(id)")
+            print("⚠️ [Cache] Cached file is invalid, removing: \(id)_\(quality)")
             try? fileManager.removeItem(at: fileURL)
             return nil
         }
@@ -124,13 +133,14 @@ class MusicCacheManager: ObservableObject {
         return false
     }
     
-    func startCaching(url: String, id: String) {
-        guard let remoteURL = URL(string: url), !isCached(id: id) else { return }
+    func startCaching(url: String, quality: String, id: String) {
+        guard let remoteURL = URL(string: url), !isCached(id: id, quality: quality) else { return }
 
         // Avoid duplicate downloads
-        if downloadTasks[id] != nil { return }
+        let taskKey = id + "_" + quality
+        if downloadTasks[taskKey] != nil { return }
 
-        print("📥 [Cache] Start downloading: \(id)")
+        print("📥 [Cache] Start downloading: \(id)_\(quality)")
 
         // Use a URLSession with the same headers that AVPlayer uses for this URL
         var request = URLRequest(url: remoteURL)
@@ -138,7 +148,7 @@ class MusicCacheManager: ObservableObject {
 
         let task = URLSession.shared.downloadTask(with: request) { [weak self] tempURL, response, error in
             guard let self = self else { return }
-            self.downloadTasks.removeValue(forKey: id)
+            self.downloadTasks.removeValue(forKey: taskKey)
 
             if let error = error {
                 print("❌ [Cache] Download failed: \(error.localizedDescription)")
@@ -147,27 +157,29 @@ class MusicCacheManager: ObservableObject {
 
             // Validate response
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                print("❌ [Cache] Bad HTTP status: \(httpResponse.statusCode) for \(id)")
+                print("❌ [Cache] Bad HTTP status: \(httpResponse.statusCode) for \(id)_\(quality)")
                 return
             }
 
-            guard let tempURL = tempURL, let destinationURL = self.getFileURL(for: id) else { return }
+            guard let tempURL = tempURL, let destinationURL = self.getFileURL(for: id, quality: quality) else { return }
 
             do {
                 if self.fileManager.fileExists(atPath: destinationURL.path) {
                     try self.fileManager.removeItem(at: destinationURL)
                 }
-                try self.fileManager.moveItem(at: tempURL, to: destinationURL)
-                print("✅ [Cache] Cached successfully: \(id)")
-                DispatchQueue.main.async {
-                    self.updateCacheSize()
+                // 迁移：清理旧版不带音质的同名缓存（\(id).mp3）
+                if let oldURL = self.getLegacyFileURL(for: id), self.fileManager.fileExists(atPath: oldURL.path) {
+                    try? self.fileManager.removeItem(at: oldURL)
                 }
+                try self.fileManager.moveItem(at: tempURL, to: destinationURL)
+                print("✅ [Cache] Cached successfully: \(id)_\(quality)")
+                self.enforceCacheLimit()
             } catch {
                 print("❌ [Cache] Save file failed: \(error.localizedDescription)")
             }
         }
 
-        downloadTasks[id] = task
+        downloadTasks[taskKey] = task
         task.resume()
     }
     
@@ -182,6 +194,44 @@ class MusicCacheManager: ObservableObject {
             updateCacheSize()
         } catch {
             print("❌ [Cache] Clear cache failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 缓存总量超过上限时，按修改时间从旧到新清理（跳过正在播放的文件），直至不超过 2GB。
+    func enforceCacheLimit() {
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            guard let self = self, let cacheDirectory = self.cacheDirectory else { return }
+
+            var files: [(url: URL, size: Int64, modified: Date)] = []
+            var total: Int64 = 0
+            do {
+                let fileURLs = try self.fileManager.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
+                for fileURL in fileURLs {
+                    let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+                    let size = Int64(values?.fileSize ?? 0)
+                    total += size
+                    files.append((fileURL, size, values?.contentModificationDate ?? .distantPast))
+                }
+            } catch {
+                return
+            }
+
+            guard total > self.maxCacheBytes else { return }
+
+            files.sort { $0.modified < $1.modified }
+            let playingPath = PlayerManager.shared.currentPlaybackURL?.path
+            for f in files {
+                guard total > self.maxCacheBytes else { break }
+                guard f.url.path != playingPath else { continue }
+                if (try? self.fileManager.removeItem(at: f.url)) != nil {
+                    total -= f.size
+                    print("🗑️ [Cache] Evicted (limit): \(f.url.lastPathComponent)")
+                }
+            }
+
+            DispatchQueue.main.async {
+                self.updateCacheSize()
+            }
         }
     }
     
@@ -213,12 +263,11 @@ class MusicCacheManager: ObservableObject {
     
     // MARK: - Helper
     
-    private func getFileURL(for id: String) -> URL? {
-        // Use mp3 extension by default, or could parse from URL if needed. 
-        // For simplicity, we assume mp3/audio file.
-        // To be safe we could just use the id as filename without extension or with a fixed one.
-        // AVPlayer works fine with file URLs even without proper extension sometimes, 
-        // but let's append .mp3 for clarity or if AVPlayer requires it.
+    private func getFileURL(for id: String, quality: String) -> URL? {
+        return cacheDirectory?.appendingPathComponent("\(id)_\(quality).mp3")
+    }
+
+    private func getLegacyFileURL(for id: String) -> URL? {
         return cacheDirectory?.appendingPathComponent("\(id).mp3")
     }
 }

@@ -86,6 +86,10 @@ final class DownloadService: NSObject, ObservableObject {
         downloadedSongs.contains { $0.id == song.id }
     }
 
+    func downloadedQuality(for song: LXSong) -> String? {
+        downloadedSongs.first(where: { $0.id == song.id })?.quality
+    }
+
     func localURL(for song: LXSong) -> URL? {
         guard let d = downloadedSongs.first(where: { $0.id == song.id }) else { return nil }
         let url = downloadsDir.appendingPathComponent(d.localFile)
