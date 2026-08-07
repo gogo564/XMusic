@@ -12,9 +12,11 @@ struct PlayerView: View {
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
+    // 滑动换歌：displaySong 为"页面当前展示的歌曲"，起播成功前页面先切，音频起播后再同步
+    @State private var displaySong: LXSong?
     @State private var pageOffset: CGFloat = 0
-    @State private var swipeEdge: Edge = .bottom
-    @State private var coverDominantColor: Color = .black
+    @State private var dragTarget: LXSong?
+    @State private var dragTargetDirection: CGFloat = 1 // +1=下一页在下方，-1=上一页在上方
     @State private var feedQueue: [LXSong] = []
     @State private var feedIndex = 0
     @State private var feedLoaded = false
@@ -38,12 +40,12 @@ struct PlayerView: View {
             }
         }
         .onChange(of: playerManager.currentSong?.id) { _ in
+            displaySong = playerManager.currentSong
             rebuildFeedQueue()
-            updateDominantColor()
         }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
-            updateDominantColor()
+            displaySong = playerManager.currentSong
             if !feedLoaded {
                 feedLoaded = true
                 Task { await loadFeedQueue() }
@@ -51,46 +53,102 @@ struct PlayerView: View {
         }
     }
 
-    private var coverURL: URL? {
-        guard let song = playerManager.currentSong, !song.imageURL.isEmpty else { return nil }
+    private func coverURL(for song: LXSong?) -> URL? {
+        guard let song = song, !song.imageURL.isEmpty else { return nil }
         return URL(string: song.imageURL)
     }
 
-    // MARK: - 整页跟手竖滑（汽水式）：整页 = 背景色 + 封面 + 歌词 + 控制区，上下滑动换歌
+    // MARK: - 整页跟手竖滑（汽水式）：两页叠放 + offset 跟手，不使用 .id/.transition（规避 iOS15 崩溃）
 
     private var swipeablePage: some View {
         GeometryReader { geo in
+            let pageHeight = geo.size.height
             ZStack {
-                songPage(width: geo.size.width)
-                    .id(playerManager.currentSong?.id)
-                    .transition(pageTransition)
+                // 当前页（完整内容）
+                songPage(song: displaySong, width: geo.size.width)
                     .offset(y: pageOffset)
+
+                // 目标预览页（仅封面+背景），跟随拖动滑入
+                if let target = dragTarget {
+                    coverPreview(song: target, width: geo.size.width)
+                        .offset(y: dragTargetDirection * pageHeight + pageOffset)
+                }
             }
+            .background(Color.black)
+            .clipped()
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 20)
                     .onChanged { value in
                         pageOffset = value.translation.height
+                        updateDragTarget()
                     }
                     .onEnded { value in
-                        if value.translation.height < -70 {
-                            swipeNext()
-                        } else if value.translation.height > 70 {
-                            swipePrev()
-                        }
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                            pageOffset = 0
+                        if value.translation.height < -70, feedIndex < feedQueue.count - 1 {
+                            commitSwipe(.next, pageHeight: pageHeight)
+                        } else if value.translation.height > 70, feedIndex > 0 {
+                            commitSwipe(.prev, pageHeight: pageHeight)
+                        } else {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                pageOffset = 0
+                                dragTarget = nil
+                            }
                         }
                     }
             )
         }
     }
 
-    // 每一页 = 一首歌：全屏封面主色背景 + 大封面卡 + 交错歌词 + 底部控制区
-    private func songPage(width: CGFloat) -> some View {
+    private enum SwipeDirection {
+        case next, prev
+    }
+
+    private func updateDragTarget() {
+        if pageOffset < 0 {
+            if feedIndex < feedQueue.count - 1 {
+                dragTarget = feedQueue[feedIndex + 1]
+                dragTargetDirection = 1
+            } else {
+                dragTarget = nil
+            }
+        } else if pageOffset > 0 {
+            if feedIndex > 0 {
+                dragTarget = feedQueue[feedIndex - 1]
+                dragTargetDirection = -1
+            } else {
+                dragTarget = nil
+            }
+        }
+    }
+
+    private func commitSwipe(_ direction: SwipeDirection, pageHeight: CGFloat) {
+        let targetIndex: Int
+        switch direction {
+        case .next: targetIndex = min(feedIndex + 1, feedQueue.count - 1)
+        case .prev: targetIndex = max(feedIndex - 1, 0)
+        }
+        let song = feedQueue[targetIndex]
+        // 先落位动画：当前页滑出、目标页滑入
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            pageOffset = direction == .next ? -pageHeight : pageHeight
+        }
+        // 动画结束后提交：页面先切到目标（displaySong），音频异步起播后 currentSong 再同步
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            feedIndex = targetIndex
+            displaySong = song
+            pageOffset = 0
+            dragTarget = nil
+            if playerManager.currentSong?.id != song.id {
+                playerManager.play(song: song, in: feedQueue, index: targetIndex, presentPlayer: false)
+            }
+        }
+    }
+
+    // 当前完整页：封面主色沉浸背景 + 大封面卡 + 一行歌词 + 底部控制区
+    private func songPage(song: LXSong?, width: CGFloat) -> some View {
         let coverSize = width - 60
         return ZStack {
-            coverDominantColor
+            DominantColorBackground(url: coverURL(for: song))
 
             LinearGradient(
                 colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.6)],
@@ -101,7 +159,7 @@ struct PlayerView: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 100)
 
-                coverCard(size: coverSize)
+                coverCard(song: song, size: coverSize)
 
                 Spacer(minLength: 40)
 
@@ -110,7 +168,7 @@ struct PlayerView: View {
 
                 Spacer(minLength: 0)
 
-                trackInfoAndControls
+                trackInfoAndControls(song: song)
 
                 Spacer(minLength: 16)
             }
@@ -118,13 +176,21 @@ struct PlayerView: View {
         }
     }
 
-    private var pageTransition: AnyTransition {
-        let insertEdge: Edge = swipeEdge
-        let removeEdge: Edge = (swipeEdge == .top) ? .bottom : .top
-        return .asymmetric(
-            insertion: .move(edge: insertEdge).combined(with: .opacity),
-            removal: .move(edge: removeEdge).combined(with: .opacity)
-        )
+    // 目标预览页：仅封面+背景，滑动过程中显示
+    private func coverPreview(song: LXSong?, width: CGFloat) -> some View {
+        let coverSize = width - 60
+        return ZStack {
+            DominantColorBackground(url: coverURL(for: song))
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.6)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            coverCard(song: song, size: coverSize)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - 悬浮顶部 ActionBar（不随页滑动）
@@ -245,8 +311,8 @@ struct PlayerView: View {
 
     // MARK: - Cover Card (square, rounded, 屏宽-60)
 
-    private func coverCard(size: CGFloat) -> some View {
-        AsyncImage(url: coverURL) { image in
+    private func coverCard(song: LXSong?, size: CGFloat) -> some View {
+        AsyncImage(url: coverURL(for: song)) { image in
             image.resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(width: size, height: size)
@@ -266,15 +332,15 @@ struct PlayerView: View {
 
     // MARK: - Track Info & Controls
 
-    private var trackInfoAndControls: some View {
+    private func trackInfoAndControls(song: LXSong?) -> some View {
         VStack(spacing: 22) {
             // 歌名 / 歌手（左对齐）+ 下载 + 收藏
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(playerManager.currentSong?.name ?? "未知歌曲")
+                    Text(song?.name ?? "未知歌曲")
                         .font(.title2.bold())
                         .lineLimit(1)
-                    Text(playerManager.currentSong?.singer ?? "未知歌手")
+                    Text(song?.singer ?? "未知歌手")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
                         .lineLimit(1)
@@ -485,73 +551,7 @@ struct PlayerView: View {
         }
     }
 
-    // MARK: - 背景主色提取（沉浸背景随歌变色）
-
-    private func updateDominantColor() {
-        guard let url = coverURL else {
-            coverDominantColor = .black
-            return
-        }
-        Task {
-            let color = await Self.dominantColor(from: url)
-            await MainActor.run { coverDominantColor = color ?? .black }
-        }
-    }
-
-    private static func dominantColor(from url: URL) async -> Color? {
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
-            return Color(uiColor: averageColor(of: cgImage))
-        } catch {
-            return nil
-        }
-    }
-
-    private static func averageColor(of image: CGImage) -> UIColor {
-        let width = 1
-        let height = 1
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 4 * width,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return .black }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let data = context.data else { return .black }
-        let bytes = data.assumingMemoryBound(to: UInt8.self)
-        let r = CGFloat(bytes[0]) / 255
-        let g = CGFloat(bytes[1]) / 255
-        let b = CGFloat(bytes[2]) / 255
-        return UIColor(red: r, green: g, blue: b, alpha: 1)
-    }
-
     // MARK: - Actions
-
-    private func swipeNext() {
-        guard !feedQueue.isEmpty else { return }
-        feedIndex = min(feedIndex + 1, feedQueue.count - 1)
-        swipeEdge = .bottom
-        let song = feedQueue[feedIndex]
-        if playerManager.currentSong?.id != song.id {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
-            }
-        }
-    }
-
-    private func swipePrev() {
-        guard feedIndex > 0 else { return }
-        feedIndex -= 1
-        swipeEdge = .top
-        let song = feedQueue[feedIndex]
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-            playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
-        }
-    }
 
     private func loadFeedQueue() async {
         if playlistStore.listData == nil {
@@ -599,6 +599,61 @@ struct PlayerView: View {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+}
+
+// MARK: - 沉浸背景：从封面提取主色，随歌变色
+
+private struct DominantColorBackground: View {
+    let url: URL?
+    @State private var color: Color = .black
+
+    var body: some View {
+        color
+            .onAppear { load() }
+            .onChange(of: url) { _ in load() }
+    }
+
+    private func load() {
+        guard let url = url else {
+            color = .black
+            return
+        }
+        Task {
+            let c = await Self.dominantColor(from: url)
+            await MainActor.run { color = c ?? .black }
+        }
+    }
+
+    private static func dominantColor(from url: URL) async -> Color? {
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
+            return Color(uiColor: averageColor(of: cgImage))
+        } catch {
+            return nil
+        }
+    }
+
+    private static func averageColor(of image: CGImage) -> UIColor {
+        let width = 1
+        let height = 1
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 4 * width,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return .black }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let data = context.data else { return .black }
+        let bytes = data.assumingMemoryBound(to: UInt8.self)
+        let r = CGFloat(bytes[0]) / 255
+        let g = CGFloat(bytes[1]) / 255
+        let b = CGFloat(bytes[2]) / 255
+        return UIColor(red: r, green: g, blue: b, alpha: 1)
     }
 }
 

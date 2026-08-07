@@ -379,12 +379,10 @@ final class PlayerManager: ObservableObject {
 
     private func resolveAndPlay(_ song: LXSong?) {
         guard let song = song else { return }
-        currentSong = song
+        // 注意：不在解析前切换 currentSong。只有真正起播（startPlayback）成功才切，
+        // 这样解析期间封面/歌词仍是上一首，声音与画面一致；解析失败则维持上一首继续播。
         isResolving = true
         playbackError = nil
-        lyrics = ""
-        parsedLyrics = []
-        currentLyricIndex = -1
 
         // 预取下一首：与当前曲解析并行，切歌时下一首 URL 已就绪，省去解析等待
         prefetchNext()
@@ -434,6 +432,11 @@ final class PlayerManager: ObservableObject {
     }
 
     private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String = "") {
+        // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
+        currentSong = song
+        lyrics = ""
+        parsedLyrics = []
+        currentLyricIndex = -1
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 4
         item.preferredPeakBitRate = 0
