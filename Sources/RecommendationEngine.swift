@@ -189,8 +189,9 @@ final class RecommendationEngine: ObservableObject {
     private func loadFresh() async -> [LXSong] {
         // 新鲜：用 新歌/飙升 榜，偏向用户少用的平台
         let sources = preferredSources(limit: 5)
-        let pool = await fetchLeaderboardPool(sources: sources, keyword: "新歌") +
-                   await fetchLeaderboardPool(sources: sources, keyword: "飙升")
+        async let freshPool = fetchLeaderboardPool(sources: sources, keyword: "新歌")
+        async let risingPool = fetchLeaderboardPool(sources: sources, keyword: "飙升")
+        let pool = (await freshPool) + (await risingPool)
         return rank(pool) {
             self.scoreFresh($0)
         }
