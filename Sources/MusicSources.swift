@@ -7,6 +7,7 @@ enum MusicSources {
         ("tx", "腾讯"),
         ("kg", "酷狗"),
         ("mg", "咪咕"),
+        ("soda", "汽水"),
     ]
 
     static func name(_ id: String) -> String {

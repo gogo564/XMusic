@@ -101,7 +101,7 @@ struct SongRow: View {
             Button("选择音质播放") { showQualityPicker = true }
             Button("下一首播放") { player.playNext(with: song) }
             Button("添加到歌单") { showPlaylistPicker = true }
-            if !downloader.isDownloaded(song) {
+            if !downloader.isDownloaded(song), song.source != "soda" {
                 Button("下载 (320k)") { downloader.download(song, quality: "320k") }
                 Button("下载 (无损)") { downloader.download(song, quality: "flac") }
             }
@@ -144,7 +144,9 @@ struct SongRow: View {
             .frame(width: 30, height: 30)
         } else {
             HStack(spacing: 14) {
-                if downloader.isDownloaded(song) {
+                if song.source == "soda" {
+                    // 汽水歌播放直连 qishui-api，不支持下载，仅显示菜单
+                } else if downloader.isDownloaded(song) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
                         .font(.system(size: 16))
@@ -177,6 +179,7 @@ struct SongRow: View {
         case "wy": return "网易"
         case "kg": return "酷狗"
         case "mg": return "咪咕"
+        case "soda": return "汽水"
         default: return s
         }
     }

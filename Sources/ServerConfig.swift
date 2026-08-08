@@ -9,6 +9,8 @@ struct ServerConfig: Codable, Equatable {
     var playerPassword: String = "3302872"
     var defaultQuality: String = "128k"
     var autoSwitchSource: Bool = true
+    // 汽水音乐 API 服务（自部署 qishui-api），为空则不启用汽水源
+    var sodaBaseURL: String = "http://192.168.1.85:3310"
 
     var normalizedBaseURL: String {
         var url = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)

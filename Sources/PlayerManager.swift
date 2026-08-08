@@ -380,6 +380,21 @@ final class PlayerManager: ObservableObject {
 
     // MARK: - Internal playback
 
+    /// 汽水音乐歌曲（source == "soda"），播放 URL 由 SodaAPIClient 直接提供
+    private func isSoda(_ song: LXSong) -> Bool {
+        song.source == "soda"
+    }
+
+    /// 统一获取播放地址：汽水源走 SodaAPIClient（audio_url 直连），其余走 lx-sync-server
+    private func playbackInfo(for song: LXSong) async throws -> (url: String, type: String, sourceName: String) {
+        if isSoda(song) {
+            let pb = try await SodaAPIClient.shared.playbackURL(trackID: song.songmid ?? "")
+            return (pb.url, "128k", "汽水")
+        }
+        let result = try await LXAPIClient.shared.getPlaybackURL(for: song, quality: quality, autoSwitch: AppConfigStore.shared.config.autoSwitchSource)
+        return (result.url, result.type, result.sourceName)
+    }
+
     private func resolveAndPlay(_ song: LXSong?) {
         guard let song = song else { return }
         // 注意：不在解析前切换 currentSong。只有真正起播（startPlayback）成功才切，
@@ -414,7 +429,7 @@ final class PlayerManager: ObservableObject {
 
         Task {
             do {
-                let result = try await LXAPIClient.shared.getPlaybackURL(for: song, quality: quality, autoSwitch: AppConfigStore.shared.config.autoSwitchSource)
+                let result = try await playbackInfo(for: song)
                 await MainActor.run {
                     guard let url = URL(string: result.url) else {
                         self.playbackError = "播放地址无效"
@@ -474,9 +489,8 @@ final class PlayerManager: ObservableObject {
         if MusicCacheManager.shared.isCached(id: next.id, quality: prefetchQuality) { return }
         prefetchTask = Task { [weak self] in
             guard let self = self else { return }
-            let autoSwitch = AppConfigStore.shared.config.autoSwitchSource
             do {
-                let result = try await LXAPIClient.shared.getPlaybackURL(for: next, quality: prefetchQuality, autoSwitch: autoSwitch)
+                let result = try await playbackInfo(for: next)
                 guard !Task.isCancelled else { return }
                 self.prefetchedURLs[next.id + "_" + prefetchQuality] = result.url
                 MusicCacheManager.shared.startCaching(url: result.url, quality: prefetchQuality, id: next.id)
@@ -510,22 +524,29 @@ final class PlayerManager: ObservableObject {
 
     private func loadLyric(for song: LXSong) async {
         do {
-            let result = try await LXAPIClient.shared.getLyric(for: song)
-            var raw = result.lyric ?? ""
-            var parsed = LRC.parse(raw, translation: result.translated)
+            var raw: String
+            var parsed: LRC
+            if isSoda(song) {
+                raw = try await SodaAPIClient.shared.lyric(trackID: song.songmid ?? "")
+                parsed = LRC.parse(raw)
+            } else {
+                let result = try await LXAPIClient.shared.getLyric(for: song)
+                raw = result.lyric ?? ""
+                parsed = LRC.parse(raw, translation: result.translated)
 
-            if parsed.lines.isEmpty, LRC.hasTimestamps(result.lxlyric) {
-                let lxLines = LRC.parseLxlyric(result.lxlyric)
-                if !lxLines.isEmpty {
-                    raw = lxLines.map { formatLRC($0.time) + $0.text }.joined(separator: "\n")
-                    parsed = LRC.parse(raw)
+                if parsed.lines.isEmpty, LRC.hasTimestamps(result.lxlyric) {
+                    let lxLines = LRC.parseLxlyric(result.lxlyric)
+                    if !lxLines.isEmpty {
+                        raw = lxLines.map { formatLRC($0.time) + $0.text }.joined(separator: "\n")
+                        parsed = LRC.parse(raw)
+                    }
                 }
-            }
 
-            if parsed.lines.isEmpty, LRC.hasTimestamps(raw) == false {
-                if let fallback = await LXAPIClient.shared.getLyricFallback(for: song) {
-                    raw = fallback
-                    parsed = LRC.parse(fallback)
+                if parsed.lines.isEmpty, LRC.hasTimestamps(raw) == false {
+                    if let fallback = await LXAPIClient.shared.getLyricFallback(for: song) {
+                        raw = fallback
+                        parsed = LRC.parse(fallback)
+                    }
                 }
             }
 

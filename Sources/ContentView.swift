@@ -94,6 +94,8 @@ struct HomeView: View {
     @State private var hotKeywords: [String] = []
     @State private var isLoadingBoards = true
     @State private var squareLoading = true
+    @State private var sodaPlaylists: [SodaAPIClient.SodaPlaylist] = []
+    @State private var sodaRadios: [SodaAPIClient.SodaRadio] = []
 
     let gridColumns = [
         GridItem(.flexible(), spacing: 15),
@@ -104,10 +106,14 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 25) {
                 sourcePicker
-                rankSection
-                squareSection
-                if !hotKeywords.isEmpty {
-                    hotSearchSection
+                if source == "soda" {
+                    sodaSection
+                } else {
+                    rankSection
+                    squareSection
+                    if !hotKeywords.isEmpty {
+                        hotSearchSection
+                    }
                 }
                 if !recentStore.items.isEmpty {
                     recentPlayedSection
@@ -284,6 +290,112 @@ struct HomeView: View {
         }
     }
 
+    // MARK: 汽水推荐（source == "soda"）
+    private var sodaSection: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("🍺 汽水推荐歌单")
+                        .font(.title2.bold())
+                    Spacer()
+                    if !SodaAPIClient.shared.isConfigured {
+                        Text("未配置汽水服务")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal)
+
+                if isLoadingBoards {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .padding(.vertical, 20)
+                } else if sodaPlaylists.isEmpty {
+                    Text("暂无推荐，请检查设置中的汽水服务地址")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                } else {
+                    LazyVGrid(columns: gridColumns, spacing: 20) {
+                        ForEach(sodaPlaylists) { pl in
+                            NavigationLink(destination: SodaTrackListView(
+                                title: pl.title,
+                                load: { try await SodaAPIClient.shared.playlistSongs(playlistID: pl.id) }
+                            )) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    AsyncImage(url: URL(string: pl.coverURL)) { image in
+                                        image.resizable().aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        Image(systemName: "music.note.list").foregroundColor(.secondary)
+                                    }
+                                    .frame(height: 120)
+                                    .cornerRadius(12)
+                                    .clipped()
+                                    .overlay(alignment: .bottomTrailing) {
+                                        if pl.trackCount > 0 {
+                                            Text("\(pl.trackCount)首")
+                                                .font(.caption2.bold())
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color.black.opacity(0.6))
+                                                .cornerRadius(4)
+                                                .padding(4)
+                                        }
+                                    }
+                                    Text(pl.title)
+                                        .font(.subheadline.bold())
+                                        .lineLimit(1)
+                                        .foregroundColor(.primary)
+                                }
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("📻 汽水电台")
+                    .font(.title2.bold())
+                    .padding(.horizontal)
+
+                if sodaRadios.isEmpty {
+                    Text("暂无电台")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                } else {
+                    UIKitHorizontalScrollView {
+                        HStack(spacing: 8) {
+                            ForEach(sodaRadios) { radio in
+                                NavigationLink(destination: SodaTrackListView(
+                                    title: radio.title,
+                                    load: { try await SodaAPIClient.shared.radioTracks(radioID: radio.id) }
+                                )) {
+                                    Text(radio.title)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 6)
+                                        .background(Color(.systemGray5))
+                                        .foregroundColor(.primary)
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    .frame(height: 34)
+                }
+            }
+        }
+    }
+
     private func tagChip(_ name: String, id: String?) -> some View {
         Button {
             guard selectedTagID != id else { return }
@@ -381,6 +493,10 @@ struct HomeView: View {
     // MARK: 加载
     @MainActor
     private func loadHome() async {
+        guard source != "soda" else {
+            await loadSodaHome()
+            return
+        }
         isLoadingBoards = true
         squareLoading = true
         async let hot = LXAPIClient.shared.getHotSearch(source: source)
@@ -397,6 +513,14 @@ struct HomeView: View {
         isLoadingBoards = false
         squareTags = await (try? tags) ?? []
         await loadSquare(tagID: selectedTagID)
+    }
+
+    @MainActor
+    private func loadSodaHome() async {
+        isLoadingBoards = true
+        defer { isLoadingBoards = false }
+        sodaPlaylists = (try? await SodaAPIClient.shared.recommendPlaylists()) ?? []
+        sodaRadios = (try? await SodaAPIClient.shared.radioList()) ?? []
     }
 
     @MainActor
@@ -435,7 +559,7 @@ struct SearchView: View {
         VStack(spacing: 0) {
             sourcePicker
             searchField
-            if hasSearched {
+            if hasSearched && source != "soda" {
                 modePicker
             }
             ScrollView(showsIndicators: false) {
@@ -712,6 +836,14 @@ struct SearchView: View {
         guard !text.isEmpty else { return }
         hasSearched = true
         isLoading = true
+        if source == "soda" {
+            // 汽水仅支持歌曲搜索（/search 需登录，未登录时可能返回空）
+            mode = 0
+            let tracks = (try? await SodaAPIClient.shared.search(keyword: text)) ?? []
+            songResults = tracks.map { $0.toLXSong() }
+            isLoading = false
+            return
+        }
         switch mode {
         case 0:
             do {
@@ -1071,7 +1203,12 @@ struct SongSearchResultsView: View {
     private func load() async {
         isLoading = true
         do {
-            songs = try await LXAPIClient.shared.search(name: query, source: source, page: 1, pages: 3)
+            if source == "soda" {
+                let tracks = try await SodaAPIClient.shared.search(keyword: query)
+                songs = tracks.map { $0.toLXSong() }
+            } else {
+                songs = try await LXAPIClient.shared.search(name: query, source: source, page: 1, pages: 3)
+            }
         } catch {
             songs = []
         }

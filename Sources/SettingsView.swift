@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var playerPassword = ""
     @State private var quality = "128k"
     @State private var autoSwitch = true
+    @State private var sodaBaseURL = ""
     @State private var isTesting = false
     @State private var statusMessage: String?
     @State private var isError = false
@@ -35,6 +36,14 @@ struct SettingsView: View {
                     .autocapitalization(.none)
                 TextField("播放器密码 (Web播放器)", text: $playerPassword)
                     .autocapitalization(.none)
+            }
+            Section(header: Text("汽水音乐服务")) {
+                TextField("汽水服务地址（如 http://192.168.1.85:3310）", text: $sodaBaseURL)
+                    .keyboardType(.URL)
+                    .autocapitalization(.none)
+                Text("清空则隐藏汽水源；推荐/电台/播放均通过该服务。")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
             }
             Section(header: Text("播放")) {
                 Picker("默认音质", selection: $quality) {
@@ -129,6 +138,7 @@ struct SettingsView: View {
         playerPassword = cfg.playerPassword
         quality = cfg.defaultQuality
         autoSwitch = cfg.autoSwitchSource
+        sodaBaseURL = cfg.sodaBaseURL
     }
 
     private func save() {
@@ -140,6 +150,7 @@ struct SettingsView: View {
         cfg.playerPassword = playerPassword
         cfg.defaultQuality = quality
         cfg.autoSwitchSource = autoSwitch
+        cfg.sodaBaseURL = sodaBaseURL
         AppConfigStore.shared.config = cfg
         PlayerManager.shared.quality = quality
         statusMessage = "已保存"
