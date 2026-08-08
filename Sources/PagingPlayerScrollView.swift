@@ -36,8 +36,9 @@ struct PagingPlayerScrollView<Page: View>: UIViewRepresentable {
         scrollView.automaticallyAdjustsScrollIndicatorInsets = false
         scrollView.delegate = context.coordinator
         context.coordinator.scrollView = scrollView
-        scrollView.onLayout = { [weak context.coordinator] in
-            context.coordinator?.syncLayout()
+        let coordinator = context.coordinator
+        scrollView.onLayout = { [weak coordinator] in
+            coordinator?.syncLayout()
         }
         return scrollView
     }
