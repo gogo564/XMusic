@@ -84,6 +84,7 @@ struct MiniPlayerLayer: View {
 
 struct HomeView: View {
     @ObservedObject var recentStore = RecentStore.shared
+    @ObservedObject var sodaStore = SodaPlaylistStore.shared
     @EnvironmentObject var player: PlayerManager
 
     @State private var source = "wy"
@@ -346,6 +347,19 @@ struct HomeView: View {
                                                 .padding(4)
                                         }
                                     }
+                                    .overlay(alignment: .topTrailing) {
+                                        Button {
+                                            sodaStore.toggle(pl)
+                                        } label: {
+                                            Image(systemName: sodaStore.isLoved(pl) ? "heart.fill" : "heart")
+                                                .font(.system(size: 13))
+                                                .foregroundColor(.white)
+                                                .padding(6)
+                                                .background(Color.black.opacity(0.4), in: Circle())
+                                                .padding(6)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
                                     Text(pl.title)
                                         .font(.subheadline.bold())
                                         .lineLimit(1)
@@ -540,6 +554,7 @@ struct HomeView: View {
 struct SearchView: View {
     @EnvironmentObject var player: PlayerManager
     @EnvironmentObject var libraryStore: LibraryStore
+    @ObservedObject var sodaStore = SodaPlaylistStore.shared
     @State private var searchText = ""
     @State private var source = "wy"
     @State private var mode = 0 // 0 = 歌曲, 1 = 歌手, 2 = 专辑, 3 = 歌单
@@ -837,6 +852,16 @@ struct SearchView: View {
                                     .foregroundColor(.secondary)
                             }
                             Spacer()
+                            Button {
+                                sodaStore.toggle(pl)
+                            } label: {
+                                Image(systemName: sodaStore.isLoved(pl) ? "heart.fill" : "heart")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(sodaStore.isLoved(pl) ? .red : .secondary)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)

@@ -3,6 +3,7 @@ import SwiftUI
 struct LibraryView: View {
     @EnvironmentObject var playlistStore: PlaylistStore
     @EnvironmentObject var downloader: DownloadService
+    @ObservedObject private var sodaStore = SodaPlaylistStore.shared
     @StateObject private var cacheManager = MusicCacheManager.shared
 
     @State private var showNewPlaylist = false
@@ -133,6 +134,33 @@ struct LibraryView: View {
                                 }
                             }
                             .padding(.vertical, 2)
+                        }
+                    }
+
+                    if !sodaStore.loved.isEmpty {
+                        Section(header: Text("汽水收藏歌单")) {
+                            ForEach(sodaStore.loved) { pl in
+                                NavigationLink(destination: SodaTrackListView(
+                                    title: pl.title,
+                                    load: { try await SodaAPIClient.shared.playlistSongs(playlistID: pl.id) }
+                                )) {
+                                    HStack(spacing: 12) {
+                                        LXCachedImage(urlString: pl.coverURL, size: 48, cornerRadius: 8)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(pl.title)
+                                                .font(.system(size: 15, weight: .medium))
+                                                .lineLimit(1)
+                                            Text(pl.trackCount > 0 ? "\(pl.trackCount) 首" : "汽水歌单")
+                                                .font(.system(size: 12))
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                            .onDelete { offsets in
+                                sodaStore.remove(atOffsets: offsets)
+                            }
                         }
                     }
 

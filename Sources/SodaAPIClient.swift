@@ -62,7 +62,7 @@ struct SodaAPIClient {
 
     // MARK: - 推荐歌单
 
-    struct SodaPlaylist: Identifiable {
+    struct SodaPlaylist: Identifiable, Codable {
         let id: String
         let title: String
         let coverURL: String

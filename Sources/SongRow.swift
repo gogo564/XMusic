@@ -3,6 +3,7 @@ import SwiftUI
 struct SongRow: View {
     @EnvironmentObject private var player: PlayerManager
     @EnvironmentObject private var downloader: DownloadService
+    @EnvironmentObject private var playlistStore: PlaylistStore
 
     let song: LXSong
     let showSource: Bool
@@ -126,6 +127,24 @@ struct SongRow: View {
         }
     }
 
+    private var heartButton: some View {
+        Button {
+            if playlistStore.isLoved(song) {
+                Task { try? await playlistStore.removeSongFromLove(song) }
+            } else {
+                Task { try? await playlistStore.addSongToLove(song) }
+                HapticManager.shared.notification(type: .success)
+            }
+        } label: {
+            Image(systemName: playlistStore.isLoved(song) ? "heart.fill" : "heart")
+                .font(.system(size: 16))
+                .foregroundColor(playlistStore.isLoved(song) ? .red : .secondary)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var trailingActionView: some View {
         let key = song.id + "_320k"
@@ -144,6 +163,7 @@ struct SongRow: View {
             .frame(width: 30, height: 30)
         } else {
             HStack(spacing: 14) {
+                heartButton
                 if song.source == "soda" {
                     // 汽水歌播放直连 qishui-api，不支持下载，仅显示菜单
                 } else if downloader.isDownloaded(song) {
