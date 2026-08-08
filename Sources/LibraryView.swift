@@ -137,6 +137,28 @@ struct LibraryView: View {
                         }
                     }
 
+                    NavigationLink(destination: SodaCollectionListView()) {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color.pink.opacity(0.18))
+                                    .frame(width: 48, height: 48)
+                                Image(systemName: "square.stack.3d.up.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(.pink)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("汽水云收藏")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .lineLimit(1)
+                                Text("我的汽水收藏的歌单 / 专辑")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
                     if !sodaStore.loved.isEmpty {
                         Section(header: Text("汽水收藏歌单")) {
                             ForEach(sodaStore.loved) { pl in

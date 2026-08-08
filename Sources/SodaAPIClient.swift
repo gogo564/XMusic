@@ -120,6 +120,50 @@ struct SodaAPIClient {
         }
     }
 
+    // MARK: - 汽水云收藏（歌单 / 专辑）
+
+    struct SodaCollection: Identifiable {
+        let id: String
+        let type: String
+        let title: String
+        let subtitle: String
+        let coverURL: String
+        let trackCount: Int
+    }
+
+    func myCollections() async throws -> [SodaCollection] {
+        let data = try await postJSON(makeURL("/me/collection/mixed"), body: [:])
+        guard let dict = data as? [String: Any],
+              let list = dict["mixed_collections"] as? [[String: Any]] else { return [] }
+        return list.compactMap { item in
+            let type = item["item_type"] as? String ?? ""
+            if type == "playlist", let p = item["playlist"] as? [String: Any], let id = p["id"] as? String {
+                let count = p["count_tracks"] as? Int ?? 0
+                return SodaCollection(
+                    id: id,
+                    type: "playlist",
+                    title: p["title"] as? String ?? "",
+                    subtitle: "歌单 · \(count) 首",
+                    coverURL: p["cover_url"] as? String ?? "",
+                    trackCount: count
+                )
+            }
+            if type == "album", let a = item["album"] as? [String: Any], let id = a["id"] as? String {
+                let count = a["count_tracks"] as? Int ?? 0
+                let artist = a["artist_name"] as? String ?? ""
+                return SodaCollection(
+                    id: id,
+                    type: "album",
+                    title: a["title"] as? String ?? "",
+                    subtitle: artist.isEmpty ? "专辑" : artist,
+                    coverURL: a["cover_url"] as? String ?? "",
+                    trackCount: count
+                )
+            }
+            return nil
+        }
+    }
+
     // MARK: - 歌曲
 
     struct SodaTrack: Identifiable {
