@@ -20,6 +20,10 @@ struct PlayerView: View {
     @State private var feedLoaded = false
     @State private var showingFullLyrics = false
     @State private var showingComments = false
+    // 三模式侧边栏（汽水式：右缘滑出 / 顶栏呼出）
+    @State private var sidebarOffset: CGFloat = 0
+    @State private var sidebarDragging = false
+    @State private var showingSidebar = false
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
@@ -30,8 +34,10 @@ struct PlayerView: View {
             if showingFullLyrics {
                 fullLyricsView
             }
+            sidebarView
         }
         .preferredColorScheme(.dark)
+        .gesture(sidebarPanGesture)
         .sheet(isPresented: $showingRecentList) {
             RecentPlaylistView()
                 .environmentObject(playerManager)
@@ -124,15 +130,8 @@ struct PlayerView: View {
     private func songPage(song: LXSong?, width: CGFloat) -> some View {
         let coverSize = width - 60
         return ZStack {
-            DominantColorBackground(url: coverURL(for: song))
+            BlurredCoverBackground(url: coverURL(for: song))
                 .ignoresSafeArea()
-
-            LinearGradient(
-                colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.6)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer(minLength: 100)
@@ -157,15 +156,8 @@ struct PlayerView: View {
     private func previewPage(song: LXSong?, width: CGFloat) -> some View {
         let coverSize = width - 60
         return ZStack {
-            DominantColorBackground(url: coverURL(for: song))
+            BlurredCoverBackground(url: coverURL(for: song))
                 .ignoresSafeArea()
-
-            LinearGradient(
-                colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.6)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer(minLength: 100)
@@ -197,15 +189,8 @@ struct PlayerView: View {
 
     private var fullLyricsView: some View {
         ZStack {
-            DominantColorBackground(url: coverURL(for: playerManager.currentSong))
+            BlurredCoverBackground(url: coverURL(for: playerManager.currentSong))
                 .ignoresSafeArea()
-
-            LinearGradient(
-                colors: [Color.black.opacity(0.6), .clear, .clear, Color.black.opacity(0.7)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
 
             if playerManager.parsedLyrics.isEmpty {
                 VStack(spacing: 10) {
@@ -292,7 +277,7 @@ struct PlayerView: View {
 
                 Spacer()
 
-                modeMenu
+                modeButton
 
                 Spacer()
 
@@ -305,27 +290,121 @@ struct PlayerView: View {
         .foregroundColor(.white)
     }
 
-    // 模式选择（三模式切换）+ 播放来源信息
-    private var modeMenu: some View {
-        Menu {
-            ForEach(RecommendMode.allCases) { m in
-                Button {
-                    selectFeedMode(m)
-                } label: {
-                    if engine.mode == m {
-                        Label(m.rawValue, systemImage: "checkmark")
+    // MARK: - 三模式侧边栏（汽水式：点击顶栏呼出 / 屏幕右缘右滑呼出）
+
+    private var sidebarView: some View {
+        ZStack {
+            if showingSidebar || sidebarDragging {
+                Color.black.opacity(0.45 * sidebarDimmingProgress)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        closeSidebar()
+                    }
+                    .animation(.easeInOut(duration: 0.22), value: sidebarOffset)
+            }
+
+            if showingSidebar || sidebarDragging {
+                ModeSidebarView(
+                    mode: engine.mode,
+                    onSelect: { m in
+                        selectFeedMode(m)
+                        closeSidebar()
+                    },
+                    onRefresh: {
+                        refreshSidebarFeed()
+                    },
+                    onBackToDefault: {
+                        HapticManager.shared.selection()
+                        engine.setMode(.recommend)
+                        feedActive = true
+                        Task {
+                            await engine.loadCurrentMode()
+                            await MainActor.run { rebuildFeedQueue() }
+                        }
+                        closeSidebar()
+                    },
+                    onClose: {
+                        closeSidebar()
+                    }
+                )
+                .offset(x: sidebarOffset)
+                .transition(.move(edge: .trailing))
+            }
+        }
+        .zIndex(20)
+        .animation(.easeInOut(duration: 0.28), value: showingSidebar)
+    }
+
+    private var sidebarWidth: CGFloat { 300 }
+
+    private var sidebarDimmingProgress: Double {
+        let hidden = -sidebarWidth
+        let shown: CGFloat = 0
+        let p = (sidebarOffset - hidden) / (shown - hidden)
+        return Double(min(max(p, 0), 1))
+    }
+
+    // 右缘右滑呼出侧边栏
+    private var sidebarPanGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                let screenW = UIScreen.main.bounds.width
+                let startX = value.startLocation.x
+                let dx = value.translation.width
+                if !showingSidebar && !sidebarDragging {
+                    // 仅当从右缘开始且右滑时开始跟踪
+                    if startX > screenW - 38 && dx > 0 {
+                        sidebarDragging = true
+                    }
+                }
+                if sidebarDragging {
+                    sidebarOffset = max(dx - sidebarWidth, -sidebarWidth)
+                }
+            }
+            .onEnded { value in
+                if sidebarDragging {
+                    sidebarDragging = false
+                    let velocity = value.predictedEndTranslation.width
+                    if sidebarOffset > -sidebarWidth * 0.6 || velocity > 400 {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            sidebarOffset = 0
+                            showingSidebar = true
+                        }
                     } else {
-                        Label(m.rawValue, systemImage: m.icon)
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            sidebarOffset = -sidebarWidth
+                            showingSidebar = false
+                        }
                     }
                 }
             }
-            Divider()
-            Button(role: .destructive) {
-                exitFeedMode()
-            } label: {
-                Label("退出推荐流", systemImage: "xmark")
-            }
-        } label: {
+    }
+
+    private func closeSidebar() {
+        HapticManager.shared.selection()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            sidebarOffset = -sidebarWidth
+            showingSidebar = false
+        }
+    }
+
+    // 换一换：保持当前模式，重新加载推荐
+    private func refreshSidebarFeed() {
+        HapticManager.shared.selection()
+        feedActive = true
+        Task {
+            await engine.loadCurrentMode()
+            await MainActor.run { rebuildFeedQueue() }
+        }
+    }
+
+    // 模式呼出（点击打开三模式侧边栏）
+    private var modeButton: some View {
+        Button(action: {
+            HapticManager.shared.selection()
+            showingSidebar = true
+        }) {
             VStack(spacing: 2) {
                 Text("模式选择")
                     .font(.headline)
