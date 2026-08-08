@@ -106,15 +106,12 @@ struct PlayerView: View {
         .ignoresSafeArea()
     }
 
-    // 每页视图：当前页完整播放页，邻页为对齐布局的预览（对齐汽水 AudioPlayItemViewController）
+    // 每页视图：对齐汽水 AudioPlayItemViewController —— 每一页都是完整播放页
+    // （背景 + 封面 + 歌词 + 底部控制区），不区分"当前页/邻页预览"，杜绝滑动后内容丢失。
     @ViewBuilder
     private func pageView(forIndex index: Int, width: CGFloat, height: CGFloat) -> some View {
         if feedQueue.indices.contains(index) {
-            if index == feedIndex {
-                songPage(song: feedQueue[index], width: width, height: height)
-            } else {
-                previewPage(song: feedQueue[index], width: width, height: height)
-            }
+            songPage(song: feedQueue[index], width: width, height: height)
         } else {
             songPage(song: displaySong, width: width, height: height)
         }
@@ -129,67 +126,39 @@ struct PlayerView: View {
         playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
     }
 
-    // 当前完整页：模糊沉浸背景铺满 + 封面（高度约束）+ 歌词 + 底部控制区（对齐汽水页面结构）。
-    // 背景固定铺满，封面/歌词/控制区用弹性 Spacer 撑开，控制区始终贴底可见。
+    // 每页内容：模糊沉浸背景铺满 + 封面 + 歌词 + 底部控制区。
+    // 内部用 GeometryReader 读取本页实际尺寸（hosting view 已由容器铺满），
+    // 封面高度受约束、控制区贴底，任何页高都不会把底部挤出屏幕。
     private func songPage(song: LXSong?, width: CGFloat, height: CGFloat) -> some View {
-        let coverSize = min(width - 60, height * 0.42)
-        return ZStack {
-            BlurredCoverBackground(url: coverURL(for: song))
+        GeometryReader { geo in
+            let pageW = geo.size.width
+            let pageH = geo.size.height
+            let coverSize = min(pageW - 60, pageH * 0.42)
+            ZStack {
+                BlurredCoverBackground(url: coverURL(for: song))
 
-            VStack(spacing: 0) {
-                Spacer(minLength: 12)
+                VStack(spacing: 0) {
+                    Spacer(minLength: 12)
 
-                coverCard(song: song, size: coverSize)
+                    coverCard(song: song, size: coverSize)
 
-                Spacer(minLength: 22)
+                    Spacer(minLength: 22)
 
-                currentLyricView
+                    currentLyricView
 
-                Spacer(minLength: 14)
+                    Spacer(minLength: 14)
 
-                trackInfoAndControls(song: song)
+                    trackInfoAndControls(song: song)
 
-                Spacer(minLength: 20)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .frame(width: width, height: height)
-        .background(Color.black)
-        .clipped()
-    }
-
-    // 邻页预览：与当前页同一套整页布局（铺满背景 + 封面 + 歌名/歌手），跟随滚动带平移
-    private func previewPage(song: LXSong?, width: CGFloat, height: CGFloat) -> some View {
-        let coverSize = min(width - 60, height * 0.42)
-        return ZStack {
-            BlurredCoverBackground(url: coverURL(for: song))
-
-            VStack(spacing: 0) {
-                Spacer(minLength: 12)
-
-                coverCard(song: song, size: coverSize)
-
-                Spacer(minLength: 22)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(song?.name ?? "未知歌曲")
-                        .font(.title2.bold())
-                        .lineLimit(1)
-                    Text(song?.singer ?? "未知歌手")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.7))
-                        .lineLimit(1)
+                    Spacer(minLength: 20)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 24)
-
-                Spacer(minLength: 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: pageW, height: pageH)
+            .background(Color.black)
+            .clipped()
         }
         .frame(width: width, height: height)
-        .background(Color.black)
-        .clipped()
     }
 
     // MARK: - 全屏歌词（点击封面进入，抖音式覆盖层）：当前行高亮居中，可滚动，点击/下滑退出
@@ -291,30 +260,30 @@ struct PlayerView: View {
     }
 
     // MARK: - 悬浮顶部 ActionBar（不随页滑动）
+    // 注意：fullScreenCover 的 ZStack 已按安全区布局（顶部起点就在状态栏下），
+    // 这里直接 padding 少量即可，不能再用 safeAreaInsets.top 叠加（否则顶栏被顶到屏幕中部）。
 
     private var topOverlay: some View {
-        GeometryReader { geo in
-            VStack {
-                HStack {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "chevron.down")
-                            .font(.title2.bold())
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-
-                    Spacer()
-
-                    modeButton
-
-                    Spacer()
-
-                    topMenu
+        VStack {
+            HStack {
+                Button(action: { dismiss() }) {
+                    Image(systemName: "chevron.down")
+                        .font(.title2.bold())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .padding(.horizontal)
-                .padding(.top, geo.safeAreaInsets.top + 8)
+
                 Spacer()
+
+                modeButton
+
+                Spacer()
+
+                topMenu
             }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            Spacer()
         }
         .foregroundColor(.white)
     }
