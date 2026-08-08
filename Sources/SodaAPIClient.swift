@@ -60,6 +60,26 @@ struct SodaAPIClient {
         return dict["data"] ?? [:]
     }
 
+    /// 原始 JSON（不要求 code == 0），用于登录状态检测/更新，需读取错误 message
+    private func rawJSON(_ url: URL?, method: String = "GET", body: [String: Any]? = nil) async throws -> [String: Any] {
+        guard let url = url else { throw SodaError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 25
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw SodaError.http(http.statusCode)
+        }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw SodaError.upstream
+        }
+        return obj
+    }
+
     // MARK: - 推荐歌单
 
     struct SodaPlaylist: Identifiable, Codable {
@@ -201,6 +221,44 @@ struct SodaAPIClient {
                 trackCount: p["count_tracks"] as? Int ?? 0
             )
         }
+    }
+
+    // MARK: - 登录状态
+
+    struct SodaAuthStatus {
+        let valid: Bool
+        let nickname: String
+        let message: String
+    }
+
+    /// 检测汽水登录态是否有效（qishui-api /auth/status）
+    func authStatus() async throws -> SodaAuthStatus {
+        let dict = try await rawJSON(makeURL("/auth/status"))
+        if let data = dict["data"] as? [String: Any] {
+            return SodaAuthStatus(
+                valid: data["valid"] as? Bool ?? false,
+                nickname: data["nickname"] as? String ?? "",
+                message: data["message"] as? String ?? ""
+            )
+        }
+        return SodaAuthStatus(valid: false, nickname: "", message: dict["message"] as? String ?? "检测失败")
+    }
+
+    /// 更新汽水登录签名（Cookie/X-Helios/X-Medusa），qishui-api 校验成功才持久化
+    func updateAuth(cookie: String, helios: String, medusa: String) async throws -> SodaAuthStatus {
+        let dict = try await rawJSON(makeURL("/auth/update"), method: "POST", body: [
+            "cookie": cookie,
+            "helios": helios,
+            "medusa": medusa,
+        ])
+        if let data = dict["data"] as? [String: Any] {
+            return SodaAuthStatus(
+                valid: data["valid"] as? Bool ?? false,
+                nickname: data["nickname"] as? String ?? "",
+                message: data["message"] as? String ?? ""
+            )
+        }
+        return SodaAuthStatus(valid: false, nickname: "", message: dict["message"] as? String ?? "更新失败")
     }
 
     // MARK: - 播放 URL 与歌词

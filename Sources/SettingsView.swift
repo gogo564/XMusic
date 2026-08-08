@@ -18,6 +18,13 @@ struct SettingsView: View {
     @State private var isTesting = false
     @State private var statusMessage: String?
     @State private var isError = false
+    @State private var sodaAuthStatus: String?
+    @State private var sodaAuthLoading = false
+    @State private var sodaCookie = ""
+    @State private var sodaHelios = ""
+    @State private var sodaMedusa = ""
+    @State private var sodaUpdating = false
+    @State private var sodaUpdateMessage: String?
 
     private let qualities = ["128k", "320k", "flac"]
 
@@ -44,6 +51,49 @@ struct SettingsView: View {
                 Text("清空则隐藏汽水源；推荐/电台/播放均通过该服务。")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
+                if !sodaBaseURL.isEmpty {
+                    HStack {
+                        Text("登录状态")
+                        Spacer()
+                        if sodaAuthLoading {
+                            ProgressView()
+                        } else if let status = sodaAuthStatus {
+                            Text(status)
+                                .font(.system(size: 13))
+                                .foregroundColor(status.hasPrefix("✅") ? .green : .red)
+                        }
+                    }
+                    Button {
+                        checkSodaAuth()
+                    } label: {
+                        Label(sodaAuthStatus == nil ? "检测汽水登录状态" : "重新检测", systemImage: "arrow.clockwise")
+                    }
+                    DisclosureGroup("更新汽水登录签名（失效时粘贴新值）") {
+                        TextField("Cookie（含 sessionid，抓包整段复制）", text: $sodaCookie)
+                            .font(.system(size: 12))
+                            .autocapitalization(.none)
+                        TextField("X-Helios", text: $sodaHelios)
+                            .font(.system(size: 12))
+                            .autocapitalization(.none)
+                        TextField("X-Medusa", text: $sodaMedusa)
+                            .font(.system(size: 12))
+                            .autocapitalization(.none)
+                        Button {
+                            updateSodaAuth()
+                        } label: {
+                            HStack {
+                                if sodaUpdating { ProgressView().scaleEffect(0.7) }
+                                Text(sodaUpdating ? "校验中…" : "校验并保存")
+                            }
+                        }
+                        .disabled(sodaUpdating)
+                        if let msg = sodaUpdateMessage {
+                            Text(msg)
+                                .font(.system(size: 12))
+                                .foregroundColor(msg.hasPrefix("✅") ? .green : .red)
+                        }
+                    }
+                }
             }
             Section(header: Text("播放")) {
                 Picker("默认音质", selection: $quality) {
@@ -178,6 +228,45 @@ struct SettingsView: View {
             isError = true
         }
         isTesting = false
+    }
+
+    private func checkSodaAuth() {
+        guard !sodaBaseURL.isEmpty else { return }
+        sodaAuthLoading = true
+        sodaAuthStatus = nil
+        Task {
+            defer { sodaAuthLoading = false }
+            let result = (try? await SodaAPIClient.shared.authStatus())
+                ?? SodaAPIClient.SodaAuthStatus(valid: false, nickname: "", message: "检测失败")
+            sodaAuthStatus = result.valid
+                ? "✅ 正常（\(result.nickname)）"
+                : "⚠️ \(result.message)"
+        }
+    }
+
+    private func updateSodaAuth() {
+        guard !sodaBaseURL.isEmpty else {
+            sodaUpdateMessage = "请先填写汽水服务地址"
+            return
+        }
+        guard !sodaCookie.isEmpty || !sodaHelios.isEmpty || !sodaMedusa.isEmpty else {
+            sodaUpdateMessage = "请至少粘贴 Cookie 或签名中的一项"
+            return
+        }
+        sodaUpdating = true
+        sodaUpdateMessage = nil
+        Task {
+            defer { sodaUpdating = false }
+            let result = (try? await SodaAPIClient.shared.updateAuth(cookie: sodaCookie, helios: sodaHelios, medusa: sodaMedusa))
+                ?? SodaAPIClient.SodaAuthStatus(valid: false, nickname: "", message: "更新失败")
+            sodaUpdateMessage = result.valid ? "✅ \(result.message)" : "⚠️ \(result.message)"
+            if result.valid {
+                sodaCookie = ""
+                sodaHelios = ""
+                sodaMedusa = ""
+                sodaAuthStatus = "✅ 正常（\(result.nickname)）"
+            }
+        }
     }
 }
 
