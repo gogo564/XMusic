@@ -256,9 +256,11 @@ struct PlayerView: View {
                 Spacer(minLength: 0)
             } else if playerManager.currentLyricIndex < 0 {
                 Spacer(minLength: 0)
-                Text("正在加载歌词…")
+                Text(playerManager.parsedLyrics.first?.text ?? "歌词即将开始")
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
                 Spacer(minLength: 0)
             } else {
                 Spacer(minLength: 0)
