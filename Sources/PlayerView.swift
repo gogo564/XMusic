@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct PlayerView: View {
     @EnvironmentObject var playerManager: PlayerManager
@@ -7,37 +6,20 @@ struct PlayerView: View {
     @EnvironmentObject var downloader: DownloadService
     @Environment(\.dismiss) var dismiss
     @ObservedObject var recentStore = RecentStore.shared
-    @ObservedObject var engine = RecommendationEngine.shared
+    @State private var showInPlaceLyrics = false
     @State private var localTime: Double = 0
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
-    // 滑动换歌（汽水式分页）：feedIndex 为当前页索引，由原生分页容器驱动
-    @State private var displaySong: LXSong?
-    @State private var feedQueue: [LXSong] = []
-    @State private var feedIndex = 0
-    @State private var feedActive = false
-    @State private var feedLoaded = false
-    @State private var showingFullLyrics = false
-    @State private var showingComments = false
-    // 三模式侧边栏（汽水式：右缘滑出 / 顶栏呼出）
-    @State private var sidebarOffset: CGFloat = 0
-    @State private var sidebarDragging = false
-    @State private var showingSidebar = false
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
     var body: some View {
         ZStack {
-            swipeablePage
-            topOverlay
-            if showingFullLyrics {
-                fullLyricsView
-            }
-            sidebarView
+            backgroundBlur
+            mainPlayerView
         }
         .preferredColorScheme(.dark)
-        .gesture(sidebarPanGesture)  // 仅右缘右滑触发，与竖向分页兼容
         .sheet(isPresented: $showingRecentList) {
             RecentPlaylistView()
                 .environmentObject(playerManager)
@@ -48,380 +30,41 @@ struct PlayerView: View {
                     .environmentObject(playlistStore)
             }
         }
-        .sheet(isPresented: $showingComments) {
-            CommentsView(song: playerManager.currentSong)
-                .environmentObject(playerManager)
-        }
-        .onChange(of: playerManager.currentSong?.id) { _ in
-            displaySong = playerManager.currentSong
-            // 若当前歌不在推荐里（手动从歌单/搜索/榜单点的歌），自动退出推荐流回到歌单滑动
-            if feedActive, let cur = playerManager.currentSong,
-               !engine.recommendations.contains(where: { $0.id == cur.id }) {
-                feedActive = false
-            }
-            rebuildFeedQueue()
-        }
-        .onChange(of: feedIndex) { _ in
-            // 原生分页吸附落定后切歌（汽水式：滑动到哪页播哪页）
-            handlePageSettled()
-        }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
-            displaySong = playerManager.currentSong
-            if !feedLoaded {
-                feedLoaded = true
-                Task { await loadFeedQueue() }
-            }
         }
     }
 
-    private func coverURL(for song: LXSong?) -> URL? {
-        guard let song = song, !song.imageURL.isEmpty else { return nil }
-        return URL(string: song.imageURL)
-    }
-
-    // MARK: - 汽水式竖向分页：原生 UIScrollView 分页容器（系统级惯性/吸附），
-    // 每页完整播放页，只渲染当前页与上下邻页（cell 复用），iOS 15 安全
-
-    private var swipeablePage: some View {
-        // 注意：ignoresSafeArea 加在 GeometryReader 上，使 geo.size 等于全屏尺寸，
-        // 再以该尺寸显式构建每页，hosting view 才与屏幕完全一致（否则内容被安全区压缩，
-        // 表现为"横版显示不全 / 背景不铺满 / 底部控制区消失"）。
+    private var backgroundBlur: some View {
         GeometryReader { geo in
-            PagingPlayerScrollView(
-                currentIndex: feedIndex,
-                pageCount: max(feedQueue.count, 1),
-                pageBuilder: { index in
-                    pageView(forIndex: index, width: geo.size.width, height: geo.size.height)
-                },
-                onIndexChange: { newIndex in
-                    if newIndex != feedIndex {
-                        feedIndex = newIndex
-                    }
+            ZStack {
+                AsyncImage(url: coverURL) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .blur(radius: 45)
+                        .opacity(0.6)
+                } placeholder: {
+                    Color.black
                 }
-            )
-            .frame(width: geo.size.width, height: geo.size.height)
-            .background(Color.black)
+
+                // 顶部 + 底部渐变遮罩，保证文字可读
+                LinearGradient(
+                    colors: [Color.black.opacity(0.5), .clear, .clear, Color.black.opacity(0.65)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
         }
         .ignoresSafeArea()
     }
 
-    // 每页视图：对齐汽水 AudioPlayItemViewController —— 每一页都是完整播放页
-    // （背景 + 封面 + 歌词 + 底部控制区），不区分"当前页/邻页预览"，杜绝滑动后内容丢失。
-    @ViewBuilder
-    private func pageView(forIndex index: Int, width: CGFloat, height: CGFloat) -> some View {
-        if feedQueue.indices.contains(index) {
-            songPage(song: feedQueue[index], width: width, height: height)
-        } else {
-            songPage(song: displaySong, width: width, height: height)
-        }
+    private var coverURL: URL? {
+        guard let song = playerManager.currentSong, !song.imageURL.isEmpty else { return nil }
+        return URL(string: song.imageURL)
     }
 
-    // 翻页落定（原生分页吸附完成）→ 切歌。由 feedIndex 的 onChange 触发
-    private func handlePageSettled() {
-        guard feedQueue.indices.contains(feedIndex) else { return }
-        let song = feedQueue[feedIndex]
-        guard playerManager.currentSong?.id != song.id else { return }
-        displaySong = song
-        playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
-    }
-
-    // 每页内容：模糊沉浸背景铺满 + 封面 + 歌词 + 底部控制区。
-    // 内部用 GeometryReader 读取本页实际尺寸（hosting view 已由容器铺满），
-    // 封面高度受约束、控制区贴底，任何页高都不会把底部挤出屏幕。
-    private func songPage(song: LXSong?, width: CGFloat, height: CGFloat) -> some View {
-        GeometryReader { geo in
-            let pageW = geo.size.width
-            let pageH = geo.size.height
-            let coverSize = min(pageW - 60, pageH * 0.42)
-            ZStack {
-                BlurredCoverBackground(url: coverURL(for: song))
-
-                VStack(spacing: 0) {
-                    Spacer(minLength: 12)
-
-                    coverCard(song: song, size: coverSize)
-
-                    Spacer(minLength: 22)
-
-                    currentLyricView
-
-                    Spacer(minLength: 14)
-
-                    trackInfoAndControls(song: song)
-
-                    Spacer(minLength: 20)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(width: pageW, height: pageH)
-            .background(Color.black)
-            .clipped()
-        }
-        .frame(width: width, height: height)
-    }
-
-    // MARK: - 全屏歌词（点击封面进入，抖音式覆盖层）：当前行高亮居中，可滚动，点击/下滑退出
-
-    private var fullLyricsView: some View {
-        ZStack {
-            BlurredCoverBackground(url: coverURL(for: playerManager.currentSong))
-                .ignoresSafeArea()
-
-            if playerManager.parsedLyrics.isEmpty {
-                VStack(spacing: 10) {
-                    Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
-                        .font(.title3)
-                        .foregroundColor(.white.opacity(0.75))
-                        .multilineTextAlignment(.center)
-                    Text("点击任意处返回")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.4))
-                }
-                .padding(32)
-            } else {
-                lyricsScroller
-            }
-
-            // 全屏歌词顶栏（对齐汽水 LongLyricView backButton）
-            VStack {
-                HStack {
-                    Button(action: {
-                        HapticManager.shared.selection()
-                        showingFullLyrics = false
-                    }) {
-                        Image(systemName: "chevron.down")
-                            .font(.title2.bold())
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal)
-                .padding(.top, 8)
-                Spacer()
-            }
-            .foregroundColor(.white)
-
-            // 返回提示
-            VStack {
-                Spacer()
-                Text("下滑返回")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.4))
-                    .padding(.bottom, 40)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            HapticManager.shared.selection()
-            showingFullLyrics = false
-        }
-        .gesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { value in
-                    // 下滑退出全屏歌词
-                    if value.translation.height > 60 {
-                        HapticManager.shared.selection()
-                        showingFullLyrics = false
-                    }
-                }
-        )
-        .transition(.opacity)
-        .zIndex(10)
-    }
-
-    // 歌词滚动视图：当前行高亮居中，随时间自动滚动到当前行
-    private var lyricsScroller: some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
-                    Spacer(minLength: 140)
-                    ForEach(Array(playerManager.parsedLyrics.enumerated()), id: \.element.id) { index, line in
-                        let isCurrent = index == playerManager.currentLyricIndex
-                        Text(line.text.isEmpty ? " " : line.text)
-                            .font(.system(size: isCurrent ? 21 : 15, weight: isCurrent ? .semibold : .regular))
-                            .foregroundColor(isCurrent ? .white : .white.opacity(0.45))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                            .id(index)
-                    }
-                    Spacer(minLength: 140)
-                }
-                .padding(.horizontal, 28)
-            }
-            .onChange(of: playerManager.currentLyricIndex) { _ in
-                guard playerManager.currentLyricIndex >= 0 else { return }
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    proxy.scrollTo(playerManager.currentLyricIndex, anchor: .center)
-                }
-            }
-        }
-    }
-
-    // MARK: - 悬浮顶部 ActionBar（不随页滑动）
-    // 注意：fullScreenCover 的 ZStack 已按安全区布局（顶部起点就在状态栏下），
-    // 这里直接 padding 少量即可，不能再用 safeAreaInsets.top 叠加（否则顶栏被顶到屏幕中部）。
-
-    private var topOverlay: some View {
-        VStack {
-            HStack {
-                Button(action: { dismiss() }) {
-                    Image(systemName: "chevron.down")
-                        .font(.title2.bold())
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-
-                Spacer()
-
-                modeButton
-
-                Spacer()
-
-                topMenu
-            }
-            .padding(.horizontal)
-            .padding(.top, 8)
-            Spacer()
-        }
-        .foregroundColor(.white)
-    }
-
-    // MARK: - 三模式侧边栏（汽水式：点击顶栏呼出 / 屏幕右缘右滑呼出）
-
-    private var sidebarView: some View {
-        ZStack {
-            if showingSidebar || sidebarDragging {
-                Color.black.opacity(0.45 * sidebarDimmingProgress)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        closeSidebar()
-                    }
-                    .animation(.easeInOut(duration: 0.22), value: sidebarOffset)
-            }
-
-            if showingSidebar || sidebarDragging {
-                ModeSidebarView(
-                    mode: engine.mode,
-                    onSelect: { m in
-                        selectFeedMode(m)
-                        closeSidebar()
-                    },
-                    onRefresh: {
-                        refreshSidebarFeed()
-                    },
-                    onBackToDefault: {
-                        HapticManager.shared.selection()
-                        engine.setMode(.recommend)
-                        feedActive = true
-                        Task {
-                            await engine.loadCurrentMode()
-                            await MainActor.run { rebuildFeedQueue() }
-                        }
-                        closeSidebar()
-                    },
-                    onClose: {
-                        closeSidebar()
-                    }
-                )
-                .offset(x: sidebarOffset)
-                .transition(.move(edge: .trailing))
-            }
-        }
-        .zIndex(20)
-        .animation(.easeInOut(duration: 0.28), value: showingSidebar)
-    }
-
-    private var sidebarWidth: CGFloat { 300 }
-
-    private var sidebarDimmingProgress: Double {
-        let hidden = -sidebarWidth
-        let shown: CGFloat = 0
-        let p = (sidebarOffset - hidden) / (shown - hidden)
-        return Double(min(max(p, 0), 1))
-    }
-
-    // 右缘右滑呼出侧边栏
-    private var sidebarPanGesture: some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { value in
-                guard !showingFullLyrics else { return }
-                let screenW = UIScreen.main.bounds.width
-                let startX = value.startLocation.x
-                let dx = value.translation.width
-                if !showingSidebar && !sidebarDragging {
-                    // 仅当从右缘开始且右滑时开始跟踪
-                    if startX > screenW - 38 && dx > 0 {
-                        sidebarDragging = true
-                    }
-                }
-                if sidebarDragging {
-                    sidebarOffset = max(dx - sidebarWidth, -sidebarWidth)
-                }
-            }
-            .onEnded { value in
-                guard !showingFullLyrics else { return }
-                if sidebarDragging {
-                    sidebarDragging = false
-                    let velocity = value.predictedEndTranslation.width
-                    if sidebarOffset > -sidebarWidth * 0.6 || velocity > 400 {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            sidebarOffset = 0
-                            showingSidebar = true
-                        }
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            sidebarOffset = -sidebarWidth
-                            showingSidebar = false
-                        }
-                    }
-                }
-            }
-    }
-
-    private func closeSidebar() {
-        HapticManager.shared.selection()
-        withAnimation(.easeInOut(duration: 0.25)) {
-            sidebarOffset = -sidebarWidth
-            showingSidebar = false
-        }
-    }
-
-    // 换一换：保持当前模式，重新加载推荐
-    private func refreshSidebarFeed() {
-        HapticManager.shared.selection()
-        feedActive = true
-        Task {
-            await engine.loadCurrentMode()
-            await MainActor.run { rebuildFeedQueue() }
-        }
-    }
-
-    // 模式呼出（点击打开三模式侧边栏）
-    private var modeButton: some View {
-        Button(action: {
-            HapticManager.shared.selection()
-            withAnimation(.easeInOut(duration: 0.25)) {
-                sidebarOffset = 0
-                showingSidebar = true
-            }
-        }) {
-            VStack(spacing: 2) {
-                Text("模式选择")
-                    .font(.headline)
-                Text(engine.mode.rawValue)
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.55))
-            }
-            .frame(width: 150)
-            .contentShape(Rectangle())
-        }
-    }
-
-    // 来源 · 音质 · 下载/缓存 信息（显示在封面下方歌名上方）
-    private var playbackInfoLine: String {
+    private var playbackSubtitle: String {
         var parts: [String] = []
         if !playerManager.sourceName.isEmpty {
             parts.append(MusicSources.name(playerManager.sourceName))
@@ -429,10 +72,65 @@ struct PlayerView: View {
         if !playerManager.qualityName.isEmpty {
             parts.append(MusicSources.qualityName(playerManager.qualityName))
         }
-        if !playerManager.playbackOrigin.isEmpty {
-            parts.append(playerManager.playbackOrigin)
+        return parts.isEmpty ? " " : parts.joined(separator: " · ")
+    }
+
+    // MARK: - Main Player View
+
+    private var mainPlayerView: some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                topBar
+                    .padding(.top, 8)
+
+                bodyArea(width: geo.size.width)
+
+                trackInfoAndControls
+                    .padding(.bottom, 40)
+            }
         }
-        return parts.isEmpty ? "" : parts.joined(separator: " · ")
+    }
+
+    private var topBar: some View {
+        HStack {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.down")
+                    .font(.title2.bold())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+
+            Spacer()
+
+            VStack(spacing: 2) {
+                Text("正在播放")
+                    .font(.headline)
+                HStack(spacing: 4) {
+                    Text(playbackSubtitle)
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.55))
+                    if !playerManager.playbackOrigin.isEmpty {
+                        Text(playerManager.playbackOrigin)
+                            .font(.system(size: 9, weight: .medium))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.white.opacity(0.2))
+                            .clipShape(Capsule())
+                    }
+                }
+                if playerManager.sleepTimerRemaining > 0 {
+                    Text("定时 \(playerManager.sleepTimerText) 后停止")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
+
+            Spacer()
+
+            topMenu
+        }
+        .padding(.horizontal)
+        .foregroundColor(.white)
     }
 
     private var topMenu: some View {
@@ -448,6 +146,12 @@ struct PlayerView: View {
                 ForEach(qualityOptions, id: \.self) { q in
                     Text(q).tag(q)
                 }
+            }
+
+            Button {
+                toggleLyrics()
+            } label: {
+                Label(showInPlaceLyrics ? "隐藏歌词" : "显示歌词", systemImage: "text.quote")
             }
 
             Menu("定时关闭") {
@@ -472,83 +176,149 @@ struct PlayerView: View {
         )
     }
 
-    // MARK: - 歌词：封面下方上下 2 行居中（当前行 + 下一行），对齐汽水 ShortLyricView
-
-    private var currentLyricView: some View {
-        Group {
-            if playerManager.parsedLyrics.isEmpty {
-                Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else {
-                let lines = playerManager.parsedLyrics
-                let idx = max(playerManager.currentLyricIndex, 0)
-                let current = lines.indices.contains(idx) ? lines[idx].text : ""
-                let next = lines.indices.contains(idx + 1) ? lines[idx + 1].text : ""
-                VStack(spacing: 8) {
-                    Text(current.isEmpty ? " " : current)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .multilineTextAlignment(.center)
-                    Text(next.isEmpty ? " " : next)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .frame(height: 74, alignment: .center)
-            }
-        }
-        .padding(.horizontal, 20)
+    private func toggleLyrics() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showInPlaceLyrics.toggle() }
+        HapticManager.shared.selection()
     }
 
-    // MARK: - Cover Card (square, rounded, 屏宽-60) 点击进入全屏歌词
+    // MARK: - Body Area (cover <-> full-height lyrics)
 
-    private func coverCard(song: LXSong?, size: CGFloat) -> some View {
-        LXCachedImage(urlString: coverURL(for: song)?.absoluteString ?? "", size: size, cornerRadius: 20)
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
-            .onTapGesture {
-                HapticManager.shared.selection()
-                showingFullLyrics = true
+    private func bodyArea(width: CGFloat) -> some View {
+        let coverSize = min(width * 0.74, 320)
+        return ZStack {
+            if showInPlaceLyrics {
+                fullLyricsView
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                        removal: .opacity.combined(with: .scale(scale: 0.9))))
+            } else {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 8)
+                    coverCard(size: coverSize)
+                    Spacer(minLength: 8)
+                }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                    removal: .opacity.combined(with: .scale(scale: 0.9))))
             }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            toggleLyrics()
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    if value.translation.height < -60, !showInPlaceLyrics {
+                        toggleLyrics()
+                    } else if value.translation.height > 60, showInPlaceLyrics {
+                        toggleLyrics()
+                    }
+                }
+        )
+    }
+
+    // MARK: - Cover Card (square, rounded)
+
+    private func coverCard(size: CGFloat) -> some View {
+        AsyncImage(url: coverURL) { image in
+            image.resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+        } placeholder: {
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color.gray.opacity(0.35))
+                .frame(width: size, height: size)
+                .overlay(
+                    Image(systemName: "music.note")
+                        .font(.system(size: 54))
+                        .foregroundColor(.white.opacity(0.55))
+                )
+        }
+        .shadow(color: Color.black.opacity(0.45), radius: 22, x: 0, y: 10)
+    }
+
+    // MARK: - Full-height Layered Lyrics
+    // 顶部从「正在播放」下方开始，底部到歌名/控制区为止，铺满整块区域。
+
+    private var fullLyricsView: some View {
+        VStack(alignment: .center, spacing: 0) {
+            if playerManager.parsedLyrics.isEmpty {
+                Spacer(minLength: 0)
+                Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Spacer(minLength: 0)
+            } else if playerManager.currentLyricIndex < 0 {
+                Spacer(minLength: 0)
+                Text("正在加载歌词…")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.6))
+                Spacer(minLength: 0)
+            } else {
+                Spacer(minLength: 0)
+                VStack(spacing: 18) {
+                    ForEach(visibleLyrics) { item in
+                        Text(item.text)
+                            .font(.body)
+                            .fontWeight(item.diff == 0 ? .bold : .regular)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .foregroundColor(item.text.isEmpty ? .clear : (item.diff == 0 ? .white : .white.opacity(0.45)))
+                            .shadow(color: Color.black.opacity(0.5), radius: 6)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .move(edge: .top).combined(with: .opacity)))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 20)
+        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: playerManager.currentLyricIndex)
+    }
+
+    private var visibleLyrics: [VisibleLyric] {
+        let lines = playerManager.parsedLyrics
+        let idx = playerManager.currentLyricIndex
+        guard !lines.isEmpty, idx >= 0, idx < lines.count else { return [] }
+        var out: [VisibleLyric] = []
+        for offset in -2...2 {
+            let li = idx + offset
+            if lines.indices.contains(li) {
+                out.append(VisibleLyric(id: li, diff: offset, text: lines[li].text))
+            } else {
+                out.append(VisibleLyric(id: li, diff: offset, text: ""))
+            }
+        }
+        return out
     }
 
     // MARK: - Track Info & Controls
 
-    private func trackInfoAndControls(song: LXSong?) -> some View {
-        VStack(spacing: 22) {
-            // 歌名 / 歌手（左对齐）+ 下载 + 收藏
+    private var trackInfoAndControls: some View {
+        VStack(spacing: 26) {
+            // 歌名 / 歌手（左对齐）+ 收藏 + 下载
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(song?.name ?? "未知歌曲")
+                    Text(playerManager.currentSong?.name ?? "未知歌曲")
                         .font(.title2.bold())
                         .lineLimit(1)
-                    Text(song?.singer ?? "未知歌手")
+                    Text(playerManager.currentSong?.singer ?? "未知歌手")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
                         .lineLimit(1)
-                    if !playbackInfoLine.isEmpty {
-                        Text(playbackInfoLine)
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.55))
-                            .lineLimit(1)
-                    }
                 }
 
                 Spacer()
 
                 downloadButton
-                commentButton
                 loveButton
             }
             .padding(.horizontal, 24)
@@ -576,20 +346,6 @@ struct PlayerView: View {
             Image(systemName: isLoved ? "heart.fill" : "heart")
                 .font(.title3)
                 .foregroundColor(isLoved ? .red : .white.opacity(0.85))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-    }
-
-    private var commentButton: some View {
-        Button(action: {
-            guard playerManager.currentSong != nil else { return }
-            HapticManager.shared.selection()
-            showingComments = true
-        }) {
-            Image(systemName: "bubble.right")
-                .font(.title3)
-                .foregroundColor(.white.opacity(0.85))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -707,7 +463,7 @@ struct PlayerView: View {
     // MARK: - Controls Section
 
     private var controlsSection: some View {
-        HStack(spacing: 48) {
+        HStack(spacing: 28) {
             Button(action: {
                 playerManager.togglePlayMode()
                 HapticManager.shared.selection()
@@ -715,9 +471,21 @@ struct PlayerView: View {
                 Image(systemName: playerManager.playModeIcon)
                     .font(.body)
                     .foregroundColor(.white.opacity(0.75))
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+
+            Button(action: {
+                playerManager.playPrevious()
+                HapticManager.shared.selection()
+            }) {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: 26))
+                    .foregroundColor(playerManager.canPlayPrevious() ? .white : .gray)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
+            .disabled(!playerManager.canPlayPrevious())
 
             Button(action: {
                 playerManager.togglePlayPause()
@@ -729,61 +497,31 @@ struct PlayerView: View {
             }
 
             Button(action: {
+                playerManager.playNext()
+                HapticManager.shared.selection()
+            }) {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 26))
+                    .foregroundColor(playerManager.canPlayNext() ? .white : .gray)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(!playerManager.canPlayNext())
+
+            Button(action: {
                 showingRecentList = true
                 HapticManager.shared.selection()
             }) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.body)
                     .foregroundColor(.white.opacity(0.75))
-                    .frame(width: 44, height: 44)
+                    .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
             }
         }
     }
 
     // MARK: - Actions
-
-    private func loadFeedQueue() async {
-        if playlistStore.listData == nil {
-            await playlistStore.refresh()
-        }
-        let loved = playlistStore.listData?.loveSongs ?? []
-        await engine.load(recent: RecentStore.shared.items, loved: loved)
-        await MainActor.run { rebuildFeedQueue() }
-    }
-
-    // 滑动队列：推荐流模式用推荐列表，否则用真实播放队列（歌单内切歌）
-    private func rebuildFeedQueue() {
-        if feedActive {
-            var q = engine.recommendations
-            if let cur = playerManager.currentSong, !q.contains(where: { $0.id == cur.id }) {
-                q.insert(cur, at: 0)
-            }
-            feedQueue = q
-            feedIndex = q.firstIndex(where: { $0.id == playerManager.currentSong?.id }) ?? 0
-        } else {
-            feedQueue = playerManager.queue
-            feedIndex = max(playerManager.currentIndex, 0)
-        }
-    }
-
-    private func selectFeedMode(_ m: RecommendMode) {
-        guard engine.mode != m else { return }
-        HapticManager.shared.selection()
-        engine.setMode(m)
-        feedActive = true
-        Task {
-            await engine.loadCurrentMode()
-            await MainActor.run { rebuildFeedQueue() }
-        }
-    }
-
-    // 退出推荐流：滑动队列回到真实播放队列（上下滑切歌在歌单内进行）
-    private func exitFeedMode() {
-        HapticManager.shared.selection()
-        feedActive = false
-        rebuildFeedQueue()
-    }
 
     private func toggleLove(_ song: LXSong) {
         if playlistStore.isLoved(song) {
@@ -805,7 +543,13 @@ struct PlayerView: View {
     }
 }
 
-// MARK: - 沉浸背景已由 BlurredCoverBackground.swift 实现（对齐 BNPlayBackgroundView）
+/// A single lyric line shown in the in-place layered lyrics view.
+/// `id` is the absolute index in `parsedLyrics`, `diff` is distance from current line (-1/0/1).
+private struct VisibleLyric: Identifiable {
+    let id: Int
+    let diff: Int
+    let text: String
+}
 
 #Preview {
     PlayerView()
