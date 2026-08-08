@@ -84,12 +84,15 @@ struct PlayerView: View {
     // 每页完整播放页，只渲染当前页与上下邻页（cell 复用），iOS 15 安全
 
     private var swipeablePage: some View {
+        // 注意：ignoresSafeArea 加在 GeometryReader 上，使 geo.size 等于全屏尺寸，
+        // 再以该尺寸显式构建每页，hosting view 才与屏幕完全一致（否则内容被安全区压缩，
+        // 表现为"横版显示不全 / 背景不铺满 / 底部控制区消失"）。
         GeometryReader { geo in
             PagingPlayerScrollView(
                 currentIndex: feedIndex,
                 pageCount: max(feedQueue.count, 1),
                 pageBuilder: { index in
-                    pageView(forIndex: index, width: geo.size.width)
+                    pageView(forIndex: index, width: geo.size.width, height: geo.size.height)
                 },
                 onIndexChange: { newIndex in
                     if newIndex != feedIndex {
@@ -99,21 +102,21 @@ struct PlayerView: View {
             )
             .frame(width: geo.size.width, height: geo.size.height)
             .background(Color.black)
-            .ignoresSafeArea()
         }
+        .ignoresSafeArea()
     }
 
     // 每页视图：当前页完整播放页，邻页为对齐布局的预览（对齐汽水 AudioPlayItemViewController）
     @ViewBuilder
-    private func pageView(forIndex index: Int, width: CGFloat) -> some View {
+    private func pageView(forIndex index: Int, width: CGFloat, height: CGFloat) -> some View {
         if feedQueue.indices.contains(index) {
             if index == feedIndex {
-                songPage(song: feedQueue[index], width: width)
+                songPage(song: feedQueue[index], width: width, height: height)
             } else {
-                previewPage(song: feedQueue[index], width: width)
+                previewPage(song: feedQueue[index], width: width, height: height)
             }
         } else {
-            songPage(song: displaySong, width: width)
+            songPage(song: displaySong, width: width, height: height)
         }
     }
 
@@ -126,45 +129,47 @@ struct PlayerView: View {
         playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
     }
 
-    // 当前完整页：封面主色沉浸背景 + 大封面卡 + 一行歌词 + 底部控制区
-    private func songPage(song: LXSong?, width: CGFloat) -> some View {
-        let coverSize = width - 60
+    // 当前完整页：模糊沉浸背景铺满 + 封面（高度约束）+ 歌词 + 底部控制区（对齐汽水页面结构）。
+    // 背景固定铺满，封面/歌词/控制区用弹性 Spacer 撑开，控制区始终贴底可见。
+    private func songPage(song: LXSong?, width: CGFloat, height: CGFloat) -> some View {
+        let coverSize = min(width - 60, height * 0.42)
         return ZStack {
             BlurredCoverBackground(url: coverURL(for: song))
-                .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                Spacer(minLength: 100)
+                Spacer(minLength: 12)
 
                 coverCard(song: song, size: coverSize)
 
-                Spacer(minLength: 40)
+                Spacer(minLength: 22)
 
                 currentLyricView
 
-                Spacer(minLength: 0)
+                Spacer(minLength: 14)
 
                 trackInfoAndControls(song: song)
 
-                Spacer(minLength: 16)
+                Spacer(minLength: 20)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(width: width, height: height)
+        .background(Color.black)
+        .clipped()
     }
 
     // 邻页预览：与当前页同一套整页布局（铺满背景 + 封面 + 歌名/歌手），跟随滚动带平移
-    private func previewPage(song: LXSong?, width: CGFloat) -> some View {
-        let coverSize = width - 60
+    private func previewPage(song: LXSong?, width: CGFloat, height: CGFloat) -> some View {
+        let coverSize = min(width - 60, height * 0.42)
         return ZStack {
             BlurredCoverBackground(url: coverURL(for: song))
-                .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                Spacer(minLength: 100)
+                Spacer(minLength: 12)
 
                 coverCard(song: song, size: coverSize)
 
-                Spacer(minLength: 40)
+                Spacer(minLength: 22)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(song?.name ?? "未知歌曲")
@@ -178,11 +183,13 @@ struct PlayerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 24)
 
-                Spacer(minLength: 0)
-                Spacer(minLength: 16)
+                Spacer(minLength: 12)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(width: width, height: height)
+        .background(Color.black)
+        .clipped()
     }
 
     // MARK: - 全屏歌词（点击封面进入，抖音式覆盖层）：当前行高亮居中，可滚动，点击/下滑退出
@@ -286,26 +293,28 @@ struct PlayerView: View {
     // MARK: - 悬浮顶部 ActionBar（不随页滑动）
 
     private var topOverlay: some View {
-        VStack {
-            HStack {
-                Button(action: { dismiss() }) {
-                    Image(systemName: "chevron.down")
-                        .font(.title2.bold())
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+        GeometryReader { geo in
+            VStack {
+                HStack {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.down")
+                            .font(.title2.bold())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+
+                    Spacer()
+
+                    modeButton
+
+                    Spacer()
+
+                    topMenu
                 }
-
+                .padding(.horizontal)
+                .padding(.top, geo.safeAreaInsets.top + 8)
                 Spacer()
-
-                modeButton
-
-                Spacer()
-
-                topMenu
             }
-            .padding(.horizontal)
-            .padding(.top, 8)
-            Spacer()
         }
         .foregroundColor(.white)
     }
@@ -827,71 +836,7 @@ struct PlayerView: View {
     }
 }
 
-// MARK: - 沉浸背景：从封面提取主色，随歌变色
-
-private struct DominantColorBackground: View {
-    let url: URL?
-    @State private var color: Color = .black
-
-    var body: some View {
-        color
-            .onAppear { load() }
-            .onChange(of: url) { _ in load() }
-    }
-
-    private static var cache = NSCache<NSString, UIColor>()
-
-    private func load() {
-        guard let url = url else {
-            color = .black
-            return
-        }
-        let key = url.absoluteString as NSString
-        if let cached = Self.cache.object(forKey: key) {
-            color = Color(uiColor: cached)
-            return
-        }
-        Task {
-            let c = await Self.dominantColor(from: url)
-            await MainActor.run {
-                color = c.map { Color(uiColor: $0) } ?? .black
-            }
-        }
-    }
-
-    private static func dominantColor(from url: URL) async -> UIColor? {
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
-            let c = averageColor(of: cgImage)
-            cache.setObject(c, forKey: url.absoluteString as NSString)
-            return c
-        } catch {
-            return nil
-        }
-    }
-
-    private static func averageColor(of image: CGImage) -> UIColor {
-        let width = 1
-        let height = 1
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 4 * width,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return .black }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let data = context.data else { return .black }
-        let bytes = data.assumingMemoryBound(to: UInt8.self)
-        let r = CGFloat(bytes[0]) / 255
-        let g = CGFloat(bytes[1]) / 255
-        let b = CGFloat(bytes[2]) / 255
-        return UIColor(red: r, green: g, blue: b, alpha: 1)
-    }
-}
+// MARK: - 沉浸背景已由 BlurredCoverBackground.swift 实现（对齐 BNPlayBackgroundView）
 
 #Preview {
     PlayerView()
