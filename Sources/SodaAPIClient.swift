@@ -172,6 +172,21 @@ struct SodaAPIClient {
         return []
     }
 
+    func searchPlaylists(keyword: String, count: Int = 20) async throws -> [SodaPlaylist] {
+        let data = try await getJSON(makeURL("/search", query: ["keyword": keyword, "count": String(count)]))
+        guard let dict = data as? [String: Any],
+              let list = dict["playlists"] as? [[String: Any]] else { return [] }
+        return list.compactMap { p in
+            guard let id = p["id"] as? String else { return nil }
+            return SodaPlaylist(
+                id: id,
+                title: p["title"] as? String ?? "",
+                coverURL: p["cover_url"] as? String ?? "",
+                trackCount: p["count_tracks"] as? Int ?? 0
+            )
+        }
+    }
+
     // MARK: - 播放 URL 与歌词
 
     struct SodaPlayback {

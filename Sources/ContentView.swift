@@ -547,6 +547,7 @@ struct SearchView: View {
     @State private var artistResults: [LXArtist] = []
     @State private var albumResults: [LXAlbum] = []
     @State private var playlistResults: [LXOnlinePlaylist] = []
+    @State private var sodaPlaylistResults: [SodaAPIClient.SodaPlaylist] = []
     @State private var hasSearched = false
     @State private var isLoading = false
     @FocusState private var searchFocused: Bool
@@ -559,7 +560,7 @@ struct SearchView: View {
         VStack(spacing: 0) {
             sourcePicker
             searchField
-            if hasSearched && source != "soda" {
+            if hasSearched {
                 modePicker
             }
             ScrollView(showsIndicators: false) {
@@ -586,7 +587,9 @@ struct SearchView: View {
                     case 0: songResultsList
                     case 1: artistResultsList
                     case 2: albumResultsList
-                    default: playlistResultsList
+                    default:
+                        if source == "soda" { sodaPlaylistResultsList }
+                        else { playlistResultsList }
                     }
                 }
                 Spacer(minLength: 120)
@@ -614,6 +617,7 @@ struct SearchView: View {
                 artistResults = []
                 albumResults = []
                 playlistResults = []
+                sodaPlaylistResults = []
             }
         }
         .onChange(of: source) { _ in
@@ -684,9 +688,13 @@ struct SearchView: View {
     private var modePicker: some View {
         Picker("搜索类型", selection: $mode) {
             Text("歌曲").tag(0)
-            Text("歌手").tag(1)
-            Text("专辑").tag(2)
-            Text("歌单").tag(3)
+            if source == "soda" {
+                Text("歌单").tag(3)
+            } else {
+                Text("歌手").tag(1)
+                Text("专辑").tag(2)
+                Text("歌单").tag(3)
+            }
         }
         .pickerStyle(.segmented)
         .padding(.horizontal, 16)
@@ -807,6 +815,41 @@ struct SearchView: View {
         .padding(.top, 4)
     }
 
+    private var sodaPlaylistResultsList: some View {
+        LazyVStack(spacing: 0) {
+            if sodaPlaylistResults.isEmpty {
+                emptyView(text: "未找到歌单")
+            } else {
+                ForEach(sodaPlaylistResults) { pl in
+                    NavigationLink(destination: SodaTrackListView(
+                        title: pl.title,
+                        load: { try await SodaAPIClient.shared.playlistSongs(playlistID: pl.id) }
+                    )) {
+                        HStack(spacing: 12) {
+                            LXCachedImage(urlString: pl.coverURL, size: 56, cornerRadius: 8)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(pl.title)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                Text(pl.trackCount > 0 ? "\(pl.trackCount) 首" : "歌单")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Divider().padding(.leading, 68)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
     private func loveButton(loved: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: loved ? "heart.fill" : "heart")
@@ -837,10 +880,13 @@ struct SearchView: View {
         hasSearched = true
         isLoading = true
         if source == "soda" {
-            // 汽水仅支持歌曲搜索（/search 需登录，未登录时可能返回空）
-            mode = 0
-            let tracks = (try? await SodaAPIClient.shared.search(keyword: text)) ?? []
-            songResults = tracks.map { $0.toLXSong() }
+            if mode == 3 {
+                sodaPlaylistResults = (try? await SodaAPIClient.shared.searchPlaylists(keyword: text)) ?? []
+            } else {
+                mode = 0
+                let tracks = (try? await SodaAPIClient.shared.search(keyword: text)) ?? []
+                songResults = tracks.map { $0.toLXSong() }
+            }
             isLoading = false
             return
         }
