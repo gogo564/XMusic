@@ -37,7 +37,7 @@ struct PlayerView: View {
             sidebarView
         }
         .preferredColorScheme(.dark)
-        .gesture(sidebarPanGesture)
+        .gesture(sidebarPanGesture)  // 仅右缘右滑触发，与竖向分页兼容
         .sheet(isPresented: $showingRecentList) {
             RecentPlaylistView()
                 .environmentObject(playerManager)
@@ -207,6 +207,26 @@ struct PlayerView: View {
                 lyricsScroller
             }
 
+            // 全屏歌词顶栏（对齐汽水 LongLyricView backButton）
+            VStack {
+                HStack {
+                    Button(action: {
+                        HapticManager.shared.selection()
+                        showingFullLyrics = false
+                    }) {
+                        Image(systemName: "chevron.down")
+                            .font(.title2.bold())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                Spacer()
+            }
+            .foregroundColor(.white)
+
             // 返回提示
             VStack {
                 Spacer()
@@ -349,6 +369,7 @@ struct PlayerView: View {
     private var sidebarPanGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
+                guard !showingFullLyrics else { return }
                 let screenW = UIScreen.main.bounds.width
                 let startX = value.startLocation.x
                 let dx = value.translation.width
@@ -363,6 +384,7 @@ struct PlayerView: View {
                 }
             }
             .onEnded { value in
+                guard !showingFullLyrics else { return }
                 if sidebarDragging {
                     sidebarDragging = false
                     let velocity = value.predictedEndTranslation.width
@@ -403,7 +425,10 @@ struct PlayerView: View {
     private var modeButton: some View {
         Button(action: {
             HapticManager.shared.selection()
-            showingSidebar = true
+            withAnimation(.easeInOut(duration: 0.25)) {
+                sidebarOffset = 0
+                showingSidebar = true
+            }
         }) {
             VStack(spacing: 2) {
                 Text("模式选择")
