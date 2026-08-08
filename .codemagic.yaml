@@ -1,0 +1,47 @@
+workflows:
+  ios-build:
+    name: Build IPA (TrollStore)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+    scripts:
+      - name: Install XcodeGen
+        script: |
+          brew install xcodegen 2>&1 | tail -3
+      - name: Generate xcodeproj with XcodeGen
+        script: |
+          xcodegen generate --project .
+      - name: Archive (unsigned)
+        script: |
+          xcodebuild -project XMusic.xcodeproj -scheme XMusic \
+            -destination generic/platform=iOS \
+            -archivePath $CM_BUILD_DIR/XMusic.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+            archive
+      - name: Sign with ldid + entitlements
+        script: |
+          APP=$(find $CM_BUILD_DIR/XMusic.xcarchive -name "*.app" -type d | head -1)
+          echo "App: $APP"
+          if [ -z "$APP" ]; then
+            echo "ERROR: no .app found"
+            exit 1
+          fi
+          brew install ldid >/dev/null 2>&1 || true
+          BIN="$APP/XMusic"
+          if [ -f "$BIN" ]; then
+            ldid -SXMusic.entitlements "$BIN"
+            echo "Signed with ldid + entitlements"
+          else
+            echo "WARN: binary not found at $BIN"
+          fi
+      - name: Package IPA
+        script: |
+          APP=$(find $CM_BUILD_DIR/XMusic.xcarchive -name "*.app" -type d | head -1)
+          mkdir -p $CM_BUILD_DIR/ipa/Payload
+          cp -R "$APP" $CM_BUILD_DIR/ipa/Payload/
+          cd $CM_BUILD_DIR/ipa
+          zip -r XMusic.ipa Payload/
+          ls -lh XMusic.ipa
+    artifacts:
+      - $CM_BUILD_DIR/ipa/*.ipa
