@@ -7,6 +7,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private var interfaceController: CPInterfaceController?
     private var window: UIWindow?
     private var didConnect = false
+    private var rootTemplate: CPListTemplate?
 
     // MARK: - CPTemplateApplicationSceneDelegate
 
@@ -14,13 +15,17 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         _ templateApplicationScene: CPTemplateApplicationScene,
         didConnect interfaceController: CPInterfaceController
     ) {
+        NSLog("[CarPlay] didConnect")
         self.interfaceController = interfaceController
         guard !didConnect else { return }
         didConnect = true
-        buildRootTemplate()
+        // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏
+        buildRootTemplate(placeholder: true)
         Task { @MainActor in
+            NSLog("[CarPlay] loading data")
             await PlaylistStore.shared.refresh()
-            buildRootTemplate()
+            NSLog("[CarPlay] data loaded, rebuilding root")
+            buildRootTemplate(placeholder: false)
         }
     }
 
@@ -28,17 +33,30 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         _ templateApplicationScene: CPTemplateApplicationScene,
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
+        NSLog("[CarPlay] didDisconnect")
         self.interfaceController = nil
         self.window = nil
         didConnect = false
+        rootTemplate = nil
     }
 
     // MARK: - Root
 
-    private func buildRootTemplate() {
+    private func buildRootTemplate(placeholder: Bool) {
         guard let controller = interfaceController else { return }
 
         var items: [CPListItem] = []
+
+        if placeholder {
+            // 数据未就绪：先放一个"加载中"占位，避免空根模板导致黑屏
+            let loading = CPListItem(text: "正在加载…", detailText: nil)
+            loading.handler = { _, completion in completion() }
+            let template = CPListTemplate(title: "LX音乐", sections: [CPListSection(items: [loading])])
+            controller.setRootTemplate(template, animated: true) { success, error in
+                NSLog("[CarPlay] placeholder setRoot success=\(success) error=\(String(describing: error))")
+            }
+            return
+        }
 
         // 我喜欢的音乐
         let loveSongs = PlaylistStore.shared.songs(kind: .love, playlistID: "")

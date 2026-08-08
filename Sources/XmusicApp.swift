@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct XmusicApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var player = PlayerManager.shared
     @StateObject private var playlistStore = PlaylistStore.shared
     @StateObject private var downloader = DownloadService.shared
