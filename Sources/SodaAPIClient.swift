@@ -84,6 +84,22 @@ struct SodaAPIClient {
         }
     }
 
+    /// 我的汽水歌单（qishui-api 注入登录态后返回账号歌单，如"我喜欢的音乐"）
+    func myPlaylists() async throws -> [SodaPlaylist] {
+        let data = try await postJSON(makeURL("/me/playlists"), body: [:])
+        guard let dict = data as? [String: Any],
+              let list = dict["playlists"] as? [[String: Any]] else { return [] }
+        return list.compactMap { p in
+            guard let id = p["id"] as? String else { return nil }
+            return SodaPlaylist(
+                id: id,
+                title: p["title"] as? String ?? "",
+                coverURL: p["cover_url"] as? String ?? "",
+                trackCount: p["count_tracks"] as? Int ?? 0
+            )
+        }
+    }
+
     // MARK: - 歌曲
 
     struct SodaTrack: Identifiable {

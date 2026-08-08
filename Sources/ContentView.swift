@@ -97,6 +97,7 @@ struct HomeView: View {
     @State private var squareLoading = true
     @State private var sodaPlaylists: [SodaAPIClient.SodaPlaylist] = []
     @State private var sodaRadios: [SodaAPIClient.SodaRadio] = []
+    @State private var sodaMyPlaylists: [SodaAPIClient.SodaPlaylist] = []
 
     let gridColumns = [
         GridItem(.flexible(), spacing: 15),
@@ -294,6 +295,73 @@ struct HomeView: View {
     // MARK: 汽水推荐（source == "soda"）
     private var sodaSection: some View {
         VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("⭐ 我的汽水歌单")
+                        .font(.title3.bold())
+                    Spacer()
+                }
+                .padding(.horizontal)
+
+                if sodaMyPlaylists.isEmpty {
+                    Text("未获取到我的歌单（需汽水登录态）")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                } else {
+                    LazyVGrid(columns: gridColumns, spacing: 20) {
+                        ForEach(sodaMyPlaylists) { pl in
+                            NavigationLink(destination: SodaTrackListView(
+                                title: pl.title,
+                                load: { try await SodaAPIClient.shared.playlistSongs(playlistID: pl.id) }
+                            )) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    AsyncImage(url: URL(string: pl.coverURL)) { image in
+                                        image.resizable().aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        Image(systemName: "music.note.list").foregroundColor(.secondary)
+                                    }
+                                    .frame(height: 120)
+                                    .cornerRadius(12)
+                                    .clipped()
+                                    .overlay(alignment: .bottomTrailing) {
+                                        if pl.trackCount > 0 {
+                                            Text("\(pl.trackCount)首")
+                                                .font(.caption2.bold())
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color.black.opacity(0.6))
+                                                .cornerRadius(4)
+                                                .padding(4)
+                                        }
+                                    }
+                                    .overlay(alignment: .topTrailing) {
+                                        Button {
+                                            sodaStore.toggle(pl)
+                                        } label: {
+                                            Image(systemName: sodaStore.isLoved(pl) ? "heart.fill" : "heart")
+                                                .font(.system(size: 13))
+                                                .foregroundColor(.white)
+                                                .padding(6)
+                                                .background(Color.black.opacity(0.4), in: Circle())
+                                                .padding(6)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                    Text(pl.title)
+                                        .font(.subheadline.bold())
+                                        .lineLimit(1)
+                                        .foregroundColor(.primary)
+                                }
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("🍺 汽水推荐歌单")
@@ -534,6 +602,7 @@ struct HomeView: View {
         isLoadingBoards = true
         defer { isLoadingBoards = false }
         sodaPlaylists = (try? await SodaAPIClient.shared.recommendPlaylists()) ?? []
+        sodaMyPlaylists = (try? await SodaAPIClient.shared.myPlaylists()) ?? []
         sodaRadios = (try? await SodaAPIClient.shared.radioList()) ?? []
     }
 
