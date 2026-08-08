@@ -7,12 +7,14 @@ import UIKit
 // iOS 15 安全：不使用 .id/.transition 重建页面。
 
 struct PagingPlayerScrollView<Page: View>: UIViewRepresentable {
-    @Binding var currentIndex: Int
+    // 当前页索引（双向：外部可改驱动程序化滚动；吸附落定后回调）
+    let currentIndex: Int
     let pageCount: Int
     let pageBuilder: (Int) -> Page
+    let onIndexChange: (Int) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(self)
+        Coordinator(pageBuilder: pageBuilder, onIndexChange: onIndexChange)
     }
 
     func makeUIView(context: Context) -> UIScrollView {
@@ -32,12 +34,8 @@ struct PagingPlayerScrollView<Page: View>: UIViewRepresentable {
         let c = context.coordinator
         c.pageCount = pageCount
         c.pageBuilder = pageBuilder
-        c.onPageChange = { [weak self] idx in
-            guard let self else { return }
-            if currentIndex != idx {
-                currentIndex = idx
-            }
-        }
+        c.onIndexChange = onIndexChange
+        c.externalIndex = currentIndex
         c.layoutIfNeeded(in: scrollView)
     }
 
@@ -50,15 +48,17 @@ struct PagingPlayerScrollView<Page: View>: UIViewRepresentable {
     final class Coordinator: NSObject, UIScrollViewDelegate {
         var pageCount: Int = 0
         var pageBuilder: (Int) -> Page
-        var onPageChange: ((Int) -> Void)?
+        var onIndexChange: ((Int) -> Void)?
+        var externalIndex: Int = 0
 
         weak var scrollView: UIScrollView?
         private var hosts: [Int: UIHostingController<Page>] = [:]
         private var renderedCenter: Int?
         private var userInteracting = false
 
-        init(_ parent: PagingPlayerScrollView<Page>) {
-            self.pageBuilder = parent.pageBuilder
+        init(pageBuilder: @escaping (Int) -> Page, onIndexChange: @escaping (Int) -> Void) {
+            self.pageBuilder = pageBuilder
+            self.onIndexChange = onIndexChange
             super.init()
         }
 
@@ -72,12 +72,12 @@ struct PagingPlayerScrollView<Page: View>: UIViewRepresentable {
             scrollView.contentSize = CGSize(width: w, height: CGFloat(max(pageCount, 1)) * h)
 
             // 外部索引变化（切歌/加载完成）→ 程序化滚动到对应页
-            let target = CGPoint(x: 0, y: CGFloat(currentIndex) * h)
+            let target = CGPoint(x: 0, y: CGFloat(externalIndex) * h)
             if !userInteracting && abs(scrollView.contentOffset.y - target.y) > 1 {
                 scrollView.setContentOffset(target, animated: false)
             }
 
-            renderWindow(center: currentIndex, width: w, height: h)
+            renderWindow(center: externalIndex, width: w, height: h)
         }
 
         // 只渲染当前页 + 上下邻页（对齐 CollectionView cell 复用）
@@ -143,11 +143,9 @@ struct PagingPlayerScrollView<Page: View>: UIViewRepresentable {
             let h = scrollView.bounds.height
             guard h > 0 else { return }
             let idx = min(max(Int((scrollView.contentOffset.y / h).rounded()), 0), max(pageCount - 1, 0))
-            if idx != currentIndex {
-                currentIndex = idx
-                onPageChange?(idx)
-            }
+            externalIndex = idx
             renderWindow(center: idx, width: scrollView.bounds.width, height: h)
+            onIndexChange?(idx)
         }
     }
 }

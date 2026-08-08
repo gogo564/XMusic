@@ -80,11 +80,17 @@ struct PlayerView: View {
     private var swipeablePage: some View {
         GeometryReader { geo in
             PagingPlayerScrollView(
-                currentIndex: $feedIndex,
-                pageCount: max(feedQueue.count, 1)
-            ) { index in
-                pageView(forIndex: index, width: geo.size.width)
-            }
+                currentIndex: feedIndex,
+                pageCount: max(feedQueue.count, 1),
+                pageBuilder: { index in
+                    pageView(forIndex: index, width: geo.size.width)
+                },
+                onIndexChange: { newIndex in
+                    if newIndex != feedIndex {
+                        feedIndex = newIndex
+                    }
+                }
+            )
             .frame(width: geo.size.width, height: geo.size.height)
             .background(Color.black)
             .ignoresSafeArea()
@@ -92,6 +98,7 @@ struct PlayerView: View {
     }
 
     // 每页视图：当前页完整播放页，邻页为对齐布局的预览（对齐汽水 AudioPlayItemViewController）
+    @ViewBuilder
     private func pageView(forIndex index: Int, width: CGFloat) -> some View {
         if feedQueue.indices.contains(index) {
             if index == feedIndex {
