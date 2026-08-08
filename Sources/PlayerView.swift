@@ -12,13 +12,10 @@ struct PlayerView: View {
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
-    // 滑动换歌（分页式）：三页窗口（上/中/下）共享同一偏移 lastDrag 整体平移，feedIndex 为当前页
+    // 滑动换歌（汽水式分页）：feedIndex 为当前页索引，由原生分页容器驱动
     @State private var displaySong: LXSong?
-    // 连续滚动带偏移：拖动跟手、翻页动画、回弹全程用它驱动（所有页同频平移，无跳变）
-    @State private var lastDrag: CGFloat = 0
     @State private var feedQueue: [LXSong] = []
     @State private var feedIndex = 0
-    @State private var isSwitching = false
     @State private var feedActive = false
     @State private var feedLoaded = false
     @State private var showingFullLyrics = false
@@ -58,6 +55,10 @@ struct PlayerView: View {
             }
             rebuildFeedQueue()
         }
+        .onChange(of: feedIndex) { _ in
+            // 原生分页吸附落定后切歌（汽水式：滑动到哪页播哪页）
+            handlePageSettled()
+        }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
             displaySong = playerManager.currentSong
@@ -73,109 +74,43 @@ struct PlayerView: View {
         return URL(string: song.imageURL)
     }
 
-    // MARK: - 整页跟手竖滑（汽水式）：上/中/下三页共享同一 lastDrag 平移（连续滚动带），
-    // 邻页为整页布局预览，不使用 .id/.transition（规避 iOS15 崩溃）
+    // MARK: - 汽水式竖向分页：原生 UIScrollView 分页容器（系统级惯性/吸附），
+    // 每页完整播放页，只渲染当前页与上下邻页（cell 复用），iOS 15 安全
 
     private var swipeablePage: some View {
         GeometryReader { geo in
-            let pageHeight = geo.size.height
-            let width = geo.size.width
-            ZStack {
-                // 上一页（整页预览，从上方滑入）
-                if feedIndex > 0 {
-                    previewPage(song: feedQueue[feedIndex - 1], width: width)
-                        .offset(y: -pageHeight + lastDrag)
-                }
-                // 当前页（完整内容）
-                songPage(song: displaySong, width: width)
-                    .offset(y: lastDrag)
-                // 下一页（整页预览，从下方滑入）
-                if feedIndex < feedQueue.count - 1 {
-                    previewPage(song: feedQueue[feedIndex + 1], width: width)
-                        .offset(y: pageHeight + lastDrag)
-                }
+            PagingPlayerScrollView(
+                currentIndex: $feedIndex,
+                pageCount: max(feedQueue.count, 1)
+            ) { index in
+                pageView(forIndex: index, width: geo.size.width)
             }
+            .frame(width: geo.size.width, height: geo.size.height)
             .background(Color.black)
-            .clipped()
-            .contentShape(Rectangle())
             .ignoresSafeArea()
-            .gesture(
-                DragGesture(minimumDistance: 20)
-                    .onChanged { value in
-                        guard !isSwitching else { return }
-                        lastDrag = value.translation.height
-                    }
-                    .onEnded { value in
-                        guard !isSwitching else { return }
-                        let threshold = pageHeight * 0.22
-                        let moved = value.translation.height
-                        let predicted = value.predictedEndTranslation.height
-                        if moved < -threshold || predicted < -pageHeight * 0.5 {
-                            if feedIndex < feedQueue.count - 1 {
-                                commitSwipe(.next, pageHeight: pageHeight)
-                            } else {
-                                bounceBack()
-                            }
-                        } else if moved > threshold || predicted > pageHeight * 0.5 {
-                            if feedIndex > 0 {
-                                commitSwipe(.prev, pageHeight: pageHeight)
-                            } else {
-                                bounceBack()
-                            }
-                        } else {
-                            bounceBack()
-                        }
-                    }
-            )
         }
     }
 
-    private enum SwipeDirection {
-        case next, prev
-    }
-
-    private func bounceBack() {
-        if isSwitching { return }
-        isSwitching = true
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-            lastDrag = 0
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            isSwitching = false
-            lastDrag = 0
+    // 每页视图：当前页完整播放页，邻页为对齐布局的预览（对齐汽水 AudioPlayItemViewController）
+    private func pageView(forIndex index: Int, width: CGFloat) -> some View {
+        if feedQueue.indices.contains(index) {
+            if index == feedIndex {
+                songPage(song: feedQueue[index], width: width)
+            } else {
+                previewPage(song: feedQueue[index], width: width)
+            }
+        } else {
+            songPage(song: displaySong, width: width)
         }
     }
 
-    private func commitSwipe(_ direction: SwipeDirection, pageHeight: CGFloat) {
-        guard !feedQueue.isEmpty else {
-            bounceBack()
-            return
-        }
-        guard !isSwitching else { return }
-        isSwitching = true
-        let targetIndex: Int
-        switch direction {
-        case .next: targetIndex = min(feedIndex + 1, feedQueue.count - 1)
-        case .prev: targetIndex = max(feedIndex - 1, 0)
-        }
-        let song = feedQueue[targetIndex]
-        guard playerManager.currentSong?.id != song.id else {
-            isSwitching = false
-            bounceBack()
-            return
-        }
-        // 抖音式翻页：整页继续平移到位（邻页随之滑入），动画结束后切歌并归零偏移
-        let targetOffset = direction == .next ? -pageHeight : pageHeight
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
-            lastDrag = targetOffset
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
-            isSwitching = false
-            feedIndex = targetIndex
-            displaySong = song
-            lastDrag = 0
-            playerManager.play(song: song, in: feedQueue, index: targetIndex, presentPlayer: false)
-        }
+    // 翻页落定（原生分页吸附完成）→ 切歌。由 feedIndex 的 onChange 触发
+    private func handlePageSettled() {
+        guard feedQueue.indices.contains(feedIndex) else { return }
+        let song = feedQueue[feedIndex]
+        guard playerManager.currentSong?.id != song.id else { return }
+        displaySong = song
+        playerManager.play(song: song, in: feedQueue, index: feedIndex, presentPlayer: false)
     }
 
     // 当前完整页：封面主色沉浸背景 + 大封面卡 + 一行歌词 + 底部控制区
@@ -448,7 +383,7 @@ struct PlayerView: View {
         )
     }
 
-    // MARK: - 歌词：封面下方上下 2 行左对齐（当前行 + 下一行），不截断完整显示
+    // MARK: - 歌词：封面下方上下 2 行居中（当前行 + 下一行），对齐汽水 ShortLyricView
 
     private var currentLyricView: some View {
         Group {
@@ -456,26 +391,29 @@ struct PlayerView: View {
                 Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.6))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 let lines = playerManager.parsedLyrics
                 let idx = max(playerManager.currentLyricIndex, 0)
                 let current = lines.indices.contains(idx) ? lines[idx].text : ""
                 let next = lines.indices.contains(idx + 1) ? lines[idx + 1].text : ""
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(spacing: 8) {
                     Text(current.isEmpty ? " " : current)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(2)
                         .truncationMode(.tail)
+                        .multilineTextAlignment(.center)
                     Text(next.isEmpty ? " " : next)
                         .font(.system(size: 14, weight: .regular))
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(2)
                         .truncationMode(.tail)
+                        .multilineTextAlignment(.center)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 74, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(height: 74, alignment: .center)
             }
         }
         .padding(.horizontal, 20)
