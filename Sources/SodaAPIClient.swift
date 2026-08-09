@@ -303,18 +303,20 @@ struct SodaAPIClient {
         }
     }
 
-    /// 兼容两种封面字段：album["cover_url"] 字符串 或 album["url_cover"] 对象
+    /// 兼容封面字段：album["cover_url"] 字符串 或 album["url_cover"] 对象
+    /// url_cover 的 uri 形如 "tos-cn-v-2774c002/xxx"，需用 <host>/obj/<uri> 拼接才有效
     private func coverURLString(from album: [String: Any]) -> String {
         if let s = album["cover_url"] as? String, !s.isEmpty { return s }
         if let obj = album["url_cover"] as? [String: Any] {
             if let uri = obj["uri"] as? String, !uri.isEmpty {
                 if let urls = obj["urls"] as? [String], let first = urls.first {
-                    if !first.hasSuffix("/") && uri.contains("/") {
-                        return first + uri
+                    let host = first.components(separatedBy: "/").prefix(3).joined(separator: "/")
+                    if !host.isEmpty {
+                        let sep = host.hasSuffix("/") ? "" : "/"
+                        return host + sep + "obj/" + uri
                     }
-                    return first + uri
                 }
-                return "https://p3-luna.douyinpic.com/img/" + uri
+                return "https://p3-luna.douyinpic.com/obj/" + uri
             }
             if let urls = obj["urls"] as? [String], let first = urls.first { return first }
         }
