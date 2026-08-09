@@ -388,7 +388,7 @@ final class PlayerManager: ObservableObject {
     /// 统一获取播放地址：汽水源走 SodaAPIClient（audio_url 直连），其余走 lx-sync-server
     private func playbackInfo(for song: LXSong) async throws -> (url: String, type: String, sourceName: String) {
         if isSoda(song) {
-            let pb = try await SodaAPIClient.shared.playbackURL(trackID: song.songmid ?? "")
+            let pb = try await SodaAPIClient.shared.playbackURL(trackID: song.songmid ?? "", quality: quality)
             return (pb.url, pb.quality, "汽水")
         }
         let result = try await LXAPIClient.shared.getPlaybackURL(for: song, quality: quality, autoSwitch: AppConfigStore.shared.config.autoSwitchSource)

@@ -324,18 +324,38 @@ struct SodaAPIClient {
         let quality: String
     }
 
-    func playbackURL(trackID: String) async throws -> SodaPlayback {
+    /// 玩家音质（128k/320k/flac）→ qishui-api 档位
+    private func mapQuality(_ q: String) -> String {
+        switch q.lowercased() {
+        case "flac", "flac24bit", "lossless": return "lossless"
+        case "320k", "higher", "high": return "highest"
+        default: return "medium"
+        }
+    }
+
+    /// 汽水歌音质显示名
+    static func qualityDisplayName(_ q: String) -> String {
+        switch q.lowercased() {
+        case "flac", "flac24bit", "lossless": return "无损"
+        case "320k", "highest", "higher": return "320K"
+        case "128k", "medium", "hi_res": return "128K"
+        default: return q
+        }
+    }
+
+    func playbackURL(trackID: String, quality: String) async throws -> SodaPlayback {
         let data = try await getJSON(makeURL("/song/detail", query: ["track_id": trackID]))
         guard let dict = data as? [String: Any] else {
             throw SodaError.upstream
         }
         let artist = dict["artists"] as? [[String: Any]] ?? []
-        let playURL = baseURL + "/song/play?track_id=" + trackID
+        let mapped = mapQuality(quality)
+        let playURL = baseURL + "/song/play?track_id=" + trackID + "&quality=" + mapped
         return SodaPlayback(
             url: playURL,
             name: dict["name"] as? String ?? "",
             artist: artist.compactMap { $0["name"] as? String }.joined(separator: " / "),
-            quality: "最高音质"
+            quality: Self.qualityDisplayName(quality)
         )
     }
 

@@ -268,15 +268,26 @@ struct QualityPickerView: View {
     @EnvironmentObject private var player: PlayerManager
     @Environment(\.dismiss) private var dismiss
 
+    private var options: [(type: String, size: String)] {
+        if song.source == "soda" {
+            return [
+                ("128k", "汽水 128K"),
+                ("320k", "汽水 320K"),
+                ("flac", "汽水 无损"),
+            ]
+        }
+        return song.qualities
+    }
+
     var body: some View {
         NavigationView {
-            List(song.qualities, id: \.type) { q in
+            List(options, id: \.type) { q in
                 Button {
                     player.play(song: song, atQuality: q.type)
                     dismiss()
                 } label: {
                     HStack {
-                        Text(q.type)
+                        Text(song.source == "soda" ? SodaAPIClient.qualityDisplayName(q.type) : q.type)
                             .font(.system(size: 15))
                         Spacer()
                         Text(q.size)
