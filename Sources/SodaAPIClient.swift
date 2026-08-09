@@ -169,13 +169,13 @@ struct SodaAPIClient {
     /// 收藏歌曲到汽水账号「我喜欢的音乐」（写接口，用 QISHUI_PLAYLIST_COOKIE）
     func addToCollection(trackIDs: [String]) async throws -> Bool {
         let media = trackIDs.map { ["type": "track", "id": $0] as [String: Any] }
+        // postJSON 已返回服务器 data 字段：{ collected, playlist, upstream }
         let data = try await postJSON(makeURL("/me/collection/add"), body: ["media": media, "scene": ""])
-        guard let dict = data as? [String: Any],
-              let d = dict["data"] as? [String: Any] else {
+        guard let dict = data as? [String: Any] else {
             Log.write("❌ [Soda] addToCollection unexpected resp tracks=\(trackIDs.count)")
             return false
         }
-        let collected = d["collected"] as? [[String: Any]] ?? []
+        let collected = dict["collected"] as? [[String: Any]] ?? []
         Log.write("📤 [Soda] addToCollection ok tracks=\(trackIDs.count) collected=\(collected.count)")
         return !collected.isEmpty
     }

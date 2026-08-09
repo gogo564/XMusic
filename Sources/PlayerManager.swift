@@ -549,6 +549,9 @@ final class PlayerManager: ObservableObject {
                     if d.isFinite, d > 0 {
                         self.duration = d
                     }
+                    // 汽水歌走自定义 loader，AVPlayer 会先瞬时 failed 再重试成功；
+                    // 已能播放则清掉瞬态错误，避免误弹「播放错误」。
+                    self.playbackError = nil
                     // 汽水歌走流式加载，瞬态 failed 会把 isPlaying 置 false；
                     // ready 后若仍打算播放（未暂停）则恢复按钮状态。
                     if self.isSoda(self.currentSong ?? LXSong([:])), self.player.rate > 0 {
