@@ -281,12 +281,18 @@ struct SodaAPIClient {
 
     private func parseTracks(from resources: [[String: Any]]) -> [SodaTrack] {
         resources.compactMap { r in
-            // 兼容三种结构：{track}, {entity:{track_wrapper:{track}}}, 直接 track
-            var track = r["track"] as? [String: Any] ?? r
-            if track["id"] == nil, let entity = r["entity"] as? [String: Any],
-               let wrapper = entity["track_wrapper"] as? [String: Any],
-               let t = wrapper["track"] as? [String: Any] {
+            // 兼容三种结构：{track}, {entity:{track_wrapper:{track}}}, 直接 track。
+            // 注意 daily/mix 的 item 自带顶层 id（如 684471...），不能因为它有 id 就跳过
+            // entity 分支；优先按嵌套层级取真实 track。
+            let track: [String: Any]
+            if let t = r["track"] as? [String: Any] {
                 track = t
+            } else if let entity = r["entity"] as? [String: Any],
+                      let wrapper = entity["track_wrapper"] as? [String: Any],
+                      let t = wrapper["track"] as? [String: Any] {
+                track = t
+            } else {
+                track = r
             }
             guard let id = track["id"] as? String else { return nil }
             let album = track["album"] as? [String: Any] ?? [:]
