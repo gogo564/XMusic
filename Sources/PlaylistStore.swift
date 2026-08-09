@@ -354,6 +354,12 @@ final class PlaylistStore: ObservableObject {
     private func push(_ raw: [String: Any]) async throws {
         let updated = LXListData(raw)
         listData = updated
-        try await LXAPIClient.shared.saveData(updated)
+        do {
+            try await LXAPIClient.shared.saveData(updated)
+            Log.write("📤 [Playlist] push ok lists=\(updated.userList.count) love=\(updated.loveSongs.count) default=\(updated.defaultSongs.count)")
+        } catch {
+            Log.write("❌ [Playlist] push failed: \(error.localizedDescription)")
+            throw error
+        }
     }
 }

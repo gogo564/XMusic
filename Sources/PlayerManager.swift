@@ -212,13 +212,16 @@ final class PlayerManager: ObservableObject {
 
     func togglePlayPause() {
         if player.currentItem == nil, currentSong != nil {
+            Log.write("🔘 [Player] togglePlayPause → currentItem nil, resolveAndPlay")
             resolveAndPlay(currentQueueSong)
             return
         }
         if isPlaying {
+            Log.write("🔘 [Player] togglePlayPause → pause (was playing)")
             player.pause()
             isPlaying = false
         } else {
+            Log.write("🔘 [Player] togglePlayPause → play (was paused)")
             player.play()
             isPlaying = true
         }
@@ -471,6 +474,7 @@ final class PlayerManager: ObservableObject {
     }
 
     private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String = "") {
+        Log.write("▶️ [Player] startPlayback song=\(song.name) scheme=\(url.scheme ?? "") origin=\(playbackOrigin) url=\(url.absoluteString.prefix(70))")
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
         lyrics = ""
@@ -541,9 +545,14 @@ final class PlayerManager: ObservableObject {
                     self.isPlaying = false
                 case .readyToPlay:
                     let d = item.duration.seconds
-                    Log.write("🎧 [Player] item ready dur=\(d) song=\(self.currentSong?.name ?? "")")
+                    Log.write("🎧 [Player] item ready dur=\(d) song=\(self.currentSong?.name ?? "") isPlayingBefore=\(self.isPlaying)")
                     if d.isFinite, d > 0 {
                         self.duration = d
+                    }
+                    // 汽水歌走流式加载，瞬态 failed 会把 isPlaying 置 false；
+                    // ready 后若仍打算播放（未暂停）则恢复按钮状态。
+                    if self.isSoda(self.currentSong ?? LXSong([:])), self.player.rate > 0 {
+                        self.isPlaying = true
                     }
                     self.updateNowPlaying()
                 default:

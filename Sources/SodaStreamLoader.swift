@@ -9,7 +9,9 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
     static let scheme = "sodastream"
 
     private var active: [String: SodaStreamSession] = [:]
+    private var activeOrder: [String] = []
     private let lock = NSLock()
+    private let maxActiveSessions = 8
 
     private override init() {}
 
@@ -32,6 +34,7 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
         }
         let key = url.absoluteString
         let session: SodaStreamSession
+        var evict: [SodaStreamSession] = []
         lock.lock()
         if let existing = active[key] {
             session = existing
@@ -41,12 +44,27 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
                 .queryItems?.first(where: { $0.name == "quality" })?.value ?? "highest"
             session = SodaStreamSession(trackID: trackID, quality: quality)
             active[key] = session
+            activeOrder.append(key)
+            if activeOrder.count > maxActiveSessions {
+                let over = activeOrder.count - maxActiveSessions
+                let oldKeys = Array(activeOrder.prefix(over))
+                for oldKey in oldKeys {
+                    activeOrder.removeAll { $0 == oldKey }
+                    if let old = active.removeValue(forKey: oldKey), old !== session {
+                        evict.append(old)
+                    }
+                }
+            }
         }
         lock.unlock()
+        for old in evict {
+            old.evict()
+        }
         session.enqueue(loadingRequest)
         session.startIfNeeded { [weak self] in
             guard let self = self, session.isFinished else { return }
             self.lock.lock()
+            self.activeOrder.removeAll { $0 == key }
             self.active.removeValue(forKey: key)
             self.lock.unlock()
         }
@@ -55,9 +73,17 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
 
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader, didCancel loadingRequest: AVAssetResourceLoadingRequest) {
         let key = loadingRequest.request.url?.absoluteString ?? ""
+        let session: SodaStreamSession?
         lock.lock()
-        active[key]?.cancel(request: loadingRequest)
+        session = active[key]
         lock.unlock()
+        guard let session = session else { return }
+        if session.cancel(request: loadingRequest) {
+            lock.lock()
+            activeOrder.removeAll { $0 == key }
+            active.removeValue(forKey: key)
+            lock.unlock()
+        }
     }
 }
 
@@ -108,12 +134,28 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
         }
     }
 
-    func cancel(request: AVAssetResourceLoadingRequest) {
+    func cancel(request: AVAssetResourceLoadingRequest) -> Bool {
         queue.sync {
             pending.removeAll { $0.request === request }
             if pending.isEmpty {
                 downloadTask?.cancel()
+                return true
             }
+            return false
+        }
+    }
+
+    /// 被 loader 逐出时调用：中断未完成的下载并丢弃数据（可在任意线程调用）。
+    func evict() {
+        queue.sync {
+            pending.forEach { $0.request.finishLoading(with: NSError(domain: "SodaStream", code: -9,
+                userInfo: [NSLocalizedDescriptionKey: "流式会话已逐出"])) }
+            pending.removeAll()
+            downloadTask?.cancel()
+            downloadTask = nil
+            downloadSession = nil
+            encrypted = Data()
+            decrypted = Data()
         }
     }
 
@@ -173,7 +215,10 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
             serveLocked()
             if nextSample >= (parsed?.samples.count ?? Int.max) {
                 Log.write("🎧 [SodaStream] done track=\(trackID) samples=\(parsed?.samples.count ?? -1) decrypted=\(decrypted.count) finished")
-                finishAll()
+                // 下载完成不终结 session：AVPlayer 可能还会发后续字节范围请求，
+                // session 需存活并复用已解密数据，直到 AVPlayer 取消（didCancel）。
+                downloadTask = nil
+                downloadSession = nil
             } else {
                 Log.write("❌ [SodaStream] incomplete track=\(trackID) nextSample=\(nextSample) total=\(parsed?.samples.count ?? -1) dataLen=\(encrypted.count)")
                 failAll(error: NSError(domain: "SodaStream", code: -4,
@@ -287,9 +332,9 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
             }
         }
         for idx in finishedIndexes.reversed() { pending.remove(at: idx) }
-        if pending.isEmpty, isFinished == false, downloadFinished, nextSample >= (parsed?.samples.count ?? Int.max) {
-            finishAll()
-        }
+        // 不再因 pending 清空就终结 session：AVPlayer 对同一资源会先发探测请求
+        // （如 off=0 len=2）再发完整请求，session 必须存活以复用已下载/解密的数据，
+        // 否则完整请求会重建 session 重复下载并触发瞬时 item failed。清理交给 didCancel。
     }
 
     private func slice(of range: Range<Int64>, headerLen: Int64) -> Data {

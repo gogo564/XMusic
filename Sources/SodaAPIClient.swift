@@ -171,8 +171,12 @@ struct SodaAPIClient {
         let media = trackIDs.map { ["type": "track", "id": $0] as [String: Any] }
         let data = try await postJSON(makeURL("/me/collection/add"), body: ["media": media, "scene": ""])
         guard let dict = data as? [String: Any],
-              let d = dict["data"] as? [String: Any] else { return false }
+              let d = dict["data"] as? [String: Any] else {
+            Log.write("❌ [Soda] addToCollection unexpected resp tracks=\(trackIDs.count)")
+            return false
+        }
         let collected = d["collected"] as? [[String: Any]] ?? []
+        Log.write("📤 [Soda] addToCollection ok tracks=\(trackIDs.count) collected=\(collected.count)")
         return !collected.isEmpty
     }
 

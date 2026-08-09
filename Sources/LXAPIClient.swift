@@ -304,8 +304,15 @@ final class LXAPIClient {
             request.httpMethod = "POST"
             request.allHTTPHeaderFields = headers(cfg)
             request.httpBody = try JSONSerialization.data(withJSONObject: listData.raw)
-            let (_, response) = try await URLSession.shared.data(for: request)
-            try ensureOK(response)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            do {
+                try ensureOK(response)
+            } catch {
+                Log.write("❌ [API] saveData failed: \(error.localizedDescription)")
+                let body = String(data: data, encoding: .utf8) ?? ""
+                if !body.isEmpty { Log.write("   ↳ \(body.prefix(300))") }
+                throw error
+            }
         }
     }
 
