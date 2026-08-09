@@ -135,6 +135,8 @@ class MusicCacheManager: ObservableObject {
     
     func startCaching(url: String, quality: String, id: String) {
         guard let remoteURL = URL(string: url), !isCached(id: id, quality: quality) else { return }
+        // 汽水流式（sodastream://）由 AVAssetResourceLoader 直连解密，无需走本地缓存
+        if remoteURL.scheme == "sodastream" { return }
 
         // Avoid duplicate downloads
         let taskKey = id + "_" + quality

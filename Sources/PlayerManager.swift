@@ -385,14 +385,26 @@ final class PlayerManager: ObservableObject {
         song.source == "soda"
     }
 
-    /// 统一获取播放地址：汽水源走 SodaAPIClient（audio_url 直连），其余走 lx-sync-server
+    /// 统一获取播放地址：汽水源走 SodaAPIClient（sodastream:// 流式解密），其余走 lx-sync-server
     private func playbackInfo(for song: LXSong) async throws -> (url: String, type: String, sourceName: String) {
         if isSoda(song) {
-            let pb = try await SodaAPIClient.shared.playbackURL(trackID: song.songmid ?? "", quality: quality)
-            return (pb.url, pb.quality, "汽水")
+            let trackID = song.songmid ?? ""
+            let mapped = mapSodaQuality(quality)
+            let customURL = SodaStreamLoader.customURL(trackID: trackID, quality: mapped)
+            return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
         }
         let result = try await LXAPIClient.shared.getPlaybackURL(for: song, quality: quality, autoSwitch: AppConfigStore.shared.config.autoSwitchSource)
         return (result.url, result.type, result.sourceName)
+    }
+
+    /// 汽水音质档位映射：128k/320k/flac → 服务器 quality（medium/highest/lossless）
+    private func mapSodaQuality(_ q: String) -> String {
+        switch q {
+        case "128k": return "medium"
+        case "320k": return "highest"
+        case "flac": return "lossless"
+        default: return "highest"
+        }
     }
 
     private func resolveAndPlay(_ song: LXSong?) {
@@ -455,7 +467,14 @@ final class PlayerManager: ObservableObject {
         lyrics = ""
         parsedLyrics = []
         currentLyricIndex = -1
-        let item = AVPlayerItem(url: url)
+        let item: AVPlayerItem
+        if url.scheme == SodaStreamLoader.scheme {
+            let asset = AVURLAsset(url: url)
+            asset.resourceLoader.setDelegate(SodaStreamLoader.shared, queue: DispatchQueue(label: "soda.resourceLoader"))
+            item = AVPlayerItem(asset: asset)
+        } else {
+            item = AVPlayerItem(url: url)
+        }
         item.preferredForwardBufferDuration = 4
         item.preferredPeakBitRate = 0
         player.replaceCurrentItem(with: item)

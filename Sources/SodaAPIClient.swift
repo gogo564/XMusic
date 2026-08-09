@@ -359,6 +359,32 @@ struct SodaAPIClient {
         )
     }
 
+    /// 流式播放信息（客户端解密用）：返回 CDN 加密音频 URL + 解密密钥
+    struct SodaStreamInfo {
+        let trackID: String
+        let mainURL: String
+        let hexKey: String
+        let spadeA: String
+        let quality: String
+        let durationMs: Int
+    }
+
+    func songStream(trackID: String, quality: String) async throws -> SodaStreamInfo {
+        let data = try await getJSON(makeURL("/song/stream", query: ["track_id": trackID, "quality": mapQuality(quality)]))
+        guard let dict = data as? [String: Any],
+              let mainURL = dict["main_url"] as? String, !mainURL.isEmpty else {
+            throw SodaError.upstream
+        }
+        return SodaStreamInfo(
+            trackID: dict["track_id"] as? String ?? trackID,
+            mainURL: mainURL,
+            hexKey: dict["hex_key"] as? String ?? "",
+            spadeA: dict["spade_a"] as? String ?? "",
+            quality: dict["quality"] as? String ?? "",
+            durationMs: dict["duration_ms"] as? Int ?? 0
+        )
+    }
+
     func lyric(trackID: String) async throws -> String {
         let data = try await getJSON(makeURL("/lyric", query: ["track_id": trackID]))
         if let dict = data as? [String: Any] {
