@@ -145,6 +145,7 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
                 self.downloadSession = session
                 self.downloadTask = task
             }
+            print("🎧 [SodaStream] start track=\(trackID) q=\(quality) url=\(url.absoluteString.prefix(50))")
             task.resume()
         } catch {
             failAll(error: error)
@@ -171,8 +172,10 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
             processLocked()
             serveLocked()
             if nextSample >= (parsed?.samples.count ?? Int.max) {
+                print("🎧 [SodaStream] done track=\(trackID) samples=\(parsed?.samples.count ?? -1) decrypted=\(decrypted.count) finished")
                 finishAll()
             } else {
+                print("❌ [SodaStream] incomplete track=\(trackID) nextSample=\(nextSample) total=\(parsed?.samples.count ?? -1) dataLen=\(encrypted.count)")
                 failAll(error: NSError(domain: "SodaStream", code: -4,
                     userInfo: [NSLocalizedDescriptionKey: "音频数据下载不完整"]))
             }
@@ -255,9 +258,13 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
                 let wantOffset = Int64(dataReq.requestedOffset)
                 let wantLength = dataReq.requestedLength > 0 ? Int64(dataReq.requestedLength) : totalLength - wantOffset
                 let wantEnd = min(wantOffset + wantLength, totalLength)
+                // 首次响应的起点 = 请求的 offset；之后从上次响应的终点继续
+                if pending[i].served == 0 {
+                    pending[i].served = wantOffset
+                }
                 let canEnd = min(wantEnd, available)
-                if canEnd > p.served {
-                    let sliceStart = p.served
+                if canEnd > pending[i].served {
+                    let sliceStart = pending[i].served
                     let sliceEnd = canEnd
                     if sliceEnd > sliceStart {
                         dataReq.respond(with: slice(of: sliceStart..<sliceEnd, headerLen: headerLen))
