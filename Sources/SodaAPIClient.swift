@@ -321,8 +321,6 @@ struct SodaAPIClient {
         if let uri = album["url_cover"] as? String { return uri }
         return ""
     }
-        }
-    }
 
     /// 歌单详情：返回歌单内嵌歌曲（media_resources，无需登录）
     func playlistSongs(playlistID: String) async throws -> [SodaTrack] {
