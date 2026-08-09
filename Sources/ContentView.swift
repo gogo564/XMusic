@@ -364,6 +364,28 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
+                    Text("🎛 场景音乐")
+                        .font(.title2.bold())
+                    Spacer()
+                    NavigationLink(destination: SodaModeListView()) {
+                        Text("全部")
+                            .font(.subheadline)
+                    }
+                }
+                .padding(.horizontal)
+
+                if !SodaAPIClient.shared.isConfigured {
+                    Text("未配置汽水服务，无法加载场景模式")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                } else {
+                    SodaModeChipsView()
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
                     Text("🍺 汽水推荐歌单")
                         .font(.title2.bold())
                     Spacer()

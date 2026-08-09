@@ -164,6 +164,83 @@ struct SodaAPIClient {
         }
     }
 
+    // MARK: - 场景模式
+
+    struct SodaFeedMode: Identifiable {
+        let id: String
+        let text: String
+        let type: String          // preference_mode / scene_mode
+        let mode: String          // 偏好模式: default/familiar/fresh
+        let sceneModeID: Int      // 场景模式: 48 等
+        let subQueueType: String
+        let coverURI: String
+    }
+
+    /// 获取汽水 feed 模式列表（推荐 + 场景模式），来自 /feed/mode
+    func feedModes() async throws -> [SodaFeedMode] {
+        let data = try await postJSON(makeURL("/feed/mode"), body: [:])
+        guard let dict = data as? [String: Any] else { return [] }
+        // 服务器 data 结构: { supported_without_app_context, upstream }
+        let source = (dict["upstream"] as? [String: Any]) ?? dict
+        var modes: [SodaFeedMode] = []
+
+        // feed_mode_bar：顶部横条（推荐 + 常用场景）
+        if let bar = source["feed_mode_bar"] as? [String: Any],
+           let barModes = bar["feed_mode"] as? [[String: Any]] {
+            for m in barModes {
+                modes.append(parseFeedMode(m))
+            }
+        }
+        // feed_mode_block：完整分组（场景音乐等）
+        if let blocks = source["feed_mode_block"] as? [[String: Any]] {
+            for block in blocks {
+                if let blockModes = block["feed_mode"] as? [[String: Any]] {
+                    for m in blockModes {
+                        modes.append(parseFeedMode(m))
+                    }
+                }
+            }
+        }
+        // 去重（bar 与 block 可能重复）
+        var seen = Set<String>()
+        var result: [SodaFeedMode] = []
+        for m in modes {
+            guard seen.insert(m.id).inserted else { continue }
+            result.append(m)
+        }
+        return result
+    }
+
+    private func parseFeedMode(_ m: [String: Any]) -> SodaFeedMode {
+        let text = m["text"] as? String ?? ""
+        let type = m["type"] as? String ?? ""
+        let entity = m["entity"] as? [String: Any] ?? [:]
+        let pref = entity["feed_preference_mode"] as? [String: Any] ?? [:]
+        let scene = entity["feed_scene_mode"] as? [String: Any] ?? [:]
+        let mode = pref["mode"] as? String ?? ""
+        let sceneID = scene["scene_mode_id"] as? Int ?? 0
+        let subQueue = scene["sub_queue_type"] as? String ?? ""
+        let coverURI = (m["url_info"] as? [String: Any])?["uri"] as? String ?? ""
+        let id = type == "preference_mode" ? "pref_\(mode)" : "scene_\(sceneID)"
+        return SodaFeedMode(id: id, text: text, type: type, mode: mode,
+                            sceneModeID: sceneID, subQueueType: subQueue, coverURI: coverURI)
+    }
+
+    /// 按模式拉取每日推荐歌曲（/daily/mix，需汽水登录态）
+    func dailyMixTracks(sceneModeID: Int?, mode: String?, count: Int = 10) async throws -> [SodaTrack] {
+        var body: [String: Any] = ["count": count]
+        if let sceneModeID { body["scene_mode_id"] = sceneModeID }
+        if let mode { body["mode"] = mode }
+        let data = try await postJSON(makeURL("/daily/mix"), body: body)
+        guard let dict = data as? [String: Any] else { return [] }
+        // 服务器 data 结构: { supported_without_app_context, upstream }
+        let source = (dict["upstream"] as? [String: Any]) ?? dict
+        if let items = source["items"] as? [[String: Any]] {
+            return parseTracks(from: items)
+        }
+        return []
+    }
+
     // MARK: - 歌曲
 
     /// 收藏歌曲到汽水账号「我喜欢的音乐」（写接口，用 QISHUI_PLAYLIST_COOKIE）
@@ -204,7 +281,13 @@ struct SodaAPIClient {
 
     private func parseTracks(from resources: [[String: Any]]) -> [SodaTrack] {
         resources.compactMap { r in
-            let track = r["track"] as? [String: Any] ?? r
+            // 兼容三种结构：{track}, {entity:{track_wrapper:{track}}}, 直接 track
+            var track = r["track"] as? [String: Any] ?? r
+            if track["id"] == nil, let entity = r["entity"] as? [String: Any],
+               let wrapper = entity["track_wrapper"] as? [String: Any],
+               let t = wrapper["track"] as? [String: Any] {
+                track = t
+            }
             guard let id = track["id"] as? String else { return nil }
             let album = track["album"] as? [String: Any] ?? [:]
             let artists = track["artists"] as? [[String: Any]] ?? []
@@ -213,10 +296,31 @@ struct SodaAPIClient {
                 id: id,
                 name: track["name"] as? String ?? "",
                 artist: artistName,
-                coverURL: album["cover_url"] as? String ?? "",
+                coverURL: coverURLString(from: album),
                 duration: track["duration"] as? Int ?? 0,
                 albumName: album["name"] as? String ?? ""
             )
+        }
+    }
+
+    /// 兼容两种封面字段：album["cover_url"] 字符串 或 album["url_cover"] 对象
+    private func coverURLString(from album: [String: Any]) -> String {
+        if let s = album["cover_url"] as? String, !s.isEmpty { return s }
+        if let obj = album["url_cover"] as? [String: Any] {
+            if let uri = obj["uri"] as? String, !uri.isEmpty {
+                if let urls = obj["urls"] as? [String], let first = urls.first {
+                    if !first.hasSuffix("/") && uri.contains("/") {
+                        return first + uri
+                    }
+                    return first + uri
+                }
+                return "https://p3-luna.douyinpic.com/img/" + uri
+            }
+            if let urls = obj["urls"] as? [String], let first = urls.first { return first }
+        }
+        if let uri = album["url_cover"] as? String { return uri }
+        return ""
+    }
         }
     }
 
