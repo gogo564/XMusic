@@ -121,7 +121,7 @@ final class PlayerManager: ObservableObject {
             object: player.currentItem,
             queue: .main
         ) { [weak self] _ in
-            print("⏭️ [Player] DidPlayToEnd → auto next")
+            Log.write("⏭️ [Player] DidPlayToEnd → auto next")
             self?.playNext(auto: true)
         }
     }
@@ -536,12 +536,12 @@ final class PlayerManager: ObservableObject {
                 guard let self = self else { return }
                 switch item.status {
                 case .failed:
-                    print("❌ [Player] item failed: \(item.error?.localizedDescription ?? "")")
+                    Log.write("❌ [Player] item failed: \(item.error?.localizedDescription ?? "")")
                     self.playbackError = item.error?.localizedDescription ?? "播放失败"
                     self.isPlaying = false
                 case .readyToPlay:
                     let d = item.duration.seconds
-                    print("🎧 [Player] item ready dur=\(d) song=\(self.currentSong?.name ?? "")")
+                    Log.write("🎧 [Player] item ready dur=\(d) song=\(self.currentSong?.name ?? "")")
                     if d.isFinite, d > 0 {
                         self.duration = d
                     }

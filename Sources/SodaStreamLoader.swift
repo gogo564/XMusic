@@ -145,7 +145,7 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
                 self.downloadSession = session
                 self.downloadTask = task
             }
-            print("🎧 [SodaStream] start track=\(trackID) q=\(quality) url=\(url.absoluteString.prefix(50))")
+            Log.write("🎧 [SodaStream] start track=\(trackID) q=\(quality) url=\(url.absoluteString.prefix(50))")
             task.resume()
         } catch {
             failAll(error: error)
@@ -172,10 +172,10 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
             processLocked()
             serveLocked()
             if nextSample >= (parsed?.samples.count ?? Int.max) {
-                print("🎧 [SodaStream] done track=\(trackID) samples=\(parsed?.samples.count ?? -1) decrypted=\(decrypted.count) finished")
+                Log.write("🎧 [SodaStream] done track=\(trackID) samples=\(parsed?.samples.count ?? -1) decrypted=\(decrypted.count) finished")
                 finishAll()
             } else {
-                print("❌ [SodaStream] incomplete track=\(trackID) nextSample=\(nextSample) total=\(parsed?.samples.count ?? -1) dataLen=\(encrypted.count)")
+                Log.write("❌ [SodaStream] incomplete track=\(trackID) nextSample=\(nextSample) total=\(parsed?.samples.count ?? -1) dataLen=\(encrypted.count)")
                 failAll(error: NSError(domain: "SodaStream", code: -4,
                     userInfo: [NSLocalizedDescriptionKey: "音频数据下载不完整"]))
             }
@@ -258,6 +258,10 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
                 let wantOffset = Int64(dataReq.requestedOffset)
                 let wantLength = dataReq.requestedLength > 0 ? Int64(dataReq.requestedLength) : totalLength - wantOffset
                 let wantEnd = min(wantOffset + wantLength, totalLength)
+                if !pending[i].loggedRequest {
+                    Log.write("🎧 [SodaStream] request track=\(trackID) off=\(wantOffset) len=\(dataReq.requestedLength) wantEnd=\(wantEnd) total=\(totalLength) avail=\(available) pending=\(pending.count)")
+                    pending[i].loggedRequest = true
+                }
                 // 首次响应的起点 = 请求的 offset；之后从上次响应的终点继续
                 if pending[i].served == 0 {
                     pending[i].served = wantOffset
@@ -272,6 +276,7 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
                     }
                 }
                 if pending[i].served >= wantEnd || (downloadFinished && pending[i].served >= available) {
+                    Log.write("🎧 [SodaStream] finish request track=\(trackID) served=\(pending[i].served) wantEnd=\(wantEnd)")
                     request.finishLoading()
                     finishedIndexes.append(i)
                 }
@@ -327,4 +332,5 @@ private struct PendingRequest {
     let request: AVAssetResourceLoadingRequest
     var served: Int64 = 0
     var infoFulfilled = false
+    var loggedRequest = false
 }
