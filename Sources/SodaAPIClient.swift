@@ -166,6 +166,16 @@ struct SodaAPIClient {
 
     // MARK: - 歌曲
 
+    /// 收藏歌曲到汽水账号「我喜欢的音乐」（写接口，用 QISHUI_PLAYLIST_COOKIE）
+    func addToCollection(trackIDs: [String]) async throws -> Bool {
+        let media = trackIDs.map { ["type": "track", "id": $0] as [String: Any] }
+        let data = try await postJSON(makeURL("/me/collection/add"), body: ["media": media, "scene": ""])
+        guard let dict = data as? [String: Any],
+              let d = dict["data"] as? [String: Any] else { return false }
+        let collected = d["collected"] as? [[String: Any]] ?? []
+        return !collected.isEmpty
+    }
+
     struct SodaTrack: Identifiable {
         let id: String
         let name: String
@@ -315,12 +325,13 @@ struct SodaAPIClient {
 
     func playbackURL(trackID: String) async throws -> SodaPlayback {
         let data = try await getJSON(makeURL("/song/detail", query: ["track_id": trackID]))
-        guard let dict = data as? [String: Any], let url = dict["audio_url"] as? String, !url.isEmpty else {
+        guard let dict = data as? [String: Any] else {
             throw SodaError.upstream
         }
         let artist = dict["artists"] as? [[String: Any]] ?? []
+        let playURL = baseURL + "/song/play?track_id=" + trackID
         return SodaPlayback(
-            url: url,
+            url: playURL,
             name: dict["name"] as? String ?? "",
             artist: artist.compactMap { $0["name"] as? String }.joined(separator: " / ")
         )

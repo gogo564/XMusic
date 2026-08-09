@@ -15,6 +15,8 @@ struct SongRow: View {
     @State private var showMenu = false
     @State private var showPlaylistPicker = false
     @State private var showQualityPicker = false
+    @State private var showCollectAlert = false
+    @State private var collectMessage = ""
 
     var body: some View {
         HStack(spacing: 12) {
@@ -102,6 +104,9 @@ struct SongRow: View {
             Button("选择音质播放") { showQualityPicker = true }
             Button("下一首播放") { player.playNext(with: song) }
             Button("添加到歌单") { showPlaylistPicker = true }
+            if song.source == "soda" {
+                Button("收藏到汽水歌单") { collectToSoda() }
+            }
             if !downloader.isDownloaded(song), song.source != "soda" {
                 Button("下载 (320k)") { downloader.download(song, quality: "320k") }
                 Button("下载 (无损)") { downloader.download(song, quality: "flac") }
@@ -115,6 +120,32 @@ struct SongRow: View {
         .sheet(isPresented: $showQualityPicker) {
             QualityPickerView(song: song)
                 .environmentObject(player)
+        }
+        .alert(collectMessage, isPresented: $showCollectAlert) {
+            Button("好的", role: .cancel) {}
+        }
+    }
+
+    private func collectToSoda() {
+        guard let trackID = song.songmid, !trackID.isEmpty else {
+            collectMessage = "汽水歌曲缺少 track_id，无法收藏"
+            showCollectAlert = true
+            return
+        }
+        Task {
+            do {
+                let ok = try await SodaAPIClient.shared.addToCollection(trackIDs: [trackID])
+                await MainActor.run {
+                    collectMessage = ok ? "已收藏到汽水「我喜欢的音乐」" : "收藏失败"
+                    showCollectAlert = true
+                    if ok { HapticManager.shared.notification(type: .success) }
+                }
+            } catch {
+                await MainActor.run {
+                    collectMessage = "收藏失败：\(error.localizedDescription)"
+                    showCollectAlert = true
+                }
+            }
         }
     }
 
