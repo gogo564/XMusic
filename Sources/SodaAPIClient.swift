@@ -321,6 +321,7 @@ struct SodaAPIClient {
         let url: String
         let name: String
         let artist: String
+        let quality: String
     }
 
     func playbackURL(trackID: String) async throws -> SodaPlayback {
@@ -333,7 +334,8 @@ struct SodaAPIClient {
         return SodaPlayback(
             url: playURL,
             name: dict["name"] as? String ?? "",
-            artist: artist.compactMap { $0["name"] as? String }.joined(separator: " / ")
+            artist: artist.compactMap { $0["name"] as? String }.joined(separator: " / "),
+            quality: "最高音质"
         )
     }
 

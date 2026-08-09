@@ -389,7 +389,7 @@ final class PlayerManager: ObservableObject {
     private func playbackInfo(for song: LXSong) async throws -> (url: String, type: String, sourceName: String) {
         if isSoda(song) {
             let pb = try await SodaAPIClient.shared.playbackURL(trackID: song.songmid ?? "")
-            return (pb.url, "128k", "汽水")
+            return (pb.url, pb.quality, "汽水")
         }
         let result = try await LXAPIClient.shared.getPlaybackURL(for: song, quality: quality, autoSwitch: AppConfigStore.shared.config.autoSwitchSource)
         return (result.url, result.type, result.sourceName)
@@ -415,7 +415,7 @@ final class PlayerManager: ObservableObject {
 
         // 1. Cache-first（缓存按 音质 区分，命中即所选音质）
         if MusicCacheManager.shared.isCached(id: song.id, quality: quality), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id, quality: quality) {
-            startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: quality, playbackOrigin: "缓存")
+            startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: isSoda(song) ? "最高音质" : quality, playbackOrigin: "缓存")
             Task { await loadLyric(for: song) }
             return
         }
