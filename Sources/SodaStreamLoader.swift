@@ -204,10 +204,10 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
         // 新文件布局 ftyp + [8字节moov头 + cleanInner] + [8字节mdat头 + payload]
         // 两步法：先 dummy 求 cleanInner 长度，再算真实 mdat 偏移
         guard let moov = parser.findBox("moov"),
-              let dummyInner = try? parser.processBoxTreeForHeader(root: moov, newMdatOffset: 0) else { return }
+              let dummyInner = try? parser.processBoxTreeForHeader(root: moov, newMdatOffset: 0, parsed: parsed) else { return }
         let ftypSize = parsed.ftyp?.size ?? 0
         let newMdatOffset = ftypSize + dummyInner.count + 16
-        guard let realInner = try? parser.processBoxTreeForHeader(root: moov, newMdatOffset: newMdatOffset) else { return }
+        guard let realInner = try? parser.processBoxTreeForHeader(root: moov, newMdatOffset: newMdatOffset, parsed: parsed) else { return }
 
         var out = Data()
         if let ftyp = parsed.ftyp {
@@ -252,8 +252,8 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
                 let headerLen = Int64(header?.count ?? 0)
                 let decryptedLen = Int64(decrypted.count)
                 let available = headerLen + decryptedLen
-                let wantOffset = dataReq.requestedOffset
-                let wantLength = dataReq.requestedLength > 0 ? dataReq.requestedLength : totalLength - wantOffset
+                let wantOffset = Int64(dataReq.requestedOffset)
+                let wantLength = dataReq.requestedLength > 0 ? Int64(dataReq.requestedLength) : totalLength - wantOffset
                 let wantEnd = min(wantOffset + wantLength, totalLength)
                 let canEnd = min(wantEnd, available)
                 if canEnd > p.served {
@@ -281,16 +281,16 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
     }
 
     private func slice(of range: Range<Int64>, headerLen: Int64) -> Data {
-        let start = Int(range.lowerBound), end = Int(range.upperBound)
+        let start = range.lowerBound, end = range.upperBound
         var out = Data()
         if start < headerLen {
-            let hEnd = min(Int(headerLen), end)
-            out.append(header!.subdata(in: start..<hEnd))
+            let hEnd = min(headerLen, end)
+            out.append(header!.subdata(in: Int(start)..<Int(hEnd)))
         }
         if end > headerLen && start < headerLen + Int64(decrypted.count) {
-            let dStart = max(0, start - Int(headerLen))
-            let dEnd = min(decrypted.count, end - Int(headerLen))
-            if dEnd > dStart { out.append(decrypted.subdata(in: dStart..<dEnd)) }
+            let dStart = max(Int64(0), start - headerLen)
+            let dEnd = min(Int64(decrypted.count), end - headerLen)
+            if dEnd > dStart { out.append(decrypted.subdata(in: Int(dStart)..<Int(dEnd))) }
         }
         return out
     }

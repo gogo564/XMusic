@@ -18,7 +18,6 @@ struct SodaCencParser {
     }
 
     let fileData: Data
-    private var lastParsed: Parsed?
 
     init(_ data: Data) {
         self.fileData = data
@@ -122,7 +121,7 @@ struct SodaCencParser {
 
         let samples = zip(sampleSizes, ivs).map { Sample(size: $0, iv: $1) }
         let ftyp = findBox("ftyp")
-        let result = Parsed(
+        return Parsed(
             ftyp: ftyp,
             mdat: mdat,
             samples: samples,
@@ -131,8 +130,6 @@ struct SodaCencParser {
             decryptedPayloadSize: sampleSizes.reduce(0, +),
             keyBytes: keyBytes
         )
-        lastParsed = result
-        return result
     }
 
     func hexToBytes(_ hex: String) -> [UInt8] {
@@ -143,7 +140,7 @@ struct SodaCencParser {
         var idx = clean.startIndex
         while idx < clean.endIndex {
             let next = clean.index(idx, offsetBy: 2)
-            if let byte = UInt8(clean[idx..<next], radix: 16) { bytes.append(byte) }
+            if let byte = UInt8(String(clean[idx..<next]), radix: 16) { bytes.append(byte) }
             idx = next
         }
         return bytes
@@ -179,8 +176,8 @@ struct SodaCencParser {
 
     private func samplesPerChunk(for chunkIndex: Int, entries: [StscEntry]) -> Int {
         for (i, entry) in entries.enumerated() {
-            let next = entries.indices.contains(i + 1) ? entries[i + 1] : nil
-            if chunkIndex >= entry.firstChunk && (next == nil || chunkIndex < next.firstChunk) {
+            let next: StscEntry? = entries.indices.contains(i + 1) ? entries[i + 1] : nil
+            if chunkIndex >= entry.firstChunk && (next == nil || chunkIndex < next!.firstChunk) {
                 return entry.samplesPerChunk
             }
         }
@@ -231,16 +228,13 @@ struct SodaCencParser {
     }
 
     func boxHeader(_ type: String, innerSize: Int) -> Data {
-        var data = Data()
         var size = UInt32(innerSize + 8).bigEndian
-        data.append(Data(bytes: &size, count: 4))
-        data.append(Data(type.utf8))
+        var data = Data(type.utf8)
+        data.insert(contentsOf: Swift.withUnsafeBytes(of: &size) { Array($0) }, at: 0)
         return data
     }
 
-    func processBoxTreeForHeader(root: Box, newMdatOffset: Int) throws -> Data {
-        // Parsed 用于 stco 重写（chunkOffsets），此处仅需 stco 逻辑，复用私有实现
-        guard let parsed = self.lastParsed else { throw SodaCencError.invalidStructure("未解析") }
+    func processBoxTreeForHeader(root: Box, newMdatOffset: Int, parsed: Parsed) throws -> Data {
         return try processBoxTree(root: root, newMdatOffset: newMdatOffset, parsed: parsed)
     }
 
@@ -277,10 +271,10 @@ struct SodaCencParser {
             if type == "stco" {
                 let subdata = fileData.subdata(in: (pos + 8)..<(pos + size))
                 let chunkCount = Int(readUInt32(subdata, 4))
-                var body = subdata.prefix(8)
+                var body = Data(subdata.prefix(8))
                 for offset in parsed.chunkOffsets.prefix(chunkCount) {
                     var v = UInt32(newMdatOffset + offset).bigEndian
-                    body.append(Data(bytes: &v, count: 4))
+                    body.append(contentsOf: Swift.withUnsafeBytes(of: &v) { Array($0) })
                 }
                 parts.append(boxHeader("stco", innerSize: body.count))
                 parts.append(body)
