@@ -56,6 +56,9 @@ struct SodaCTR {
 
     private func ecbEncryptBlock(key: [UInt8], counter: [UInt8]) -> [UInt8] {
         var outputBytes = [UInt8](repeating: 0, count: 16)
+        let keyCount = key.count
+        let counterCount = counter.count
+        let outputCount = outputBytes.count
         key.withUnsafeBytes { keyPtr in
             counter.withUnsafeBytes { counterPtr in
                 outputBytes.withUnsafeMutableBytes { outPtr in
@@ -63,10 +66,10 @@ struct SodaCTR {
                         CCOperation(kCCEncrypt),
                         CCAlgorithm(kCCAlgorithmAES),
                         CCOptions(kCCOptionECBMode),
-                        keyPtr.baseAddress, key.count,
+                        keyPtr.baseAddress, keyCount,
                         nil,
-                        counterPtr.baseAddress, counter.count,
-                        outPtr.baseAddress, outputBytes.count,
+                        counterPtr.baseAddress, counterCount,
+                        outPtr.baseAddress, outputCount,
                         nil
                     )
                 }
