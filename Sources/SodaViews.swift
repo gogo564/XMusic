@@ -47,7 +47,7 @@ struct SodaTrackListView: View {
         .onDisappear {
             player.queueRefreshHandler = nil
         }
-        .onReceive(player.$queueRefreshCount) { _ in
+        .onChange(of: player.queueRefreshCount) { _ in
             if !player.queue.isEmpty {
                 songs = player.queue
             }
