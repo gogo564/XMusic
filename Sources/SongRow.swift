@@ -9,6 +9,7 @@ struct SongRow: View {
     let showSource: Bool
     var isEditing: Bool = false
     var isSelected: Bool = false
+    var showHeart: Bool = true
     var onPlay: ((LXSong) -> Void)?
     var onToggleSelect: (() -> Void)?
 
@@ -194,7 +195,9 @@ struct SongRow: View {
             .frame(width: 30, height: 30)
         } else {
             HStack(spacing: 14) {
-                heartButton
+                if showHeart {
+                    heartButton
+                }
                 if song.source == "soda" {
                     // 汽水歌播放直连 qishui-api，不支持下载，仅显示菜单
                 } else if downloader.isDownloaded(song) {
