@@ -28,6 +28,7 @@ struct SodaTrackListView: View {
                 ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
                     SongRow(song: song, showSource: true) { s in
                         player.play(song: s, in: songs, index: idx)
+                        registerQueueRefresh()
                     }
                 }
             }
@@ -39,7 +40,30 @@ struct SodaTrackListView: View {
                 .allowsHitTesting(false)
         }
         .navigationTitle(title)
-        .onAppear { Task { await loadSongs() } }
+        .onAppear {
+            Task { await loadSongs() }
+            registerQueueRefresh()
+        }
+        .onDisappear {
+            player.queueRefreshHandler = nil
+        }
+        .onReceive(player.$queueRefreshCount) { _ in
+            if !player.queue.isEmpty {
+                songs = player.queue
+            }
+        }
+    }
+
+    /// 注册场景/推荐流队列刷新：播完一批后自动拉新一批替换队列
+    private func registerQueueRefresh() {
+        player.queueRefreshHandler = { [load] in
+            do {
+                let tracks = try await load()
+                return tracks.map { $0.toLXSong() }
+            } catch {
+                return []
+            }
+        }
     }
 
     @MainActor
