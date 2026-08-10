@@ -20,15 +20,11 @@ struct SettingsView: View {
     @State private var isError = false
     @State private var sodaAuthStatus: String?
     @State private var sodaAuthLoading = false
-    @State private var sodaPlayCookie = ""
-    @State private var sodaPlayHelios = ""
-    @State private var sodaPlayMedusa = ""
-    @State private var sodaPlayUpdating = false
-    @State private var sodaPlayMessage: String?
-    @State private var sodaPlaylistAuthStatus: String?
-    @State private var sodaPlaylistCookie = ""
-    @State private var sodaPlaylistUpdating = false
-    @State private var sodaPlaylistMessage: String?
+    @State private var sodaCookie = ""
+    @State private var sodaHelios = ""
+    @State private var sodaMedusa = ""
+    @State private var sodaUpdating = false
+    @State private var sodaUpdateMessage: String?
 
     private let qualities = ["128k", "320k", "flac"]
 
@@ -56,89 +52,47 @@ struct SettingsView: View {
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                 if !sodaBaseURL.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("播放账号（会员）")
-                                .font(.system(size: 14, weight: .medium))
-                            Spacer()
-                            if sodaAuthLoading {
-                                ProgressView()
-                            } else if let status = sodaAuthStatus {
-                                Text(status)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(status.hasPrefix("✅") ? .green : .red)
-                            }
-                        }
-                        Button {
-                            checkSodaAuth()
-                        } label: {
-                            Label(sodaAuthStatus == nil ? "检测播放账号" : "重新检测播放账号", systemImage: "arrow.clockwise")
-                        }
-                        DisclosureGroup("更新播放账号签名（失效时粘贴新值）") {
-                            TextField("Cookie（含 sessionid，抓包整段复制）", text: $sodaPlayCookie)
-                                .font(.system(size: 12))
-                                .autocapitalization(.none)
-                            TextField("X-Helios", text: $sodaPlayHelios)
-                                .font(.system(size: 12))
-                                .autocapitalization(.none)
-                            TextField("X-Medusa", text: $sodaPlayMedusa)
-                                .font(.system(size: 12))
-                                .autocapitalization(.none)
-                            Button {
-                                updateSodaAuth(role: "play")
-                            } label: {
-                                HStack {
-                                    if sodaPlayUpdating { ProgressView().scaleEffect(0.7) }
-                                    Text(sodaPlayUpdating ? "校验中…" : "校验并保存")
-                                }
-                            }
-                            .disabled(sodaPlayUpdating)
-                            if let msg = sodaPlayMessage {
-                                Text(msg)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(msg.hasPrefix("✅") ? .green : .red)
-                            }
+                    HStack {
+                        Text("登录状态")
+                        Spacer()
+                        if sodaAuthLoading {
+                            ProgressView()
+                        } else if let status = sodaAuthStatus {
+                            Text(status)
+                                .font(.system(size: 13))
+                                .foregroundColor(status.hasPrefix("✅") ? .green : .red)
                         }
                     }
-                    .padding(.vertical, 4)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("歌单账号（展示/收藏）")
-                                .font(.system(size: 14, weight: .medium))
-                            Spacer()
-                            if let status = sodaPlaylistAuthStatus {
-                                Text(status)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(status.hasPrefix("✅") ? .green : .red)
-                            }
-                        }
+                    Button {
+                        checkSodaAuth()
+                    } label: {
+                        Label(sodaAuthStatus == nil ? "检测汽水登录状态" : "重新检测", systemImage: "arrow.clockwise")
+                    }
+                    DisclosureGroup("更新汽水登录签名（失效时粘贴新值）") {
+                        TextField("Cookie（含 sessionid，抓包整段复制）", text: $sodaCookie)
+                            .font(.system(size: 12))
+                            .autocapitalization(.none)
+                        TextField("X-Helios", text: $sodaHelios)
+                            .font(.system(size: 12))
+                            .autocapitalization(.none)
+                        TextField("X-Medusa", text: $sodaMedusa)
+                            .font(.system(size: 12))
+                            .autocapitalization(.none)
                         Button {
-                            checkSodaPlaylistAuth()
+                            updateSodaAuth()
                         } label: {
-                            Label(sodaPlaylistAuthStatus == nil ? "检测歌单账号" : "重新检测歌单账号", systemImage: "arrow.clockwise")
+                            HStack {
+                                if sodaUpdating { ProgressView().scaleEffect(0.7) }
+                                Text(sodaUpdating ? "校验中…" : "校验并保存")
+                            }
                         }
-                        DisclosureGroup("更新歌单账号签名（失效时粘贴新值）") {
-                            TextField("Cookie（含 sessionid，抓包整段复制）", text: $sodaPlaylistCookie)
+                        .disabled(sodaUpdating)
+                        if let msg = sodaUpdateMessage {
+                            Text(msg)
                                 .font(.system(size: 12))
-                                .autocapitalization(.none)
-                            Button {
-                                updateSodaAuth(role: "playlist")
-                            } label: {
-                                HStack {
-                                    if sodaPlaylistUpdating { ProgressView().scaleEffect(0.7) }
-                                    Text(sodaPlaylistUpdating ? "校验中…" : "校验并保存")
-                                }
-                            }
-                            .disabled(sodaPlaylistUpdating)
-                            if let msg = sodaPlaylistMessage {
-                                Text(msg)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(msg.hasPrefix("✅") ? .green : .red)
-                            }
+                                .foregroundColor(msg.hasPrefix("✅") ? .green : .red)
                         }
                     }
-                    .padding(.vertical, 4)
                 }
             }
             Section(header: Text("播放")) {
@@ -282,7 +236,7 @@ struct SettingsView: View {
         sodaAuthStatus = nil
         Task {
             defer { sodaAuthLoading = false }
-            let result = (try? await SodaAPIClient.shared.authStatus(role: "play"))
+            let result = (try? await SodaAPIClient.shared.authStatus())
                 ?? SodaAPIClient.SodaAuthStatus(valid: false, nickname: "", message: "检测失败")
             sodaAuthStatus = result.valid
                 ? "✅ 正常（\(result.nickname)）"
@@ -290,75 +244,27 @@ struct SettingsView: View {
         }
     }
 
-    private func checkSodaPlaylistAuth() {
-        guard !sodaBaseURL.isEmpty else { return }
-        sodaPlaylistAuthStatus = nil
-        Task {
-            let result = (try? await SodaAPIClient.shared.authStatus(role: "playlist"))
-                ?? SodaAPIClient.SodaAuthStatus(valid: false, nickname: "", message: "检测失败")
-            sodaPlaylistAuthStatus = result.valid
-                ? "✅ 正常（\(result.nickname)）"
-                : "⚠️ \(result.message)"
-        }
-    }
-
-    private func updateSodaAuth(role: String) {
+    private func updateSodaAuth() {
         guard !sodaBaseURL.isEmpty else {
-            if role == "play" {
-                sodaPlayMessage = "请先填写汽水服务地址"
-            } else {
-                sodaPlaylistMessage = "请先填写汽水服务地址"
-            }
+            sodaUpdateMessage = "请先填写汽水服务地址"
             return
         }
-        let cookie: String
-        let helios: String
-        let medusa: String
-        switch role {
-        case "playlist":
-            cookie = sodaPlaylistCookie
-            helios = ""
-            medusa = ""
-        default:
-            cookie = sodaPlayCookie
-            helios = sodaPlayHelios
-            medusa = sodaPlayMedusa
-        }
-        guard !cookie.isEmpty || !helios.isEmpty || !medusa.isEmpty else {
-            if role == "play" {
-                sodaPlayMessage = "请至少粘贴 Cookie 或签名中的一项"
-            } else {
-                sodaPlaylistMessage = "请至少粘贴 Cookie"
-            }
+        guard !sodaCookie.isEmpty || !sodaHelios.isEmpty || !sodaMedusa.isEmpty else {
+            sodaUpdateMessage = "请至少粘贴 Cookie 或签名中的一项"
             return
         }
-        if role == "play" {
-            sodaPlayUpdating = true
-            sodaPlayMessage = nil
-        } else {
-            sodaPlaylistUpdating = true
-            sodaPlaylistMessage = nil
-        }
+        sodaUpdating = true
+        sodaUpdateMessage = nil
         Task {
-            let result = (try? await SodaAPIClient.shared.updateAuth(role: role, cookie: cookie, helios: helios, medusa: medusa))
+            defer { sodaUpdating = false }
+            let result = (try? await SodaAPIClient.shared.updateAuth(cookie: sodaCookie, helios: sodaHelios, medusa: sodaMedusa))
                 ?? SodaAPIClient.SodaAuthStatus(valid: false, nickname: "", message: "更新失败")
-            let text = result.valid ? "✅ \(result.message)" : "⚠️ \(result.message)"
-            if role == "play" {
-                sodaPlayUpdating = false
-                sodaPlayMessage = text
-                if result.valid {
-                    sodaPlayCookie = ""
-                    sodaPlayHelios = ""
-                    sodaPlayMedusa = ""
-                    sodaAuthStatus = "✅ 正常（\(result.nickname)）"
-                }
-            } else {
-                sodaPlaylistUpdating = false
-                sodaPlaylistMessage = text
-                if result.valid {
-                    sodaPlaylistCookie = ""
-                    sodaPlaylistAuthStatus = "✅ 正常（\(result.nickname)）"
-                }
+            sodaUpdateMessage = result.valid ? "✅ \(result.message)" : "⚠️ \(result.message)"
+            if result.valid {
+                sodaCookie = ""
+                sodaHelios = ""
+                sodaMedusa = ""
+                sodaAuthStatus = "✅ 正常（\(result.nickname)）"
             }
         }
     }

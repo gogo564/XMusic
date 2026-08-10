@@ -124,7 +124,6 @@ struct ServerPlaylistDetailView: View {
                             showSource: true,
                             isEditing: isEditing,
                             isSelected: selectedIDs.contains(song.id),
-                            showHeart: false,
                             onPlay: { s in
                                 player.play(song: s, in: songs, index: idx)
                             },

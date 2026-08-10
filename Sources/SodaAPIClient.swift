@@ -400,8 +400,8 @@ struct SodaAPIClient {
     }
 
     /// 检测汽水登录态是否有效（qishui-api /auth/status）
-    func authStatus(role: String = "play") async throws -> SodaAuthStatus {
-        let dict = try await rawJSON(makeURL("/auth/status", query: ["role": role]))
+    func authStatus() async throws -> SodaAuthStatus {
+        let dict = try await rawJSON(makeURL("/auth/status"))
         if let data = dict["data"] as? [String: Any] {
             return SodaAuthStatus(
                 valid: data["valid"] as? Bool ?? false,
@@ -413,11 +413,8 @@ struct SodaAPIClient {
     }
 
     /// 更新汽水登录签名（Cookie/X-Helios/X-Medusa），qishui-api 校验成功才持久化
-    /// - Parameters:
-    ///   - role: "play" 播放账号（QISHUI_COOKIE）或 "playlist" 歌单账号（QISHUI_PLAYLIST_COOKIE）
-    func updateAuth(role: String = "play", cookie: String, helios: String, medusa: String) async throws -> SodaAuthStatus {
+    func updateAuth(cookie: String, helios: String, medusa: String) async throws -> SodaAuthStatus {
         let dict = try await rawJSON(makeURL("/auth/update"), method: "POST", body: [
-            "role": role,
             "cookie": cookie,
             "helios": helios,
             "medusa": medusa,
