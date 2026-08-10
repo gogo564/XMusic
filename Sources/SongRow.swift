@@ -199,7 +199,21 @@ struct SongRow: View {
                     heartButton
                 }
                 if song.source == "soda" {
-                    // 汽水歌播放直连 qishui-api，不支持下载，仅显示菜单
+                    // 汽水歌：调 qishui-api 拿直链下载到本地
+                    if downloader.isDownloaded(song) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.system(size: 16))
+                    } else {
+                        Button {
+                            downloader.download(song, quality: "320k")
+                        } label: {
+                            Image(systemName: "arrow.down.circle")
+                                .foregroundColor(.secondary)
+                                .font(.system(size: 16))
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 } else if downloader.isDownloaded(song) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)

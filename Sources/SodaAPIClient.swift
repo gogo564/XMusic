@@ -502,6 +502,16 @@ struct SodaAPIClient {
         )
     }
 
+    /// 解析汽水曲目可下载直链（qishui-api /download/url），返回明文音频 URL
+    func downloadURL(trackID: String, quality: String) async throws -> String {
+        let data = try await getJSON(makeURL("/download/url", query: ["track_id": trackID, "quality": mapQuality(quality)]))
+        guard let dict = data as? [String: Any],
+              let url = dict["audio_url"] as? String, !url.isEmpty else {
+            throw SodaError.upstream
+        }
+        return url
+    }
+
     func lyric(trackID: String) async throws -> String {
         let data = try await getJSON(makeURL("/lyric", query: ["track_id": trackID]))
         if let dict = data as? [String: Any] {

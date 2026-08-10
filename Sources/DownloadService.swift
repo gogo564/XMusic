@@ -121,8 +121,14 @@ final class DownloadService: NSObject, ObservableObject {
 
         Task {
             do {
-                let resolved = try await LXAPIClient.shared.downloadURL(for: song, quality: quality)
-                await startTask(song: song, quality: quality, resolvedURL: resolved)
+                if song.source == "soda" {
+                    // 汽水歌：调 qishui-api 拿明文直链后直接下载到本地
+                    let resolved = try await SodaAPIClient.shared.downloadURL(trackID: song.songmid ?? "", quality: quality)
+                    await startSodaDownload(song: song, quality: quality, resolvedURL: resolved)
+                } else {
+                    let resolved = try await LXAPIClient.shared.downloadURL(for: song, quality: quality)
+                    await startTask(song: song, quality: quality, resolvedURL: resolved)
+                }
             } catch {
                 await MainActor.run {
                     self.activeTasks[songID] = nil
@@ -130,6 +136,21 @@ final class DownloadService: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    /// 汽水歌直链下载：URLSession 直接下载音频文件到 Downloads 目录
+    @MainActor
+    private func startSodaDownload(song: LXSong, quality: String, resolvedURL: String) async {
+        guard let src = URL(string: resolvedURL) else {
+            activeTasks[song.id + "_" + quality] = nil
+            activeSongs[song.id + "_" + quality] = nil
+            return
+        }
+        var request = URLRequest(url: src)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        let task = session.downloadTask(with: request)
+        tasks[song.id + "_" + quality] = task
+        task.resume()
     }
 
     @MainActor
