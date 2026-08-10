@@ -20,7 +20,6 @@ final class PlayerManager: ObservableObject {
     @Published var lyrics: String = ""
     @Published var parsedLyrics: [LyricLine] = []
     @Published var queue: [LXSong] = []
-    @Published var queueRefreshCount = 0
     @Published var currentIndex: Int = -1
     @Published var playMode: PlayMode = .loopAll {
         didSet {
@@ -68,10 +67,6 @@ final class PlayerManager: ObservableObject {
     private var shuffledIndices: [Int] = []
     private var prefetchTask: Task<Void, Never>?
     private var prefetchedURLs: [String: String] = [:]
-
-    /// 场景/推荐流队列播放到末尾时，调用此闭包拉取一批新歌替换队列。
-    /// 由 SodaTrackListView 等视图注册；不注册则保持原有循环行为。
-    var queueRefreshHandler: (() async -> [LXSong])?
 
     private init() {
         self.quality = AppConfigStore.shared.config.defaultQuality
@@ -267,33 +262,6 @@ final class PlayerManager: ObservableObject {
             resolveAndPlay(currentQueueSong)
         case .loopAll:
             let nextIndex = (currentIndex + 1) % queue.count
-            // 场景/推荐流：自动播到队尾时拉新一批替换，避免反复循环同一批旧歌
-            if auto && nextIndex == 0, let refresh = queueRefreshHandler {
-                Task { @MainActor in
-                    let newSongs = await refresh()
-                    guard !newSongs.isEmpty else {
-                        self.currentIndex = nextIndex
-                        self.resolveAndPlay(self.currentQueueSong)
-                        return
-                    }
-                    var deduped: [LXSong] = []
-                    var seen = Set<String>()
-                    for s in newSongs {
-                        guard seen.insert(s.id).inserted else { continue }
-                        deduped.append(s)
-                    }
-                    guard !deduped.isEmpty else {
-                        self.currentIndex = nextIndex
-                        self.resolveAndPlay(self.currentQueueSong)
-                        return
-                    }
-                    self.queue = deduped
-                    self.currentIndex = 0
-                    self.queueRefreshCount += 1
-                    self.resolveAndPlay(self.currentQueueSong)
-                }
-                return
-            }
             currentIndex = nextIndex
             resolveAndPlay(currentQueueSong)
         }
