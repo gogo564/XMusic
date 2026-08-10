@@ -42,10 +42,6 @@ struct SodaTrackListView: View {
         .navigationTitle(title)
         .onAppear {
             Task { await loadSongs() }
-            registerQueueRefresh()
-        }
-        .onDisappear {
-            player.queueRefreshHandler = nil
         }
         .onChange(of: player.queueRefreshCount) { _ in
             if !player.queue.isEmpty {

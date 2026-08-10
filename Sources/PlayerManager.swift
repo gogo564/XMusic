@@ -150,6 +150,8 @@ final class PlayerManager: ObservableObject {
     func play(song: LXSong, in newQueue: [LXSong]? = nil, index: Int? = nil, presentPlayer: Bool = true) {
         if let newQueue = newQueue {
             queue = newQueue
+            // 设置新队列时清空刷新回调，防止旧场景的 handler 污染新队列
+            queueRefreshHandler = nil
             currentIndex = index ?? (newQueue.firstIndex(where: { $0.id == song.id }) ?? 0)
         } else {
             if let i = queue.firstIndex(where: { $0.id == song.id }) {
@@ -192,6 +194,7 @@ final class PlayerManager: ObservableObject {
 
     func setPlaylist(_ songs: [LXSong], startIndex: Int = 0) {
         queue = songs
+        queueRefreshHandler = nil
         currentIndex = startIndex
         if songs.indices.contains(startIndex) {
             resolveAndPlay(songs[startIndex])
@@ -203,6 +206,7 @@ final class PlayerManager: ObservableObject {
         if songs.isEmpty { return }
         if let song = currentSong, queue.contains(where: { $0.id == song.id }) { return }
         queue = songs
+        queueRefreshHandler = nil
         if let song = currentSong, let idx = songs.firstIndex(where: { $0.id == song.id }) {
             currentIndex = idx
         } else {
