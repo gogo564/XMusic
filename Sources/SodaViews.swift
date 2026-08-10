@@ -27,7 +27,7 @@ struct SodaTrackListView: View {
             } else {
                 ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
                     SongRow(song: song, showSource: true) { s in
-                        player.play(song: s, in: songs, index: idx)
+                        player.play(song: s, in: songs, index: idx, sceneName: title)
                         registerQueueRefresh()
                     }
                 }

@@ -11,6 +11,8 @@ struct PlayerView: View {
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
+    @State private var sodaCollectMessage: String?
+    @State private var sodaCollecting = false
 
     private let qualityOptions = ["128k", "320k", "flac"]
 
@@ -32,6 +34,10 @@ struct PlayerView: View {
         }
         .onAppear {
             playerManager.setPlaylistFromRecent(recentStore.items)
+        }
+        .onChange(of: playerManager.currentSong?.id) { _ in
+            sodaCollectMessage = nil
+            sodaCollecting = false
         }
     }
 
@@ -66,6 +72,9 @@ struct PlayerView: View {
 
     private var playbackSubtitle: String {
         var parts: [String] = []
+        if !playerManager.sceneName.isEmpty {
+            parts.append(playerManager.sceneName)
+        }
         if !playerManager.sourceName.isEmpty {
             parts.append(MusicSources.name(playerManager.sourceName))
         }
@@ -316,10 +325,18 @@ struct PlayerView: View {
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
                         .lineLimit(1)
+                    if let msg = sodaCollectMessage {
+                        Text(msg)
+                            .font(.caption2)
+                            .foregroundColor(msg.hasPrefix("已") ? .green : .orange)
+                    }
                 }
 
                 Spacer()
 
+                if playerManager.currentSong?.source == "soda" {
+                    sodaCollectButton
+                }
                 downloadButton
                 loveButton
             }
@@ -350,6 +367,41 @@ struct PlayerView: View {
                 .foregroundColor(isLoved ? .red : .white.opacity(0.85))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
+        }
+    }
+
+    /// 添加到汽水「我喜欢的音乐」收藏按钮（仅汽水歌显示）
+    private var sodaCollectButton: some View {
+        Button(action: {
+            guard let song = playerManager.currentSong, !sodaCollecting else { return }
+            sodaCollecting = true
+            sodaCollectMessage = nil
+            Task {
+                let ok: Bool
+                do {
+                    ok = try await SodaAPIClient.shared.addToCollection(trackIDs: [song.songmid ?? ""])
+                } catch {
+                    ok = false
+                }
+                await MainActor.run {
+                    sodaCollecting = false
+                    sodaCollectMessage = ok ? "已收藏到汽水" : "收藏失败，请检查汽水服务"
+                }
+            }
+        }) {
+            Group {
+                if sodaCollecting {
+                    ProgressView()
+                        .tint(.white)
+                        .frame(width: 44, height: 44)
+                } else {
+                    Image(systemName: "plus.circle")
+                        .font(.title3)
+                        .foregroundColor(.white.opacity(0.85))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+            }
         }
     }
 

@@ -31,6 +31,7 @@ final class PlayerManager: ObservableObject {
     @Published var isResolving = false
     @Published var playbackError: String?
     @Published var sourceName = ""
+    @Published var sceneName = ""
     @Published var qualityName = ""
     @Published var playbackOrigin = "" // "缓存" / "下载" / "本地" / ""（在线）
     @Published var quality: String {
@@ -68,6 +69,7 @@ final class PlayerManager: ObservableObject {
     private var shuffledIndices: [Int] = []
     private var prefetchTask: Task<Void, Never>?
     private var prefetchedURLs: [String: String] = [:]
+    private var sodaFailTask: Task<Void, Never>?
 
     /// 场景/推荐流队列播放到末尾时，调用此闭包拉取一批新歌替换队列。
     /// 由 SodaTrackListView 等视图注册；不注册则保持原有循环行为。
@@ -147,11 +149,12 @@ final class PlayerManager: ObservableObject {
 
     // MARK: - Public playback API
 
-    func play(song: LXSong, in newQueue: [LXSong]? = nil, index: Int? = nil, presentPlayer: Bool = true) {
+    func play(song: LXSong, in newQueue: [LXSong]? = nil, index: Int? = nil, presentPlayer: Bool = true, sceneName: String? = nil) {
         if let newQueue = newQueue {
             queue = newQueue
             // 设置新队列时清空刷新回调，防止旧场景的 handler 污染新队列
             queueRefreshHandler = nil
+            self.sceneName = sceneName ?? ""
             currentIndex = index ?? (newQueue.firstIndex(where: { $0.id == song.id }) ?? 0)
         } else {
             if let i = queue.firstIndex(where: { $0.id == song.id }) {
@@ -271,8 +274,8 @@ final class PlayerManager: ObservableObject {
             resolveAndPlay(currentQueueSong)
         case .loopAll:
             let nextIndex = (currentIndex + 1) % queue.count
-            // 场景/推荐流：自动播到队尾时拉新一批替换，避免反复循环同一批旧歌
-            if auto && nextIndex == 0, let refresh = queueRefreshHandler {
+            // 场景/推荐流：播到队尾（自动或手动切歌）时拉新一批替换，避免反复循环同一批旧歌
+            if nextIndex == 0, let refresh = queueRefreshHandler {
                 Task { @MainActor in
                     let newSongs = await refresh()
                     guard !newSongs.isEmpty else {
@@ -511,6 +514,8 @@ final class PlayerManager: ObservableObject {
 
     private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String = "") {
         Log.write("▶️ [Player] startPlayback song=\(song.name) scheme=\(url.scheme ?? "") origin=\(playbackOrigin) url=\(url.absoluteString.prefix(70))")
+        sodaFailTask?.cancel()
+        sodaFailTask = nil
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
         lyrics = ""
@@ -577,8 +582,23 @@ final class PlayerManager: ObservableObject {
                 switch item.status {
                 case .failed:
                     Log.write("❌ [Player] item failed: \(item.error?.localizedDescription ?? "")")
-                    self.playbackError = item.error?.localizedDescription ?? "播放失败"
-                    self.isPlaying = false
+                    // 汽水歌走自定义 loader，AVPlayer 会先瞬时 failed 再重试成功。
+                    // 延迟确认：1.5s 内若未 ready（说明确实起播失败）才弹「播放错误」，
+                    // 避免瞬态 failed 弹窗一闪而过。
+                    if self.isSoda(self.currentSong ?? LXSong([:])) {
+                        let err = item.error?.localizedDescription ?? "播放失败"
+                        self.isPlaying = false
+                        self.sodaFailTask?.cancel()
+                        self.sodaFailTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 1_500_000_000)
+                            if !Task.isCancelled {
+                                self.playbackError = err
+                            }
+                        }
+                    } else {
+                        self.playbackError = item.error?.localizedDescription ?? "播放失败"
+                        self.isPlaying = false
+                    }
                 case .readyToPlay:
                     let d = item.duration.seconds
                     Log.write("🎧 [Player] item ready dur=\(d) song=\(self.currentSong?.name ?? "") isPlayingBefore=\(self.isPlaying)")
@@ -588,6 +608,8 @@ final class PlayerManager: ObservableObject {
                     // 汽水歌走自定义 loader，AVPlayer 会先瞬时 failed 再重试成功；
                     // 已能播放则清掉瞬态错误，避免误弹「播放错误」。
                     self.playbackError = nil
+                    self.sodaFailTask?.cancel()
+                    self.sodaFailTask = nil
                     // 汽水歌走流式加载，瞬态 failed 会把 isPlaying 置 false；
                     // ready 后若仍打算播放（未暂停）则恢复按钮状态。
                     if self.isSoda(self.currentSong ?? LXSong([:])), self.player.rate > 0 {
