@@ -441,8 +441,21 @@ final class PlayerManager: ObservableObject {
         if isSoda(song) {
             let trackID = song.songmid ?? ""
             let mapped = mapSodaQuality(quality)
-            let customURL = SodaStreamLoader.customURL(trackID: trackID, quality: mapped)
-            return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
+            do {
+                let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: mapped)
+                if stream.hexKey.count == 32 {
+                    // 加密流：走 sodastream:// 流式解密
+                    let customURL = SodaStreamLoader.customURL(trackID: trackID, quality: mapped)
+                    return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
+                }
+                guard let url = URL(string: stream.mainURL) else {
+                    throw SodaError.upstream
+                }
+                // 明文直链（qishui-api h5 兜底）：直接播放 CDN URL，无需解密
+                return (url.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
+            } catch {
+                throw error
+            }
         }
         let result = try await LXAPIClient.shared.getPlaybackURL(for: song, quality: quality, autoSwitch: AppConfigStore.shared.config.autoSwitchSource)
         return (result.url, result.type, result.sourceName)
