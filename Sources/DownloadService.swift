@@ -122,9 +122,8 @@ final class DownloadService: NSObject, ObservableObject {
         Task {
             do {
                 if song.source == "soda" {
-                    // 汽水歌：调 qishui-api 拿明文直链后直接下载到本地
-                    let resolved = try await SodaAPIClient.shared.downloadURL(trackID: song.songmid ?? "", quality: quality)
-                    await startSodaDownload(song: song, quality: quality, resolvedURL: resolved)
+                    // 汽水歌：调 qishui-api /song/play 拿解密后的完整音频（会员通道）
+                    await startSodaDownload(song: song, quality: quality)
                 } else {
                     let resolved = try await LXAPIClient.shared.downloadURL(for: song, quality: quality)
                     await startTask(song: song, quality: quality, resolvedURL: resolved)
@@ -138,16 +137,29 @@ final class DownloadService: NSObject, ObservableObject {
         }
     }
 
-    /// 汽水歌直链下载：URLSession 直接下载音频文件到 Downloads 目录
+    /// 汽水歌下载：调 qishui-api /song/play 获取解密后的完整音频（会员通道），直接保存到 Downloads 目录
     @MainActor
-    private func startSodaDownload(song: LXSong, quality: String, resolvedURL: String) async {
-        guard let src = URL(string: resolvedURL) else {
+    private func startSodaDownload(song: LXSong, quality: String) async {
+        let trackID = song.songmid ?? ""
+        guard !trackID.isEmpty, let base = SodaAPIClient.shared.playbackBaseURL else {
             activeTasks[song.id + "_" + quality] = nil
             activeSongs[song.id + "_" + quality] = nil
             return
         }
-        var request = URLRequest(url: src)
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        let mapped = SodaAPIClient.shared.qualityParam(quality)
+        var comps = URLComponents(string: base + "/song/play")
+        comps?.queryItems = [
+            URLQueryItem(name: "track_id", value: trackID),
+            URLQueryItem(name: "quality", value: mapped),
+        ]
+        guard let url = comps?.url else {
+            activeTasks[song.id + "_" + quality] = nil
+            activeSongs[song.id + "_" + quality] = nil
+            return
+        }
+        var request = URLRequest(url: url)
+        request.setValue("audio/mp4", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 180
         let task = session.downloadTask(with: request)
         tasks[song.id + "_" + quality] = task
         task.resume()
@@ -246,7 +258,8 @@ extension DownloadService: URLSessionDownloadDelegate {
 
         let docsDir = downloadsDir
         let idPart = song.songmid ?? song.id
-        let destName = "\(Date().timeIntervalSince1970)_\(idPart).\(quality == "flac" ? "flac" : "mp3")"
+        let ext = song.source == "soda" ? "m4a" : (quality == "flac" ? "flac" : "mp3")
+        let destName = "\(Date().timeIntervalSince1970)_\(idPart).\(ext)"
         let dest = docsDir.appendingPathComponent(destName)
         do {
             try? FileManager.default.removeItem(at: dest)

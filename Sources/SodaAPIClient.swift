@@ -21,6 +21,16 @@ struct SodaAPIClient {
         return url
     }
 
+    /// 汽水服务根地址（供 DownloadService 拼接 /song/play 下载）
+    var playbackBaseURL: String? {
+        baseURL.isEmpty ? nil : baseURL
+    }
+
+    /// 玩家音质（128k/320k/flac）→ qishui-api 档位（供 DownloadService 使用）
+    func qualityParam(_ q: String) -> String {
+        mapQuality(q)
+    }
+
     private func makeURL(_ path: String, query: [String: String] = [:]) -> URL? {
         var comps = URLComponents(string: baseURL + path)
         comps?.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
