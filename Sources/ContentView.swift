@@ -105,24 +105,30 @@ struct HomeView: View {
     ]
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 25) {
-                sourcePicker
-                if source == "soda" {
-                    sodaSection
-                } else {
-                    rankSection
-                    squareSection
-                    if !hotKeywords.isEmpty {
-                        hotSearchSection
+        VStack(spacing: 0) {
+            // 音源选择固定在顶部：放在 ScrollView 外，滚出屏幕不销毁不重建，
+            // 避免 UIKitHorizontalScrollView 在 LazyVStack 回收重建后布局失败导致标签空白。
+            sourcePicker
+                .frame(height: 36)
+                .padding(.vertical, 6)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 25) {
+                    if source == "soda" {
+                        sodaSection
+                    } else {
+                        rankSection
+                        squareSection
+                        if !hotKeywords.isEmpty {
+                            hotSearchSection
+                        }
                     }
+                    if !recentStore.items.isEmpty {
+                        recentPlayedSection
+                    }
+                    Spacer(minLength: 120)
                 }
-                if !recentStore.items.isEmpty {
-                    recentPlayedSection
-                }
-                Spacer(minLength: 120)
+                .padding(.top)
             }
-            .padding(.top)
         }
         .navigationTitle("探索")
         .onAppear {

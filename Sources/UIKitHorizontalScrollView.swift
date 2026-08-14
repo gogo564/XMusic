@@ -17,11 +17,17 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UIScrollView {
-        let scrollView = UIScrollView()
+        let scrollView = LXHorizontalScrollView()
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.delaysContentTouches = false
         scrollView.canCancelContentTouches = true
         scrollView.bounces = true
+        // LazyVStack 回收重建 / 尺寸变化后，SwiftUI 不一定再次调用 updateUIView，
+        // 因此在自身 bounds 变化（含重建后恢复布局）时也主动重排内容，避免空白。
+        let coordinator = context.coordinator
+        scrollView.onLayoutChanged = { [weak coordinator] in
+            coordinator?.layoutContent(in: scrollView)
+        }
 
         let host = context.coordinator.host
         host.view.backgroundColor = .clear
@@ -36,6 +42,20 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(content: content)
+    }
+
+    /// 在 frame/bounds 变化或 LazyVStack 回收重建后重新计算内容布局。
+    final class LXHorizontalScrollView: UIScrollView {
+        var onLayoutChanged: (() -> Void)?
+        private var lastBounds = CGRect.zero
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            if bounds != lastBounds {
+                lastBounds = bounds
+                onLayoutChanged?()
+            }
+        }
     }
 
     final class Coordinator {
