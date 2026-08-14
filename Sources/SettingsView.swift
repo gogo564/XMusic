@@ -4,6 +4,7 @@ import SafariServices
 struct SettingsView: View {
     @Binding var needsConfig: Bool
     @EnvironmentObject private var playlistStore: PlaylistStore
+    @ObservedObject private var theme = ThemeManager.shared
 
     @State private var showQRLogin = false
 
@@ -146,6 +147,47 @@ struct SettingsView: View {
                     ForEach(qualities, id: \.self) { Text($0) }
                 }
                 Toggle("源失效自动切换", isOn: $autoSwitch)
+            }
+            Section(header: Text("外观")) {
+                Picker("模式", selection: $theme.mode) {
+                    ForEach(ThemeMode.allCases) { m in
+                        Text(m.name).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: theme.mode) { _ in
+                    theme.updateForSystemAppearance()
+                }
+                HStack {
+                    Text("主题色")
+                    Spacer()
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(ThemeColor.allCases) { c in
+                                Button {
+                                    theme.color = c
+                                } label: {
+                                    Circle()
+                                        .fill(c.color)
+                                        .frame(width: 26, height: 26)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(theme.color == c ? Color.accentColor : Color.clear, lineWidth: 2.5)
+                                                .padding(-3)
+                                        )
+                                        .overlay(
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 11, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .opacity(theme.color == c ? 1 : 0)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(c.name)
+                            }
+                        }
+                    }
+                }
             }
             Section(header: Text("QQ 音乐账号")) {
                 Button {

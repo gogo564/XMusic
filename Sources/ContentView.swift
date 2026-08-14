@@ -140,35 +140,26 @@ struct HomeView: View {
         UIKitHorizontalScrollView {
             HStack(spacing: 8) {
                 ForEach(MusicSources.all, id: \.id) { s in
-                    Button {
+                    ThemeChip(text: s.name, isSelected: source == s.id) {
                         source = s.id
-                    } label: {
-                        Text(s.name)
-                            .font(.system(size: 13, weight: .medium))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .background(source == s.id ? Color.accentColor : Color(.systemGray5))
-                            .foregroundColor(source == s.id ? .white : .primary)
-                            .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal)
         }
-        .frame(height: 34)
+        .frame(height: 36)
     }
 
     // MARK: 热门榜单
     private var rankSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("🏆 热门榜单")
-                    .font(.title2.bold())
+                SectionHeader(title: "热门榜单", icon: "chart.bar.fill")
                 Spacer()
                 NavigationLink(destination: RankCategoryView(source: source)) {
                     Text("查看全部")
                         .font(.subheadline)
+                        .foregroundColor(ThemeManager.shared.accent)
                 }
             }
             .padding(.horizontal)
@@ -183,7 +174,7 @@ struct HomeView: View {
             } else if boards.isEmpty {
                 Text("暂无榜单")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(ThemeManager.shared.secondaryText)
                     .padding(.horizontal)
             } else {
                 LazyVGrid(columns: gridColumns, spacing: 10) {
@@ -191,15 +182,15 @@ struct HomeView: View {
                         NavigationLink(destination: RankSongsView(rankId: board.bangid, rankName: board.name, source: source)) {
                             HStack(spacing: 8) {
                                 Image(systemName: "chart.bar.fill")
-                                    .foregroundColor(.accentColor)
+                                    .foregroundColor(ThemeManager.shared.accent)
                                 Text(board.name)
                                     .font(.system(size: 13))
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(ThemeManager.shared.primaryText)
                                     .lineLimit(1)
                                 Spacer()
                             }
                             .padding(12)
-                            .background(Color(.systemGray6))
+                            .background(ThemeManager.shared.cardBackground)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         .buttonStyle(.plain)
@@ -214,12 +205,12 @@ struct HomeView: View {
     private var squareSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("🎵 歌单广场")
-                    .font(.title2.bold())
+                SectionHeader(title: "歌单广场", icon: "square.grid.2x2.fill")
                 Spacer()
                 NavigationLink(destination: PlaylistListView(source: source)) {
                     Text("查看全部")
                         .font(.subheadline)
+                        .foregroundColor(ThemeManager.shared.accent)
                 }
             }
             .padding(.horizontal)
@@ -246,7 +237,7 @@ struct HomeView: View {
             } else if squarePlaylists.isEmpty {
                 Text("歌单加载失败，请重试")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(ThemeManager.shared.secondaryText)
                     .padding(.horizontal)
             } else {
                 LazyVGrid(columns: gridColumns, spacing: 20) {
@@ -256,7 +247,7 @@ struct HomeView: View {
                                 AsyncImage(url: URL(string: pl.imageURL)) { image in
                                     image.resizable().aspectRatio(contentMode: .fill)
                                 } placeholder: {
-                                    Image(systemName: "music.note.list").foregroundColor(.secondary)
+                                    Image(systemName: "music.note.list").foregroundColor(ThemeManager.shared.secondaryText)
                                 }
                                 .frame(height: 120)
                                 .cornerRadius(12)
@@ -276,11 +267,11 @@ struct HomeView: View {
                                 Text(pl.name)
                                     .font(.subheadline.bold())
                                     .lineLimit(1)
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(ThemeManager.shared.primaryText)
                                 if !pl.playCount.isEmpty {
                                     Text("播放 \(pl.playCount)")
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(ThemeManager.shared.secondaryText)
                                 }
                             }
                         }
@@ -296,17 +287,12 @@ struct HomeView: View {
     private var sodaSection: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("⭐ 我的汽水歌单")
-                        .font(.title3.bold())
-                    Spacer()
-                }
-                .padding(.horizontal)
+                SectionHeader(title: "我的汽水歌单", icon: "list.star")
 
                 if sodaMyPlaylists.isEmpty {
                     Text("未获取到我的歌单（需汽水登录态）")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(ThemeManager.shared.secondaryText)
                         .padding(.horizontal)
                 } else {
                     LazyVGrid(columns: gridColumns, spacing: 20) {
@@ -319,7 +305,7 @@ struct HomeView: View {
                                     AsyncImage(url: URL(string: pl.coverURL)) { image in
                                         image.resizable().aspectRatio(contentMode: .fill)
                                     } placeholder: {
-                                        Image(systemName: "music.note.list").foregroundColor(.secondary)
+                                        Image(systemName: "music.note.list").foregroundColor(ThemeManager.shared.secondaryText)
                                     }
                                     .frame(height: 120)
                                     .cornerRadius(12)
@@ -352,7 +338,7 @@ struct HomeView: View {
                                     Text(pl.title)
                                         .font(.subheadline.bold())
                                         .lineLimit(1)
-                                        .foregroundColor(.primary)
+                                        .foregroundColor(ThemeManager.shared.primaryText)
                                 }
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -363,21 +349,11 @@ struct HomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("🎛 场景音乐")
-                        .font(.title2.bold())
-                    Spacer()
-                    NavigationLink(destination: SodaModeListView()) {
-                        Text("全部")
-                            .font(.subheadline)
-                    }
-                }
-                .padding(.horizontal)
-
+                SectionHeader(title: "场景音乐", icon: "theatermasks")
                 if !SodaAPIClient.shared.isConfigured {
                     Text("未配置汽水服务，无法加载场景模式")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(ThemeManager.shared.secondaryText)
                         .padding(.horizontal)
                 } else {
                     SodaModeChipsView()
@@ -385,17 +361,7 @@ struct HomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("🍺 汽水推荐歌单")
-                        .font(.title2.bold())
-                    Spacer()
-                    if !SodaAPIClient.shared.isConfigured {
-                        Text("未配置汽水服务")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.horizontal)
+                SectionHeader(title: "汽水推荐歌单", icon: "sparkles", subtitle: SodaAPIClient.shared.isConfigured ? nil : "未配置汽水服务")
 
                 if isLoadingBoards {
                     HStack {
@@ -407,7 +373,7 @@ struct HomeView: View {
                 } else if sodaPlaylists.isEmpty {
                     Text("暂无推荐，请检查设置中的汽水服务地址")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(ThemeManager.shared.secondaryText)
                         .padding(.horizontal)
                 } else {
                     LazyVGrid(columns: gridColumns, spacing: 20) {
@@ -464,14 +430,12 @@ struct HomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("📻 汽水电台")
-                    .font(.title2.bold())
-                    .padding(.horizontal)
+                SectionHeader(title: "汽水电台", icon: "dot.radiowaves.left.and.right")
 
                 if sodaRadios.isEmpty {
                     Text("暂无电台")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(ThemeManager.shared.secondaryText)
                         .padding(.horizontal)
                 } else {
                     UIKitHorizontalScrollView {
@@ -484,9 +448,9 @@ struct HomeView: View {
                                     Text(radio.title)
                                         .font(.system(size: 13, weight: .medium))
                                         .padding(.horizontal, 14)
-                                        .padding(.vertical, 6)
-                                        .background(Color(.systemGray5))
-                                        .foregroundColor(.primary)
+                                        .padding(.vertical, 7)
+                                        .background(ThemeManager.shared.chipBackground)
+                                        .foregroundColor(ThemeManager.shared.primaryText)
                                         .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
@@ -494,7 +458,7 @@ struct HomeView: View {
                         }
                         .padding(.horizontal)
                     }
-                    .frame(height: 34)
+                    .frame(height: 36)
                 }
             }
         }
@@ -509,9 +473,9 @@ struct HomeView: View {
             Text(name)
                 .font(.system(size: 13, weight: .medium))
                 .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(selectedTagID == id ? Color.accentColor : Color(.systemGray5))
-                .foregroundColor(selectedTagID == id ? .white : .primary)
+                .padding(.vertical, 7)
+                .background(selectedTagID == id ? AnyShapeStyle(ThemeManager.shared.accent) : AnyShapeStyle(ThemeManager.shared.chipBackground))
+                .foregroundColor(selectedTagID == id ? .white : ThemeManager.shared.primaryText)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -520,20 +484,18 @@ struct HomeView: View {
     // MARK: 热搜
     private var hotSearchSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("🔥 热搜")
-                .font(.title2.bold())
-                .padding(.horizontal)
+            SectionHeader(title: "热搜", icon: "flame.fill")
 
             ForEach(Array(hotKeywords.prefix(10).enumerated()), id: \.offset) { idx, keyword in
                 NavigationLink(destination: SongSearchResultsView(query: keyword, source: source)) {
                     HStack(spacing: 12) {
                         Text("\(idx + 1)")
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(idx < 3 ? .red : .secondary)
+                            .foregroundColor(idx < 3 ? ThemeManager.shared.accent : ThemeManager.shared.secondaryText)
                             .frame(width: 20)
                         Text(keyword)
                             .font(.system(size: 15))
-                            .foregroundColor(.primary)
+                            .foregroundColor(ThemeManager.shared.primaryText)
                             .lineLimit(1)
                         Spacer()
                     }
@@ -549,12 +511,12 @@ struct HomeView: View {
     private var recentPlayedSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("⏱ 最近播放")
-                    .font(.title2.bold())
+                SectionHeader(title: "最近播放", icon: "clock.arrow.circlepath")
                 Spacer()
                 NavigationLink(destination: RecentPlaylistView()) {
                     Text("查看全部")
                         .font(.subheadline)
+                        .foregroundColor(ThemeManager.shared.accent)
                 }
             }
             .padding(.horizontal)
@@ -738,18 +700,9 @@ struct SearchView: View {
         UIKitHorizontalScrollView {
             HStack(spacing: 8) {
                 ForEach(MusicSources.all, id: \.id) { s in
-                    Button {
+                    ThemeChip(text: s.name, isSelected: source == s.id) {
                         source = s.id
-                    } label: {
-                        Text(s.name)
-                            .font(.system(size: 13, weight: .medium))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .background(source == s.id ? Color.accentColor : Color(.systemGray5))
-                            .foregroundColor(source == s.id ? .white : .primary)
-                            .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal)
@@ -785,7 +738,7 @@ struct SearchView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color(.systemGray6))
+        .background(ThemeManager.shared.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 16)
         .padding(.bottom, 4)

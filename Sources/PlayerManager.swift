@@ -61,7 +61,7 @@ final class PlayerManager: ObservableObject {
         queue.indices.contains(currentIndex) ? queue[currentIndex] : nil
     }
 
-    private let player = AVPlayer()
+    private let player = AVQueuePlayer()
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
@@ -69,6 +69,9 @@ final class PlayerManager: ObservableObject {
     private var shuffledIndices: [Int] = []
     private var prefetchTask: Task<Void, Never>?
     private var prefetchedURLs: [String: String] = [:]
+    // 预建好的下一首 item（含汽水 loader 挂载），切歌时直接替换省构建
+    private var nextItem: AVPlayerItem?
+    private var nextItemKey = ""
     private var sodaFailTask: Task<Void, Never>?
 
     /// 场景/推荐流队列播放到末尾时，调用此闭包拉取一批新歌替换队列。
@@ -403,7 +406,7 @@ final class PlayerManager: ObservableObject {
         parsedLyrics = []
         currentLyricIndex = -1
 
-        let item = AVPlayerItem(url: url)
+        let item = makeItem(for: url)
         player.replaceCurrentItem(with: item)
         observeItemStatus(item)
         player.play()
@@ -525,6 +528,20 @@ final class PlayerManager: ObservableObject {
         }
     }
 
+    private func makeItem(for url: URL) -> AVPlayerItem {
+        let item: AVPlayerItem
+        if url.scheme == SodaStreamLoader.scheme {
+            let asset = AVURLAsset(url: url)
+            asset.resourceLoader.setDelegate(SodaStreamLoader.shared, queue: DispatchQueue(label: "soda.resourceLoader"))
+            item = AVPlayerItem(asset: asset)
+        } else {
+            item = AVPlayerItem(url: url)
+        }
+        item.preferredForwardBufferDuration = 8
+        item.preferredPeakBitRate = 0
+        return item
+    }
+
     private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String = "") {
         Log.write("▶️ [Player] startPlayback song=\(song.name) scheme=\(url.scheme ?? "") origin=\(playbackOrigin) url=\(url.absoluteString.prefix(70))")
         sodaFailTask?.cancel()
@@ -534,18 +551,21 @@ final class PlayerManager: ObservableObject {
         lyrics = ""
         parsedLyrics = []
         currentLyricIndex = -1
-        let item: AVPlayerItem
-        if url.scheme == SodaStreamLoader.scheme {
-            let asset = AVURLAsset(url: url)
-            asset.resourceLoader.setDelegate(SodaStreamLoader.shared, queue: DispatchQueue(label: "soda.resourceLoader"))
-            item = AVPlayerItem(asset: asset)
-        } else {
-            item = AVPlayerItem(url: url)
-        }
-        item.preferredForwardBufferDuration = 4
-        item.preferredPeakBitRate = 0
-        player.replaceCurrentItem(with: item)
         player.automaticallyWaitsToMinimizeStalling = false
+        // 优先复用预建好的下一首 item（省去 AVURLAsset + loader 构建）；不匹配则现建
+        let item: AVPlayerItem
+        let itemKey = song.id + "_" + quality + "_" + (url.scheme ?? "")
+        if let next = nextItem, nextItemKey == itemKey {
+            item = next
+            nextItem = nil
+            nextItemKey = ""
+        } else {
+            nextItem?.cancelPendingPrerolls()
+            nextItem = nil
+            nextItemKey = ""
+            item = makeItem(for: url)
+        }
+        player.replaceCurrentItem(with: item)
         observeItemStatus(item)
         observeEnd()
         self.sourceName = sourceName
@@ -565,6 +585,7 @@ final class PlayerManager: ObservableObject {
 
     /// 预解析+预缓存队列下一首：当前曲开始播放后，后台解析下一首的播放地址并下载到缓存，
     /// 使 4G 弱网下切歌时命中缓存秒开（跳过服务器解析 + 首包缓冲）。
+    /// 同时预建好 AVPlayerItem，让切歌时直接替换、无需重新构建（汽水 loader 也提前挂载）。
     private func prefetchNext() {
         prefetchTask?.cancel()
         guard queue.count > 1, currentIndex >= 0 else { return }
@@ -579,8 +600,17 @@ final class PlayerManager: ObservableObject {
             do {
                 let result = try await playbackInfo(for: next)
                 guard !Task.isCancelled else { return }
+                guard let u = URL(string: result.url) else { return }
                 self.prefetchedURLs[next.id + "_" + prefetchQuality] = result.url
                 MusicCacheManager.shared.startCaching(url: result.url, quality: prefetchQuality, id: next.id)
+                // 预建 item（后台线程构建 asset 无碍，loader 挂载在 AVURLAsset 上）
+                let prebuilt = await MainActor.run { self.makeItem(for: u) }
+                guard !Task.isCancelled else { prebuilt.cancelPendingPrerolls(); return }
+                self.nextItem?.cancelPendingPrerolls()
+                self.nextItem = prebuilt
+                self.nextItemKey = next.id + "_" + prefetchQuality + "_" + (u.scheme ?? "")
+                // 主动触发资源预加载，让 readyToPlay 更快
+                prebuilt.preferredForwardBufferDuration = 8
             } catch {
                 // 预取失败不影响当前播放，静默忽略
             }

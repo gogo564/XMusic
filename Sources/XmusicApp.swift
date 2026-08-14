@@ -9,6 +9,7 @@ struct XmusicApp: App {
     @StateObject private var recentStore = RecentStore.shared
     @StateObject private var libraryStore = LibraryStore.shared
     @StateObject private var networkMonitor = NetworkMonitor.shared
+    @StateObject private var theme = ThemeManager.shared
     @State private var needsConfig = false
 
     var body: some Scene {
@@ -20,6 +21,9 @@ struct XmusicApp: App {
                 .environmentObject(recentStore)
                 .environmentObject(libraryStore)
                 .environmentObject(networkMonitor)
+                .environmentObject(theme)
+                .tint(theme.accent)
+                .preferredColorScheme(theme.isDark ? .dark : .light)
                 .onAppear {
                     needsConfig = AppConfigStore.shared.token == nil
                     if !needsConfig {
@@ -29,7 +33,6 @@ struct XmusicApp: App {
                         }
                     }
                 }
-                .preferredColorScheme(.dark)
         }
     }
 }
