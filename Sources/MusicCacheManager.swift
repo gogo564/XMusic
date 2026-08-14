@@ -14,6 +14,11 @@ class MusicCacheManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var downloadTasks: [String: URLSessionDownloadTask] = [:]
     
+    // 缓存文件内存索引（仅文件名，避免列表滚动时每次渲染做目录扫描）。
+    // 线程安全：读写都在 cachedFilesLock 下进行。
+    private var cachedFiles = Set<String>()
+    private let cachedFilesLock = NSLock()
+    
     private var cacheDirectory: URL? {
         guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
         return documentsDirectory.appendingPathComponent(cacheDirectoryName)
@@ -22,6 +27,18 @@ class MusicCacheManager: ObservableObject {
     private init() {
         createCacheDirectory()
         updateCacheSize()
+        refreshCacheIndex()
+    }
+    
+    /// 重新扫描一次缓存目录，重建内存索引（启动时 / 清空缓存后调用）。
+    private func refreshCacheIndex() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self, let cacheDirectory = self.cacheDirectory else { return }
+            let names = (try? self.fileManager.contentsOfDirectory(atPath: cacheDirectory.path)) ?? []
+            self.cachedFilesLock.lock()
+            self.cachedFiles = Set(names)
+            self.cachedFilesLock.unlock()
+        }
     }
     
     private func createCacheDirectory() {
@@ -38,12 +55,23 @@ class MusicCacheManager: ObservableObject {
     
     // MARK: - Public API
     
-    /// 任意音质版本是否已缓存（用于列表展示/离线判断，只查文件存在性）。
+    /// 任意音质版本是否已缓存（用于列表展示/离线判断）。走内存索引，不触碰文件系统。
     func isCached(id: String) -> Bool {
-        guard let cacheDirectory = cacheDirectory,
-              let names = try? fileManager.contentsOfDirectory(atPath: cacheDirectory.path) else { return false }
-        let prefix = "\(id)_"
-        return names.contains { $0.hasPrefix(prefix) }
+        cachedFilesLock.lock()
+        defer { cachedFilesLock.unlock() }
+        return cachedFiles.contains { $0.hasPrefix(id + "_") || $0.hasPrefix(id + ".") }
+    }
+
+    private func removeCachedFile(_ name: String) {
+        cachedFilesLock.lock()
+        cachedFiles.remove(name)
+        cachedFilesLock.unlock()
+    }
+
+    private func addCachedFile(_ name: String) {
+        cachedFilesLock.lock()
+        cachedFiles.insert(name)
+        cachedFilesLock.unlock()
     }
 
     func isCached(id: String, quality: String) -> Bool {
@@ -59,6 +87,7 @@ class MusicCacheManager: ObservableObject {
         guard isValidAudioFile(at: fileURL) else {
             print("⚠️ [Cache] Cached file is invalid, removing: \(id)_\(quality)")
             try? fileManager.removeItem(at: fileURL)
+            removeCachedFile(fileURL.lastPathComponent)
             return nil
         }
         return fileURL
@@ -172,9 +201,11 @@ class MusicCacheManager: ObservableObject {
                 // 迁移：清理旧版不带音质的同名缓存（\(id).mp3）
                 if let oldURL = self.getLegacyFileURL(for: id), self.fileManager.fileExists(atPath: oldURL.path) {
                     try? self.fileManager.removeItem(at: oldURL)
+                    self.removeCachedFile(oldURL.lastPathComponent)
                 }
                 try self.fileManager.moveItem(at: tempURL, to: destinationURL)
                 print("✅ [Cache] Cached successfully: \(id)_\(quality)")
+                self.addCachedFile(destinationURL.lastPathComponent)
                 self.enforceCacheLimit()
             } catch {
                 print("❌ [Cache] Save file failed: \(error.localizedDescription)")
@@ -193,6 +224,9 @@ class MusicCacheManager: ObservableObject {
                 try fileManager.removeItem(at: fileURL)
             }
             print("🧹 [Cache] Cleared all cache")
+            cachedFilesLock.lock()
+            cachedFiles.removeAll()
+            cachedFilesLock.unlock()
             updateCacheSize()
         } catch {
             print("❌ [Cache] Clear cache failed: \(error.localizedDescription)")
@@ -227,6 +261,7 @@ class MusicCacheManager: ObservableObject {
                 guard f.url.path != playingPath else { continue }
                 if (try? self.fileManager.removeItem(at: f.url)) != nil {
                     total -= f.size
+                    self.removeCachedFile(f.url.lastPathComponent)
                     print("🗑️ [Cache] Evicted (limit): \(f.url.lastPathComponent)")
                 }
             }

@@ -106,7 +106,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
+            LazyVStack(alignment: .leading, spacing: 25) {
                 sourcePicker
                 if source == "soda" {
                     sodaSection
