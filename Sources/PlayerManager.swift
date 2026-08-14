@@ -560,7 +560,6 @@ final class PlayerManager: ObservableObject {
             nextItem = nil
             nextItemKey = ""
         } else {
-            nextItem?.cancelPendingPrerolls()
             nextItem = nil
             nextItemKey = ""
             item = makeItem(for: url)
@@ -605,8 +604,7 @@ final class PlayerManager: ObservableObject {
                 MusicCacheManager.shared.startCaching(url: result.url, quality: prefetchQuality, id: next.id)
                 // 预建 item（后台线程构建 asset 无碍，loader 挂载在 AVURLAsset 上）
                 let prebuilt = await MainActor.run { self.makeItem(for: u) }
-                guard !Task.isCancelled else { prebuilt.cancelPendingPrerolls(); return }
-                self.nextItem?.cancelPendingPrerolls()
+                guard !Task.isCancelled else { return }
                 self.nextItem = prebuilt
                 self.nextItemKey = next.id + "_" + prefetchQuality + "_" + (u.scheme ?? "")
                 // 主动触发资源预加载，让 readyToPlay 更快

@@ -2,6 +2,7 @@ import Foundation
 import Combine
 
 /// 收藏歌手 / 收藏专辑的共享状态 (server /api/user/library/artists, /api/user/library/albums)
+@MainActor
 final class LibraryStore: ObservableObject {
     static let shared = LibraryStore()
 
@@ -16,7 +17,9 @@ final class LibraryStore: ObservableObject {
         cancellable = PlaylistStore.shared.$listData
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshPlaylistKeys()
+                Task { @MainActor in
+                    self?.refreshPlaylistKeys()
+                }
             }
     }
 

@@ -132,7 +132,7 @@ final class ThemeManager: ObservableObject {
     }
     /// 分隔/描边
     var separator: Color {
-        isDark ? Color(white: 1.0).opacity(0.08) : Color(black: 0.08)
+        isDark ? Color(white: 1.0).opacity(0.08) : Color(white: 0.08)
     }
     /// 主文字
     var primaryText: Color {
