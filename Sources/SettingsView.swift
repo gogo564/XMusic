@@ -7,6 +7,7 @@ struct SettingsView: View {
     @ObservedObject private var theme = ThemeManager.shared
 
     @State private var showQRLogin = false
+    @State private var showWyQRLogin = false
 
     @State private var baseURL = ""
     @State private var username = ""
@@ -205,6 +206,22 @@ struct SettingsView: View {
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
             }
+            Section(header: Text("网易云音乐账号")) {
+                Button {
+                    showWyQRLogin = true
+                } label: {
+                    HStack {
+                        Label("扫码更换网易云账号", systemImage: "qrcode")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Text("用网易云音乐 App 扫描二维码登录后立即生效，原账号将被替换（VIP 歌曲可正常播放）。")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
             Section {
                 Button {
                     Task { await testConnection() }
@@ -240,6 +257,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showQRLogin) {
             SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/tx")!)
+        }
+        .sheet(isPresented: $showWyQRLogin) {
+            SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/wy")!)
         }
         .navigationTitle("设置")
         .safeAreaInset(edge: .bottom) {
