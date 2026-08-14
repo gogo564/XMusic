@@ -69,6 +69,10 @@ final class PlayerManager: ObservableObject {
     private var shuffledIndices: [Int] = []
     private var prefetchTask: Task<Void, Never>?
     private var prefetchedURLs: [String: String] = [:]
+
+    /// 连续解析失败计数：>0 时解析失败自动跳下一首；跑满一圈（>= 队列长度）才停并弹错，
+    /// 避免「播放全部」被一首失效/会员曲卡死，也避免整列失败时死循环。
+    private var resolveFailStreak = 0
     // 预建好的下一首 item（含汽水 loader 挂载），切歌时直接替换省构建
     private var nextItem: AVPlayerItem?
     private var nextItemKey = ""
@@ -511,8 +515,7 @@ final class PlayerManager: ObservableObject {
                 let result = try await playbackInfo(for: song)
                 await MainActor.run {
                     guard let url = URL(string: result.url) else {
-                        self.playbackError = "播放地址无效"
-                        self.isResolving = false
+                        self.handleResolveFailure("播放地址无效")
                         return
                     }
                     MusicCacheManager.shared.startCaching(url: result.url, quality: quality, id: song.id)
@@ -521,11 +524,35 @@ final class PlayerManager: ObservableObject {
                 await self.loadLyric(for: song)
             } catch {
                 await MainActor.run {
-                    self.playbackError = error.localizedDescription
-                    self.isResolving = false
+                    self.handleResolveFailure(error.localizedDescription)
                 }
             }
         }
+    }
+
+    /// 解析播放地址失败时：队列还有后续歌曲则自动跳到下一首（跳过失效/会员曲目），
+    /// 连续失败一圈后才保留错误提示，避免「播放全部」卡在坏曲上。
+    private func handleResolveFailure(_ message: String) {
+        isResolving = false
+        resolveFailStreak += 1
+        if resolveFailStreak >= queue.count {
+            resolveFailStreak = 0
+            playbackError = message
+            return
+        }
+        guard queue.count > 1 else {
+            resolveFailStreak = 0
+            playbackError = message
+            return
+        }
+        let next = (currentIndex + 1) % queue.count
+        guard next != currentIndex else {
+            resolveFailStreak = 0
+            playbackError = message
+            return
+        }
+        currentIndex = next
+        resolveAndPlay(currentQueueSong)
     }
 
     private func makeItem(for url: URL) -> AVPlayerItem {
@@ -546,6 +573,7 @@ final class PlayerManager: ObservableObject {
         Log.write("▶️ [Player] startPlayback song=\(song.name) scheme=\(url.scheme ?? "") origin=\(playbackOrigin) url=\(url.absoluteString.prefix(70))")
         sodaFailTask?.cancel()
         sodaFailTask = nil
+        resolveFailStreak = 0
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
         lyrics = ""
