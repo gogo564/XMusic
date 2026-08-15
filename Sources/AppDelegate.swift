@@ -2,17 +2,11 @@ import UIKit
 import AVFoundation
 import SwiftUI
 
-// CarPlay 音频 app 必须使用 UIKit 生命周期（@main AppDelegate + SceneDelegate），
-// 纯 SwiftUI @main + WindowGroup 生命周期会自动生成主窗口 scene configuration，
-// 与 CarPlay scene 争抢 foreground，导致 CarPlay scene 激活后几毫秒就被切回后台
-// （sceneDidBecomeActive -> sceneWillResignActive -> sceneDidEnterBackground -> 黑屏）。
-// 切到 UIKit 生命周期后：CarPlay 场景交给 CarPlaySceneDelegate，
-// 主窗口场景交给 SceneDelegate（承载 SwiftUI 界面）。
+// AppDelegate 由 XmusicApp 通过 @UIApplicationDelegateAdaptor 注入。
+// 纯 SwiftUI 生命周期下 CarPlay scene 经常连不上（didConnect 不触发 -> 黑屏），
+// 这里显式返回 CarPlay 场景配置，确保 CarPlaySceneDelegate 被正确实例化。
 
-@main
-class AppDelegate: UIResponder, UIApplicationDelegate {
-
-    var window: UIWindow?
+final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(
         _ application: UIApplication,
@@ -35,13 +29,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             config.delegateClass = CarPlaySceneDelegate.self
             return config
         }
-        // 其余场景（主窗口）交给 SceneDelegate，它承载 SwiftUI 界面
-        let config = UISceneConfiguration(
+        // 其余场景（窗口/主 UI）交给 SwiftUI 生命周期管理
+        return UISceneConfiguration(
             name: "Default Configuration",
             sessionRole: connectingSceneSession.role
         )
-        config.delegateClass = SceneDelegate.self
-        return config
     }
 
     // CarPlay 音频 App 必须有 playback 类别 + 激活，否则车机不显示/无响应

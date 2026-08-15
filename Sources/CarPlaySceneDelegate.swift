@@ -3,11 +3,12 @@ import UIKit
 import AVFoundation
 
 @MainActor
-final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPInterfaceControllerDelegate {
 
     private var interfaceController: CPInterfaceController?
     private var rootTemplate: CPListTemplate?
     private var retryTimer: Timer?
+    private var rootDidAppear = false
 
     nonisolated private func log(_ message: String) {
         Log.write("[CarPlay] \(message)")
@@ -21,21 +22,35 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     ) {
         log("didConnect")
         self.interfaceController = interfaceController
+        interfaceController.delegate = self
         // CarPlay 音频 app：连接即确保 audio session 激活 + 接收远程控制事件，
         // 否则系统可能在 scene 激活后立即把它切回后台（黑屏）。
         ensureAudioSessionActive()
-        // 参考官方 CarPlay Music / react-native-carplay：不设 guard，每次连接都重建根模板，
-        // 避免车机断开重连或 scene 重建时 didConnect 再次触发被拦截导致黑屏。
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
         buildRootTemplate(placeholder: true)
-        // 强制重试：setRootTemplate 首次连接可能因车机未就绪不生效（topTemplate 一直 nil 黑屏）。
-        // 每 0.5s 检查一次，只要没有根模板就重设（animated:false），直到成功或断开。
+        // iOS 15 上 setRootTemplate completion 不回调，不能用 topTemplate/completion 判断成功。
+        // 模板必须被强引用持有（rootTemplate 属性），否则系统会释放 -> 黑屏。
+        // 强制重试：每 0.5s 检查一次，只要根模板未真正呈现就重设，直到 templateDidAppear 或断开。
         startRootRetry()
         Task { @MainActor in
             log("loading data")
             await PlaylistStore.shared.refresh()
-            log("data loaded, rebuilding root")
+            log("data loaded, updating root")
             buildRootTemplate(placeholder: false)
+        }
+    }
+
+    // MARK: - CPInterfaceControllerDelegate
+
+    // iOS 15 上接口控制器的布尔回调不可靠，用模板生命周期回调判断根模板是否真正呈现。
+    func templateWillAppear(_ aTemplate: CPTemplate, animated: Bool) {
+        log("templateWillAppear type=\(type(of: aTemplate))")
+    }
+
+    func templateDidAppear(_ aTemplate: CPTemplate, animated: Bool) {
+        log("templateDidAppear type=\(type(of: aTemplate)) isRoot=\(aTemplate === rootTemplate)")
+        if aTemplate === rootTemplate {
+            rootDidAppear = true
         }
     }
 
@@ -48,20 +63,20 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                     timer.invalidate()
                     return
                 }
-                guard let controller = self.interfaceController else {
+                guard self.interfaceController != nil else {
                     timer.invalidate()
                     return
                 }
                 attempts += 1
-                if controller.topTemplate != nil || attempts > 30 {
-                    if controller.topTemplate != nil {
-                        self.log("root in place after \(attempts) checks")
+                if self.rootDidAppear || attempts > 30 {
+                    if self.rootDidAppear {
+                        self.log("root appeared after \(attempts) checks")
                     }
                     timer.invalidate()
                     return
                 }
-                self.log("retry setRootTemplate attempt \(attempts) topTemplate=nil")
-                self.buildRootTemplate(placeholder: true)
+                self.log("retry setRootTemplate attempt \(attempts) rootDidAppear=false")
+                self.setRootTemplateAnimatedFalse()
             }
         }
         retryTimer = timer
@@ -77,6 +92,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         retryTimer = nil
         self.interfaceController = nil
         rootTemplate = nil
+        rootDidAppear = false
     }
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
@@ -90,9 +106,9 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         // 否则 CarPlay 会把 scene 立即切回后台（激活后几 ms 就 resignActive+enterBackground -> 黑屏）。
         if scene.session.role == UISceneSession.Role.carTemplateApplication {
             ensureAudioSessionActive()
-            if interfaceController?.topTemplate == nil {
-                log("sceneDidBecomeActive: topTemplate still nil, retrying root")
-                buildRootTemplate(placeholder: true)
+            if !rootDidAppear {
+                log("sceneDidBecomeActive: root not appeared yet, retrying")
+                setRootTemplateAnimatedFalse()
             }
         }
     }
@@ -123,25 +139,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     // MARK: - Root
 
-    private func buildRootTemplate(placeholder: Bool) {
-        guard let controller = interfaceController else {
-            log("buildRootTemplate skipped: no interfaceController")
-            return
-        }
-        log("buildRootTemplate placeholder=\(placeholder) topTemplate=\(String(describing: controller.topTemplate))")
-
+    private func makeRootItems() -> [CPListItem] {
         var items: [CPListItem] = []
-
-        if placeholder {
-            // 数据未就绪：先放一个"加载中"占位，避免空根模板导致黑屏
-            let loading = CPListItem(text: "正在加载…", detailText: nil)
-            loading.handler = { _, completion in completion() }
-            let template = CPListTemplate(title: "LX音乐", sections: [CPListSection(items: [loading])])
-            controller.setRootTemplate(template, animated: false) { [weak self] success, error in
-                self?.log("placeholder setRoot success=\(success) error=\(String(describing: error))")
-            }
-            return
-        }
 
         // 我喜欢的音乐
         let loveSongs = PlaylistStore.shared.songs(kind: .love, playlistID: "")
@@ -204,23 +203,45 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             self?.pushPlaylistTags()
         })
 
-        let section = CPListSection(items: items)
-        if controller.topTemplate is CPListTemplate {
-            if let current = controller.topTemplate as? CPListTemplate {
-                current.updateSections([section])
-            }
-        } else {
-            let template = CPListTemplate(title: "LX音乐", sections: [section])
-            controller.setRootTemplate(template, animated: false) { [weak self] success, error in
-                if let error = error {
-                    self?.log("setRootTemplate error: \(error.localizedDescription)")
-                } else if !success {
-                    self?.log("setRootTemplate did not succeed")
-                } else {
-                    self?.log("setRootTemplate success")
-                }
-            }
+        return items
+    }
+
+    // 根模板只创建一次并强引用持有（否则系统会释放 -> 黑屏）。
+    // 数据加载完成/重试时复用同一实例，仅 updateSections 刷新内容。
+    private func buildRootTemplate(placeholder: Bool) {
+        guard let controller = interfaceController else {
+            log("buildRootTemplate skipped: no interfaceController")
+            return
         }
+        log("buildRootTemplate placeholder=\(placeholder) hasRoot=\(rootTemplate != nil)")
+
+        if rootTemplate == nil {
+            let section = CPListSection(items: placeholder ? [loadingItem()] : makeRootItems())
+            let template = CPListTemplate(title: "LX音乐", sections: [section])
+            rootTemplate = template
+            log("created root template instance")
+            setRootTemplateAnimatedFalse()
+        } else {
+            // 已有根模板：更新内容。保留强引用，不重建实例。
+            let section = CPListSection(items: placeholder ? [loadingItem()] : makeRootItems())
+            rootTemplate?.updateSections([section])
+        }
+    }
+
+    private func setRootTemplateAnimatedFalse() {
+        guard let controller = interfaceController, let template = rootTemplate else {
+            log("setRootTemplate skipped: no controller or rootTemplate")
+            return
+        }
+        // animated:false 避免 iOS15 动画阻塞；completion 在 iOS15 上不会回调，不依赖它。
+        controller.setRootTemplate(template, animated: false, completion: nil)
+        log("called setRootTemplate (retained instance)")
+    }
+
+    private func loadingItem() -> CPListItem {
+        let loading = CPListItem(text: "正在加载…", detailText: nil)
+        loading.handler = { _, completion in completion() }
+        return loading
     }
 
     // MARK: - Playlists / Songs

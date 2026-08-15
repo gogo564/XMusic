@@ -1,6 +1,8 @@
 import SwiftUI
 
-struct XmusicApp: View {
+@main
+struct XmusicApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var player = PlayerManager.shared
     @StateObject private var playlistStore = PlaylistStore.shared
     @StateObject private var downloader = DownloadService.shared
@@ -10,26 +12,28 @@ struct XmusicApp: View {
     @StateObject private var theme = ThemeManager.shared
     @State private var needsConfig = false
 
-    var body: some View {
-        RootView(needsConfig: $needsConfig)
-            .environmentObject(player)
-            .environmentObject(playlistStore)
-            .environmentObject(downloader)
-            .environmentObject(recentStore)
-            .environmentObject(libraryStore)
-            .environmentObject(networkMonitor)
-            .environmentObject(theme)
-            .tint(theme.accent)
-            .preferredColorScheme(theme.isDark ? .dark : .light)
-            .onAppear {
-                needsConfig = AppConfigStore.shared.token == nil
-                if !needsConfig {
-                    Task {
-                        await playlistStore.refresh()
-                        await libraryStore.loadIfNeeded()
+    var body: some Scene {
+        WindowGroup {
+            RootView(needsConfig: $needsConfig)
+                .environmentObject(player)
+                .environmentObject(playlistStore)
+                .environmentObject(downloader)
+                .environmentObject(recentStore)
+                .environmentObject(libraryStore)
+                .environmentObject(networkMonitor)
+                .environmentObject(theme)
+                .tint(theme.accent)
+                .preferredColorScheme(theme.isDark ? .dark : .light)
+                .onAppear {
+                    needsConfig = AppConfigStore.shared.token == nil
+                    if !needsConfig {
+                        Task {
+                            await playlistStore.refresh()
+                            await libraryStore.loadIfNeeded()
+                        }
                     }
                 }
-            }
+        }
     }
 }
 
