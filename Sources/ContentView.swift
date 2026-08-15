@@ -112,7 +112,10 @@ struct HomeView: View {
                 .frame(height: 36)
                 .padding(.vertical, 6)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 25) {
+                // 用 VStack 而非 LazyVStack：内嵌的 UIKitHorizontalScrollView 若随 cell 回收销毁，
+                // 滚回时 UIHostingController 重建但 SwiftUI 渲染内容丢失（字消失、点击仍在）。
+                // 内容常驻后 UIKit 视图永不销毁，从根源避免该问题。
+                VStack(alignment: .leading, spacing: 25) {
                     if source == "soda" {
                         sodaSection
                     } else {
