@@ -22,6 +22,9 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
         scrollView.delaysContentTouches = false
         scrollView.canCancelContentTouches = true
         scrollView.bounces = true
+        // 标签行只允许横向滚动：contentSize.height 严格锁定为容器高，
+        // 否则垂直方向也能滚动，点着标签上下滑会把整行滚出屏幕（"向下就隐藏"）。
+        scrollView.alwaysBounceVertical = false
         // LazyVStack 回收重建 / 尺寸变化后，SwiftUI 不一定再次调用 updateUIView，
         // 因此在自身 bounds 变化（含重建后恢复布局）时也主动重排内容，避免空白。
         let coordinator = context.coordinator
@@ -109,7 +112,9 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
             // 内容宽度兜底：系统首次布局可能算不出宽度（返回 0），此时退回到容器宽度，
             // 避免内容被设成 0 宽导致标签空白；之后 updateUIView / size 变化会再排一次纠正。
             let contentWidth = fittingSize.width > 0 ? fittingSize.width : max(viewWidth, 1)
-            let contentHeight = max(fittingSize.height, height)
+            // 高度严格等于容器高：只要 contentSize.height > bounds.height，
+            // 标签行就能垂直滚动，点着标签上下滑会把整行滚出屏幕。
+            let contentHeight = height
             host.view.frame = CGRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
             scrollView.contentSize = CGSize(width: contentWidth, height: contentHeight)
             // 回写本次实际排出的内容宽度，供 layoutSubviews 校验"1px 退化值"

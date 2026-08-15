@@ -111,13 +111,6 @@ struct HomeView: View {
             sourcePicker
                 .frame(height: 36)
                 .padding(.vertical, 6)
-            // 歌单广场标签行同样固定在 ScrollView 外：点着标签上下滑会带动整页滚动，
-            // 滚出屏幕再滚回时布局失效消失，用户要求它只左右滑动、不随页面上下滚。
-            if source != "soda" {
-                squareTagsBar
-                    .frame(height: 36)
-                    .padding(.bottom, 10)
-            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 25) {
                     if source == "soda" {
@@ -214,19 +207,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: 歌单广场标签（固定在 ScrollView 外，只左右滑动）
-    private var squareTagsBar: some View {
-        UIKitHorizontalScrollView {
-            HStack(spacing: 8) {
-                tagChip("推荐", id: nil)
-                ForEach(squareTags, id: \.id) { tag in
-                    tagChip(tag.name, id: tag.id)
-                }
-            }
-            .padding(.horizontal)
-        }
-    }
-
     // MARK: 歌单广场
     private var squareSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -240,6 +220,18 @@ struct HomeView: View {
                 }
             }
             .padding(.horizontal)
+
+            UIKitHorizontalScrollView {
+                HStack(spacing: 8) {
+                    tagChip("推荐", id: nil)
+                    ForEach(squareTags, id: \.id) { tag in
+                        tagChip(tag.name, id: tag.id)
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .frame(height: 36)
+            .padding(.bottom, 14)
 
             if squareLoading {
                 HStack {
