@@ -291,7 +291,7 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
         for (i, p) in pending.enumerated() {
             let request = p.request
             if let info = request.contentInformationRequest, !p.infoFulfilled {
-                info.contentType = "public.mpeg-4"
+                info.contentType = "com.apple.m4a-audio"
                 info.isByteRangeAccessSupported = true
                 info.contentLength = totalLength
                 pending[i].infoFulfilled = true
