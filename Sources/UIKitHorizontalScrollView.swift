@@ -112,11 +112,13 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
             // 内容宽度兜底：系统首次布局可能算不出宽度（返回 0），此时退回到容器宽度，
             // 避免内容被设成 0 宽导致标签空白；之后 updateUIView / size 变化会再排一次纠正。
             let contentWidth = fittingSize.width > 0 ? fittingSize.width : max(viewWidth, 1)
-            // 高度严格等于容器高：只要 contentSize.height > bounds.height，
-            // 标签行就能垂直滚动，点着标签上下滑会把整行滚出屏幕。
-            let contentHeight = height
+            // host.view 用内容真实高度（含 padding）：若用容器高度，重建时 bounds 未就绪
+            // 会拿到偏小值导致标签被裁剪成"只看到上半部分"。
+            let contentHeight = max(fittingSize.height, height)
             host.view.frame = CGRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
-            scrollView.contentSize = CGSize(width: contentWidth, height: contentHeight)
+            // contentSize.height 严格锁为容器高：只要它大于 bounds.height，
+            // 标签行就能垂直滚动，点着标签上下滑会把整行滚出屏幕（"向下就隐藏"）。
+            scrollView.contentSize = CGSize(width: contentWidth, height: height)
             // 回写本次实际排出的内容宽度，供 layoutSubviews 校验"1px 退化值"
             if let lx = scrollView as? LXHorizontalScrollView {
                 lx.lastContentWidth = contentWidth
