@@ -64,6 +64,20 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
                 onLayoutChanged?()
             }
         }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            // LazyVStack 回收重建时，cell 滚出屏幕会被移出 window，滚回时重新加入。
+            // SwiftUI 此时不一定会再次调用 updateUIView，且 bounds.size 可能没变，
+            // 上面 layoutSubviews 的 size 判断触发不到 -> 内容空白（用户触碰滚动才会恢复）。
+            // 重新进入 window 必然回调这里，借此强制重排内容。
+            // 刚加入 window 时 bounds 可能仍为 0（重排会退化成 1 宽占位），下一 runloop 排一次纠正。
+            guard window != nil else { return }
+            onLayoutChanged?()
+            DispatchQueue.main.async { [weak self] in
+                self?.onLayoutChanged?()
+            }
+        }
     }
 
     final class Coordinator {
