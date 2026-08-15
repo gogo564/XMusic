@@ -1,5 +1,6 @@
 import CarPlay
 import UIKit
+import AVFoundation
 
 @MainActor
 final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
