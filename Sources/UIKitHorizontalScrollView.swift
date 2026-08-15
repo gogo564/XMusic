@@ -66,10 +66,10 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
                 onLayoutChanged?()
                 return
             }
-            // 兜底：bounds 未定时 layoutContent 会把内容宽退化成 1px 占位，且后续没有
-            // size 变化 / updateUIView / didMoveToWindow 触发来纠正它（用户只能靠再滑动一下恢复）。
-            // 这里只要发现"上次排出的是 1px 退化值"就强制重排一次，正常宽度不会触发，不卡顿。
-            if bounds.width > 1, lastContentWidth <= 1 {
+            // 兜底：LazyVStack cell 滚出屏幕再滚回时，SwiftUI 可能不销毁实例、bounds.size 不变、
+            // 也不回调 updateUIView / didMoveToWindow，但 host.view 的布局已被系统重置成 1px 占位
+            // （contentSize 反映当前实际内容宽）。此时强制重排一次，正常宽度不会触发，不卡顿。
+            if bounds.width > 1, contentSize.width <= 1 {
                 onLayoutChanged?()
             }
         }
