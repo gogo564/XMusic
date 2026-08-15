@@ -8,13 +8,17 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private var window: UIWindow?
     private var rootTemplate: CPListTemplate?
 
+    private func log(_ message: String) {
+        Log.write("[CarPlay] \(message)")
+    }
+
     // MARK: - CPTemplateApplicationSceneDelegate
 
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
         didConnect interfaceController: CPInterfaceController
     ) {
-        NSLog("[CarPlay] didConnect")
+        log("didConnect")
         self.interfaceController = interfaceController
         // 参考官方 CarPlay Music / react-native-carplay：不设 guard，每次连接都重建根模板，
         // 避免车机断开重连或 scene 重建时 didConnect 再次触发被拦截导致黑屏。
@@ -25,13 +29,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self, let controller = self.interfaceController,
                   controller.topTemplate == nil else { return }
-            NSLog("[CarPlay] retry placeholder root after timeout")
+            log("retry placeholder root after timeout (topTemplate==nil)")
             self.buildRootTemplate(placeholder: true)
         }
         Task { @MainActor in
-            NSLog("[CarPlay] loading data")
+            log("loading data")
             await PlaylistStore.shared.refresh()
-            NSLog("[CarPlay] data loaded, rebuilding root")
+            log("data loaded, rebuilding root")
             buildRootTemplate(placeholder: false)
         }
     }
@@ -40,16 +44,28 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         _ templateApplicationScene: CPTemplateApplicationScene,
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
-        NSLog("[CarPlay] didDisconnect")
+        log("didDisconnect")
         self.interfaceController = nil
         self.window = nil
         rootTemplate = nil
     }
 
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        log("willConnectTo session role=\(session.role.rawValue)")
+        if session.role == UISceneSession.Role.carTemplateApplication {
+            self.window = UIWindow(windowScene: scene as! CPTemplateApplicationScene)
+            // CarPlay 不需要手动显示 window；这里仅持有避免释放
+        }
+    }
+
     // MARK: - Root
 
     private func buildRootTemplate(placeholder: Bool) {
-        guard let controller = interfaceController else { return }
+        guard let controller = interfaceController else {
+            log("buildRootTemplate skipped: no interfaceController")
+            return
+        }
+        log("buildRootTemplate placeholder=\(placeholder) topTemplate=\(String(describing: controller.topTemplate))")
 
         var items: [CPListItem] = []
 
@@ -59,7 +75,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             loading.handler = { _, completion in completion() }
             let template = CPListTemplate(title: "LX音乐", sections: [CPListSection(items: [loading])])
             controller.setRootTemplate(template, animated: true) { success, error in
-                NSLog("[CarPlay] placeholder setRoot success=\(success) error=\(String(describing: error))")
+                self.log("placeholder setRoot success=\(success) error=\(String(describing: error))")
             }
             return
         }
@@ -134,9 +150,11 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             let template = CPListTemplate(title: "LX音乐", sections: [section])
             controller.setRootTemplate(template, animated: true) { success, error in
                 if let error = error {
-                    NSLog("CarPlay setRootTemplate error: \(error.localizedDescription)")
+                    self.log("setRootTemplate error: \(error.localizedDescription)")
                 } else if !success {
-                    NSLog("CarPlay setRootTemplate did not succeed")
+                    self.log("setRootTemplate did not succeed")
+                } else {
+                    self.log("setRootTemplate success")
                 }
             }
         }
