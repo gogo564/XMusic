@@ -6,7 +6,6 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     private var interfaceController: CPInterfaceController?
     private var window: UIWindow?
-    private var didConnect = false
     private var rootTemplate: CPListTemplate?
 
     // MARK: - CPTemplateApplicationSceneDelegate
@@ -17,10 +16,18 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     ) {
         NSLog("[CarPlay] didConnect")
         self.interfaceController = interfaceController
-        guard !didConnect else { return }
-        didConnect = true
-        // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏
+        // 参考官方 CarPlay Music / react-native-carplay：不设 guard，每次连接都重建根模板，
+        // 避免车机断开重连或 scene 重建时 didConnect 再次触发被拦截导致黑屏。
+        // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
         buildRootTemplate(placeholder: true)
+        // 延迟兜底：连接初期界面可能不稳定，参考实现会在 2s 后重设一次根模板。
+        // 仅当此时仍无根模板（说明首次 setRootTemplate 失败/未生效，界面黑屏）才补设。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self, let controller = self.interfaceController,
+                  controller.topTemplate == nil else { return }
+            NSLog("[CarPlay] retry placeholder root after timeout")
+            self.buildRootTemplate(placeholder: true)
+        }
         Task { @MainActor in
             NSLog("[CarPlay] loading data")
             await PlaylistStore.shared.refresh()
@@ -36,7 +43,6 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         NSLog("[CarPlay] didDisconnect")
         self.interfaceController = nil
         self.window = nil
-        didConnect = false
         rootTemplate = nil
     }
 
