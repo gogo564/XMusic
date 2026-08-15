@@ -6,8 +6,9 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     private var interfaceController: CPInterfaceController?
     private var rootTemplate: CPListTemplate?
+    private var retryTimer: Timer?
 
-    private func log(_ message: String) {
+    nonisolated private func log(_ message: String) {
         Log.write("[CarPlay] \(message)")
     }
 
@@ -23,14 +24,9 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         // 避免车机断开重连或 scene 重建时 didConnect 再次触发被拦截导致黑屏。
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
         buildRootTemplate(placeholder: true)
-        // 延迟兜底：连接初期界面可能不稳定，参考实现会在 2s 后重设一次根模板。
-        // 仅当此时仍无根模板（说明首次 setRootTemplate 失败/未生效，界面黑屏）才补设。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self = self, let controller = self.interfaceController,
-                  controller.topTemplate == nil else { return }
-            log("retry placeholder root after timeout (topTemplate==nil)")
-            self.buildRootTemplate(placeholder: true)
-        }
+        // 强制重试：setRootTemplate 首次连接可能因车机未就绪不生效（topTemplate 一直 nil 黑屏）。
+        // 每 0.5s 检查一次，只要没有根模板就重设（animated:false），直到成功或断开。
+        startRootRetry()
         Task { @MainActor in
             log("loading data")
             await PlaylistStore.shared.refresh()
@@ -39,11 +35,42 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         }
     }
 
+    private func startRootRetry() {
+        retryTimer?.invalidate()
+        var attempts = 0
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    timer.invalidate()
+                    return
+                }
+                guard let controller = self.interfaceController else {
+                    timer.invalidate()
+                    return
+                }
+                attempts += 1
+                if controller.topTemplate != nil || attempts > 30 {
+                    if controller.topTemplate != nil {
+                        self.log("root in place after \(attempts) checks")
+                    }
+                    timer.invalidate()
+                    return
+                }
+                self.log("retry setRootTemplate attempt \(attempts) topTemplate=nil")
+                self.buildRootTemplate(placeholder: true)
+            }
+        }
+        retryTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
         log("didDisconnect")
+        retryTimer?.invalidate()
+        retryTimer = nil
         self.interfaceController = nil
         rootTemplate = nil
     }
@@ -69,8 +96,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             let loading = CPListItem(text: "正在加载…", detailText: nil)
             loading.handler = { _, completion in completion() }
             let template = CPListTemplate(title: "LX音乐", sections: [CPListSection(items: [loading])])
-            controller.setRootTemplate(template, animated: true) { success, error in
-                self.log("placeholder setRoot success=\(success) error=\(String(describing: error))")
+            controller.setRootTemplate(template, animated: false) { [weak self] success, error in
+                self?.log("placeholder setRoot success=\(success) error=\(String(describing: error))")
             }
             return
         }
@@ -143,13 +170,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             }
         } else {
             let template = CPListTemplate(title: "LX音乐", sections: [section])
-            controller.setRootTemplate(template, animated: true) { success, error in
+            controller.setRootTemplate(template, animated: false) { [weak self] success, error in
                 if let error = error {
-                    self.log("setRootTemplate error: \(error.localizedDescription)")
+                    self?.log("setRootTemplate error: \(error.localizedDescription)")
                 } else if !success {
-                    self.log("setRootTemplate did not succeed")
+                    self?.log("setRootTemplate did not succeed")
                 } else {
-                    self.log("setRootTemplate success")
+                    self?.log("setRootTemplate success")
                 }
             }
         }
