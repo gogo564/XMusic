@@ -80,6 +80,29 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         // CarPlay 渲染用模板而非 UIWindow，这里只记录日志，不做 window 创建
     }
 
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        log("sceneDidBecomeActive role=\(scene.session.role.rawValue)")
+        // scene 激活后才可呈现模板；若 didConnect 时尚未激活，这里补设根模板
+        if scene.session.role == UISceneSession.Role.carTemplateApplication {
+            if interfaceController?.topTemplate == nil {
+                log("sceneDidBecomeActive: topTemplate still nil, retrying root")
+                buildRootTemplate(placeholder: true)
+            }
+        }
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        log("sceneWillResignActive role=\(scene.session.role.rawValue)")
+    }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        log("sceneDidEnterBackground role=\(scene.session.role.rawValue)")
+    }
+
+    func sceneDidDisconnect(_ scene: UIScene) {
+        log("sceneDidDisconnect role=\(scene.session.role.rawValue)")
+    }
+
     // MARK: - Root
 
     private func buildRootTemplate(placeholder: Bool) {
