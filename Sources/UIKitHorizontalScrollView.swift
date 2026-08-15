@@ -53,12 +53,14 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
     /// 在 frame/bounds 变化或 LazyVStack 回收重建后重新计算内容布局。
     final class LXHorizontalScrollView: UIScrollView {
         var onLayoutChanged: (() -> Void)?
-        private var lastBounds = CGRect.zero
+        private var lastSize = CGSize.zero
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            if bounds != lastBounds {
-                lastBounds = bounds
+            // 只比较 size，忽略 origin：滚动时 bounds.origin 随 contentOffset 逐帧变化，
+            // 若比较整个 bounds 会导致滚动每一帧都触发昂贵的 fittingSize 重排（卡顿）且可能把内容宽度算成 0（空白）。
+            if bounds.size != lastSize {
+                lastSize = bounds.size
                 onLayoutChanged?()
             }
         }
@@ -72,6 +74,7 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
         }
 
         func layoutContent(in scrollView: UIScrollView) {
+            let viewWidth = scrollView.bounds.width
             let height = scrollView.bounds.height > 0 ? scrollView.bounds.height : 40
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
@@ -80,7 +83,9 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
                 withHorizontalFittingPriority: .fittingSizeLevel,
                 verticalFittingPriority: .required
             )
-            let contentWidth = fittingSize.width > 0 ? fittingSize.width : scrollView.bounds.width
+            // 内容宽度兜底：系统首次布局可能算不出宽度（返回 0），此时退回到容器宽度，
+            // 避免内容被设成 0 宽导致标签空白；之后 updateUIView / size 变化会再排一次纠正。
+            let contentWidth = fittingSize.width > 0 ? fittingSize.width : max(viewWidth, 1)
             let contentHeight = max(fittingSize.height, height)
             host.view.frame = CGRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
             scrollView.contentSize = CGSize(width: contentWidth, height: contentHeight)
