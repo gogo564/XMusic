@@ -20,6 +20,9 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     ) {
         log("didConnect")
         self.interfaceController = interfaceController
+        // CarPlay 音频 app：连接即确保 audio session 激活 + 接收远程控制事件，
+        // 否则系统可能在 scene 激活后立即把它切回后台（黑屏）。
+        ensureAudioSessionActive()
         // 参考官方 CarPlay Music / react-native-carplay：不设 guard，每次连接都重建根模板，
         // 避免车机断开重连或 scene 重建时 didConnect 再次触发被拦截导致黑屏。
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
@@ -82,12 +85,26 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         log("sceneDidBecomeActive role=\(scene.session.role.rawValue)")
-        // scene 激活后才可呈现模板；若 didConnect 时尚未激活，这里补设根模板
+        // CarPlay 音频 app 的 scene 活跃依赖 audio session：激活场景时确保播放类别 + 激活，
+        // 否则 CarPlay 会把 scene 立即切回后台（激活后几 ms 就 resignActive+enterBackground -> 黑屏）。
         if scene.session.role == UISceneSession.Role.carTemplateApplication {
+            ensureAudioSessionActive()
             if interfaceController?.topTemplate == nil {
                 log("sceneDidBecomeActive: topTemplate still nil, retrying root")
                 buildRootTemplate(placeholder: true)
             }
+        }
+    }
+
+    private func ensureAudioSessionActive() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.allowAirPlay, .allowBluetooth])
+            try session.setActive(true)
+            // CarPlay 音频 app 需要接收远程控制事件，否则车机不认为它是活跃的音频 app
+            UIApplication.shared.beginReceivingRemoteControlEvents()
+        } catch {
+            log("ensureAudioSessionActive error: \(error)")
         }
     }
 
