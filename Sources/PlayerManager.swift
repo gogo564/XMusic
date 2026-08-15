@@ -61,7 +61,7 @@ final class PlayerManager: ObservableObject {
         queue.indices.contains(currentIndex) ? queue[currentIndex] : nil
     }
 
-    private let player = AVQueuePlayer()
+    private let player = AVPlayer()
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
@@ -130,9 +130,13 @@ final class PlayerManager: ObservableObject {
         if let endObserver = endObserver {
             NotificationCenter.default.removeObserver(endObserver)
         }
+        // 注意：object 传 nil（而不是 player.currentItem）。带 object 的
+        // AVPlayerItemDidPlayToEndTime 通知在部分 iOS 版本存在不投递的已知 bug，
+        // 会直接导致「播完一首不自动切下一首」。object 为 nil 后 handler 会收到
+        // 所有 item 的结束通知，playNext(auto:) 内部按 currentIndex 判断，逻辑不变。
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
-            object: player.currentItem,
+            object: nil,
             queue: .main
         ) { [weak self] _ in
             Log.write("⏭️ [Player] DidPlayToEnd → auto next")

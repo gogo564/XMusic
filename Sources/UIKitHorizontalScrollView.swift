@@ -32,6 +32,12 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
         let host = context.coordinator.host
         host.view.backgroundColor = .clear
         scrollView.addSubview(host.view)
+        // 实例刚创建时 bounds 尚为 zero（layoutSubviews 的 lastBounds 判定不触发），
+        // 此时不主动重排会导致 LazyVStack 回收重建后标签空白。下一 runloop 强制排一次。
+        DispatchQueue.main.async { [weak coordinator, weak scrollView] in
+            guard let coordinator = coordinator, let scrollView = scrollView else { return }
+            coordinator.layoutContent(in: scrollView)
+        }
         return scrollView
     }
 
