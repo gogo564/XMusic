@@ -25,15 +25,15 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
         // LazyVStack 回收重建 / 尺寸变化后，SwiftUI 不一定再次调用 updateUIView，
         // 因此在自身 bounds 变化（含重建后恢复布局）时也主动重排内容，避免空白。
         let coordinator = context.coordinator
-        scrollView.onLayoutChanged = { [weak coordinator] in
-            coordinator?.layoutContent(in: scrollView)
-        }
 
         let host = context.coordinator.host
         host.view.backgroundColor = .clear
         scrollView.addSubview(host.view)
         // 实例刚创建时 bounds 尚为 zero（layoutSubviews 的 lastBounds 判定不触发），
         // 此时不主动重排会导致 LazyVStack 回收重建后标签空白。下一 runloop 强制排一次。
+        scrollView.onLayoutChanged = { [weak coordinator] in
+            coordinator?.layoutContent(in: scrollView)
+        }
         DispatchQueue.main.async { [weak coordinator, weak scrollView] in
             guard let coordinator = coordinator, let scrollView = scrollView else { return }
             coordinator.layoutContent(in: scrollView)
@@ -54,6 +54,8 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
     final class LXHorizontalScrollView: UIScrollView {
         var onLayoutChanged: (() -> Void)?
         private var lastSize = CGSize.zero
+        /// 最近一次 layoutContent 排出的内容宽度（在 onLayoutChanged 里回写）
+        var lastContentWidth: CGFloat = 0
 
         override func layoutSubviews() {
             super.layoutSubviews()
@@ -61,6 +63,13 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
             // 若比较整个 bounds 会导致滚动每一帧都触发昂贵的 fittingSize 重排（卡顿）且可能把内容宽度算成 0（空白）。
             if bounds.size != lastSize {
                 lastSize = bounds.size
+                onLayoutChanged?()
+                return
+            }
+            // 兜底：bounds 未定时 layoutContent 会把内容宽退化成 1px 占位，且后续没有
+            // size 变化 / updateUIView / didMoveToWindow 触发来纠正它（用户只能靠再滑动一下恢复）。
+            // 这里只要发现"上次排出的是 1px 退化值"就强制重排一次，正常宽度不会触发，不卡顿。
+            if bounds.width > 1, lastContentWidth <= 1 {
                 onLayoutChanged?()
             }
         }
@@ -103,6 +112,10 @@ struct UIKitHorizontalScrollView<Content: View>: UIViewRepresentable {
             let contentHeight = max(fittingSize.height, height)
             host.view.frame = CGRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
             scrollView.contentSize = CGSize(width: contentWidth, height: contentHeight)
+            // 回写本次实际排出的内容宽度，供 layoutSubviews 校验"1px 退化值"
+            if let lx = scrollView as? LXHorizontalScrollView {
+                lx.lastContentWidth = contentWidth
+            }
         }
     }
 }
