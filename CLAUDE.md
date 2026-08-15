@@ -4,6 +4,8 @@
 
 ## 规则
 1. 所有输出必须使用中文。
+2. 每次提交后只 `git push` 一次：GitHub 主域网络不稳定导致 push 容易超时，若超时先检查 `git log --oneline -1 origin/main` 是否已同步，不要重复推送浪费额度。
+3. 构建只靠 push 自动触发（build.yml 监听 push），**绝不要手动 workflow_dispatch 触发 CI**，否则同一改动会构建 2 次浪费额度。
 
 ## 项目概述
 

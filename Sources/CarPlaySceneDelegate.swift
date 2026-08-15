@@ -5,7 +5,6 @@ import UIKit
 final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
 
     private var interfaceController: CPInterfaceController?
-    private var window: UIWindow?
     private var rootTemplate: CPListTemplate?
 
     private func log(_ message: String) {
@@ -46,16 +45,12 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     ) {
         log("didDisconnect")
         self.interfaceController = nil
-        self.window = nil
         rootTemplate = nil
     }
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        log("willConnectTo session role=\(session.role.rawValue)")
-        if session.role == UISceneSession.Role.carTemplateApplication {
-            self.window = UIWindow(windowScene: scene as! CPTemplateApplicationScene)
-            // CarPlay 不需要手动显示 window；这里仅持有避免释放
-        }
+        log("willConnectToSession role=\(session.role.rawValue)")
+        // CarPlay 渲染用模板而非 UIWindow，这里只记录日志，不做 window 创建
     }
 
     // MARK: - Root
