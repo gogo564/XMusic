@@ -60,6 +60,14 @@ jobs:
           # 注意：不在模拟器上用 ldid 重签——ldid 签名会让模拟器拒绝启动（SBMainWorkspace）。
           xcrun simctl install "$DEVICE" "$APP"
           echo "Installed."
+          # 验证模拟器 app 是否真的嵌入了 CarPlay entitlement（图标能否出现在 CarPlay 主屏的关键）
+          APP_BIN="$APP/XMusic"
+          echo "=== CarPlay entitlement check ==="
+          if command -v codesign >/dev/null 2>&1 && [ -f "$APP_BIN" ]; then
+            codesign -d --entitlements :- "$APP_BIN" 2>/dev/null | grep -iE "carplay" || echo "NO carplay entitlement in signed binary!"
+          fi
+          # 备选：直接查 .xcent（Xcode 模拟器签名产物）
+          find "$APP" -name "*xcent*" -exec sh -c 'echo "--- {} ---"; cat "$1"' _ {} \; 2>/dev/null | grep -iE "carplay|entitlement|<dict" | head || true
 
       - name: Enable CarPlay and open external display
         run: |
@@ -150,13 +158,13 @@ jobs:
           # 先清空日志基线，方便精确判断 didConnect 是否出现
           : > "$LOGFILE" 2>/dev/null || true
 
-          # 解析窗口列表（CGWindowList 格式: name=..|layer=N|id=N|x,y|w,h）
+          # 重新枚举窗口（不依赖前置步骤的旧列表，窗口可能已变）
           echo "=== candidate windows ==="
+          /tmp/winenum > /tmp/sim_windows.txt 2>/dev/null || true
           cat /tmp/sim_windows.txt
 
-          # 在 CarPlay 主屏上点击 app 图标，直到日志出现 didConnect。
-          # 用户确认：主屏一页 8 图标（4列×2行），XMusic 图标在左下角第一个。
-          # 因此首选左下第一格（fx≈0.18/fy≈0.75），再全格扫描兜底。
+          # 在 CarPlay 主屏上点击 XMusic 图标（用户确认：左下第一格，4列x2行，fy≈0.75/fx≈0.18）。
+          # CarPlay 窗口是宽屏（宽高比 ~1.5），手机窗口是竖屏（~0.45）——用宽高比识别。
           found=0
           trypoint() {
             cx=$1; cy=$2
@@ -176,17 +184,28 @@ jobs:
             [ "$w" -lt 200 ] 2>/dev/null && continue
             [ "$h" -lt 150 ] 2>/dev/null && continue
             layer=$(echo "$_layer" | cut -d= -f2)
-            echo "Trying window: layer=$layer pos=$pos dims=$w x $h"
-            # 首选：左下第一格（CarPlay 8图标网格，XMusic 所在）
-            trypoint $(( x + w * 18 / 100 )) $(( y + h * 75 / 100 ))
-            [ "$found" = "1" ] && continue
-            # 兜底：全格扫描（4列x2行 + 若干中间行）
-            for fy in 0.25 0.5 0.75; do
+            [ "$layer" != "0" ] && continue
+            # 优先 CarPlay 宽屏窗口（宽高比 ≥ 1.0）
+            aspect=$(awk "BEGIN{printf \"%.2f\", $w/$h}")
+            echo "window dims=$w x $h aspect=$aspect pos=$pos"
+            isCarPlay=0
+            awk "BEGIN{exit !($aspect >= 1.0)}" && isCarPlay=1
+            if [ "$isCarPlay" = "1" ]; then
+              echo "  -> CarPlay window (wide). Clicking XMusic at bottom-left."
+              # XMusic 图标：左下第一格 (fx≈0.18, fy≈0.75)
+              trypoint $(( x + w * 18 / 100 )) $(( y + h * 75 / 100 ))
+              [ "$found" = "1" ] && continue
+              # 兜底：4x2 全格扫描
               for fx in 0.18 0.43 0.68 0.93; do
-                trypoint $(( x + w * fx / 100 )) $(( y + h * fy / 100 ))
-                [ "$found" = "1" ] && break 2
+                for fy in 0.25 0.75; do
+                  trypoint $(( x + w * fx / 100 )) $(( y + h * fy / 100 ))
+                  [ "$found" = "1" ] && break 2
+                done
               done
-            done
+            else
+              # 手机竖屏窗口也兜底试一次左下第一格
+              trypoint $(( x + w * 18 / 100 )) $(( y + h * 75 / 100 ))
+            fi
           done < /tmp/sim_windows.txt
           [ "$found" = "1" ] || echo "WARN: didConnect not detected after grid scan"
 
