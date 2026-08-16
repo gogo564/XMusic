@@ -106,12 +106,24 @@ jobs:
           done
           echo "CarPlay click attempts done."
 
-          # 兜底：cliclick（CGEvent 注入，无需辅助功能权限）——如果窗口坐标已知
-          if ! command -v cliclick >/dev/null 2>&1; then
-            brew install cliclick >/dev/null 2>&1 || true
-          fi
-          echo "cliclick: $(command -v cliclick || echo not-installed)"
-          sleep 2
+          sleep 3
+          # 诊断：点击 CarPlay 后枚举 Simulator 全部窗口（名字/位置/尺寸），确认外部显示窗口存在
+          echo "=== Simulator windows after CarPlay click ==="
+          osascript -e '
+            tell application "Simulator" to activate
+            delay 1
+            tell application "System Events" to tell process "Simulator"
+              set out to ""
+              repeat with w in windows
+                try
+                  set {px, py} to position of w
+                  set {sw, sh} to size of w
+                  set out to out & (name of w) & "|" & px & "," & py & "|" & sw & "," & sh & linefeed
+                end try
+              end repeat
+              return out
+            end tell' 2>&1 | tee /tmp/sim_windows.txt
+          echo "=== end windows ==="
 
       - name: Launch app and wait
         run: |
@@ -123,6 +135,45 @@ jobs:
           # 前台启动（-f 强制前台），并打印返回码
           xcrun simctl launch --terminate-running-process "$DEVICE" xmusic.XMusic 2>&1 || echo "LAUNCH_RC=$?"
           sleep 30
+
+      - name: Click XMusic icon on CarPlay home screen
+        run: |
+          CONTAINER=$(xcrun simctl get_app_container "$(cat /tmp/device_udid)" xmusic.XMusic data 2>/dev/null || true)
+          LOGFILE="$CONTAINER/Documents/xmusic.log"
+          echo "LOGFILE=$LOGFILE"
+          # 先清空日志基线，方便精确判断 didConnect 是否出现
+          : > "$LOGFILE" 2>/dev/null || true
+
+          # 解析 Simulator 窗口列表，取非手机的 CarPlay 外部显示窗口
+          # 格式: 名字|x,y|w,h
+          echo "=== candidate windows ==="
+          cat /tmp/sim_windows.txt
+
+          # 在 CarPlay 主屏上网格扫描点击 app 图标，直到日志出现 didConnect
+          # CarPlay 主屏图标网格：第一个 app（XMusic）通常在左上区域
+          found=0
+          while IFS='|' read -r name pos dims; do
+            [ -z "$name" ] && continue
+            x=$(echo "$pos" | cut -d, -f1); y=$(echo "$pos" | cut -d, -f2)
+            w=$(echo "$dims" | cut -d, -f1); h=$(echo "$dims" | cut -d, -f2)
+            [ "$w" -lt 200 ] && continue
+            echo "Trying window: $name ($w x $h at $x,$y)"
+            # 候选网格点：图标行区域（高度 10%~45%），每一格都试，点完即查日志
+            for fy in 0.15 0.25 0.35 0.45 0.55; do
+              for fx in 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8; do
+                # cx = x + int(w*fx/100), cy = y + int(h*fy/100)
+                cx=$(( x + w * fx / 100 )); cy=$(( y + h * fy / 100 ))
+                osascript -e "tell application \"System Events\" to click at {${cx}, ${cy}}" 2>/dev/null || true
+                sleep 1
+                if grep -q "didConnect" "$LOGFILE" 2>/dev/null; then
+                  echo "SUCCESS: didConnect detected after click at ($cx,$cy)"
+                  found=1
+                  break 2
+                fi
+              done
+            done
+          done < /tmp/sim_windows.txt
+          [ "$found" = "1" ] || echo "WARN: didConnect not detected after grid scan"
 
       - name: Screenshot CarPlay window
         run: |
@@ -151,6 +202,8 @@ jobs:
           ls -la /tmp/artifacts/crashes/ 2>/dev/null || true
           # 菜单树诊断（拿到真实路径）
           cp /tmp/menu_tree.txt /tmp/artifacts/menu_tree.txt 2>/dev/null || true
+          # 窗口列表诊断
+          cp /tmp/sim_windows.txt /tmp/artifacts/sim_windows.txt 2>/dev/null || true
           # 已安装 app 列表（确认 bundle id 与场景注册）
           xcrun simctl listapps "$DEVICE" 2>/dev/null | grep -A5 -i xmusic || echo "no xmusic in listapps"
 
