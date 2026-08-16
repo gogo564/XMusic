@@ -163,8 +163,9 @@ jobs:
           /tmp/winenum > /tmp/sim_windows.txt 2>/dev/null || true
           cat /tmp/sim_windows.txt
 
-          # 在 CarPlay 主屏上点击 XMusic 图标（用户确认：左下第一格，4列x2行，fy≈0.75/fx≈0.18）。
+          # 在 CarPlay 主屏上点击 XMusic 图标（用户确认：左下第一格，4列x2行）。
           # CarPlay 窗口是宽屏（宽高比 ~1.5），手机窗口是竖屏（~0.45）——用宽高比识别。
+          # 坐标用整数百分比系数（bash $(( )) 不支持浮点）：fx/fy 为整数 0~100。
           found=0
           trypoint() {
             cx=$1; cy=$2
@@ -192,12 +193,12 @@ jobs:
             awk "BEGIN{exit !($aspect >= 1.0)}" && isCarPlay=1
             if [ "$isCarPlay" = "1" ]; then
               echo "  -> CarPlay window (wide). Clicking XMusic at bottom-left."
-              # XMusic 图标：左下第一格 (fx≈0.18, fy≈0.75)
+              # XMusic 图标：左下第一格 (fx≈18%, fy≈75%)
               trypoint $(( x + w * 18 / 100 )) $(( y + h * 75 / 100 ))
               [ "$found" = "1" ] && continue
               # 兜底：4x2 全格扫描
-              for fx in 0.18 0.43 0.68 0.93; do
-                for fy in 0.25 0.75; do
+              for fx in 18 43 68 93; do
+                for fy in 25 75; do
                   trypoint $(( x + w * fx / 100 )) $(( y + h * fy / 100 ))
                   [ "$found" = "1" ] && break 2
                 done
