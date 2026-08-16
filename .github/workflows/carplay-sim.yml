@@ -146,9 +146,16 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b 2>&1 | tail -1
           sleep 3
           xcrun simctl install "$DEVICE" "$(find /tmp/simdd/Build/Products -name XMusic.app -type d | head -1)" 2>&1 || true
+          # 注入自动登录开关：配置页 onAppear 会自动点“测试连接并登录”，确保手机端登录成功
+          xcrun simctl spawn "$DEVICE" defaults write xmusic.XMusic autoLoginOnLaunch -bool true 2>&1 || true
           # 前台启动（-f 强制前台），并打印返回码
           xcrun simctl launch --terminate-running-process "$DEVICE" xmusic.XMusic 2>&1 || echo "LAUNCH_RC=$?"
-          sleep 30
+          # 给自动登录 + 歌单刷新留时间（未注入前传统流程是等 30s）
+          sleep 45
+          # 验证登录结果：读 token 是否已写入 UserDefaults
+          echo "=== login token check ==="
+          xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>&1 | head -c 200 || echo "NO TOKEN"
+          echo ""
 
       - name: Click XMusic icon on CarPlay home screen
         run: |
@@ -195,9 +202,16 @@ jobs:
             isCarPlay=0
             awk "BEGIN{exit !($aspect >= 1.0)}" && isCarPlay=1
             if [ "$isCarPlay" = "1" ]; then
-              echo "  -> CarPlay window (wide). First clicking XMusic at bottom-left slot."
-              # 首选：左下第一格（XMusic 所在，用户确认）。4列2行，左下格中心≈(18%, 75%)
-              trypoint $(( x + w * 18 / 100 )) $(( y + h * 75 / 100 ))
+              echo "  -> CarPlay window (wide). First clicking XMusic at user-confirmed (440,255)."
+              # 首选：用户对照截图确认的 XMusic 图标坐标 (440,255)
+              trypoint 440 255
+              # 邻近兜底：围绕 (440,255) 半径约 14px 偏移
+              for dx in -14 14; do
+                for dy in -14 14; do
+                  trypoint $((440+dx)) $((255+dy))
+                  [ "$found" = "1" ] && break 2
+                done
+              done
               # 若未命中，4x2 全格扫描
               [ "$found" = "1" ] && continue
               for fy in 25 75; do
