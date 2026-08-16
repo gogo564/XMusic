@@ -2,7 +2,7 @@ import CarPlay
 import UIKit
 
 @MainActor
-final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPInterfaceControllerDelegate {
 
     private var interfaceController: CPInterfaceController?
     private var rootTemplate: CPListTemplate?
@@ -19,6 +19,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     ) {
         log("didConnect")
         self.interfaceController = interfaceController
+        interfaceController.delegate = self
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
         // 关键：只在连接时设置一次，不要在 scene 生命周期里重设——
         // 每次 sceneDidBecomeActive 再 setRootTemplate 会打断系统已完成的呈现。
@@ -343,5 +344,23 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private func image(_ name: String) -> UIImage? {
         let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
         return UIImage(systemName: name, withConfiguration: config)?.withTintColor(.systemBlue, renderingMode: .alwaysOriginal)
+    }
+
+    // MARK: - CPInterfaceControllerDelegate（纯日志观测，不驱动任何行为）
+
+    func templateWillAppear(_ aTemplate: CPTemplate, animated: Bool) {
+        log("templateWillAppear \(type(of: aTemplate)) animated=\(animated)")
+    }
+
+    func templateDidAppear(_ aTemplate: CPTemplate, animated: Bool) {
+        log("templateDidAppear \(type(of: aTemplate)) animated=\(animated)")
+    }
+
+    func templateWillDisappear(_ aTemplate: CPTemplate, animated: Bool) {
+        log("templateWillDisappear \(type(of: aTemplate)) animated=\(animated)")
+    }
+
+    func templateDidDisappear(_ aTemplate: CPTemplate, animated: Bool) {
+        log("templateDidDisappear \(type(of: aTemplate)) animated=\(animated)")
     }
 }
