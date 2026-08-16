@@ -9,6 +9,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private var rootTemplate: CPListTemplate?
     private var retryTimer: Timer?
     private var rootDidAppear = false
+    private var sceneIsActive = false
 
     nonisolated private func log(_ message: String) {
         Log.write("[CarPlay] \(message)")
@@ -56,7 +57,6 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     private func startRootRetry() {
         retryTimer?.invalidate()
-        var attempts = 0
         let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
             Task { @MainActor [weak self] in
                 guard let self else {
@@ -67,15 +67,15 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                     timer.invalidate()
                     return
                 }
-                attempts += 1
-                if self.rootDidAppear || attempts > 30 {
+                guard self.sceneIsActive, !self.rootDidAppear else {
+                    // scene 未激活时设根模板无意义，跳过；active 且已出现则停表。
                     if self.rootDidAppear {
-                        self.log("root appeared after \(attempts) checks")
+                        self.log("root appeared, stopping retry")
+                        timer.invalidate()
                     }
-                    timer.invalidate()
                     return
                 }
-                self.log("retry setRootTemplate attempt \(attempts) rootDidAppear=false")
+                self.log("retry setRootTemplate rootDidAppear=false")
                 self.setRootTemplateAnimatedFalse()
             }
         }
@@ -93,6 +93,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         self.interfaceController = nil
         rootTemplate = nil
         rootDidAppear = false
+        sceneIsActive = false
     }
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
@@ -102,9 +103,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         log("sceneDidBecomeActive role=\(scene.session.role.rawValue)")
-        // CarPlay 音频 app 的 scene 活跃依赖 audio session：激活场景时确保播放类别 + 激活，
-        // 否则 CarPlay 会把 scene 立即切回后台（激活后几 ms 就 resignActive+enterBackground -> 黑屏）。
         if scene.session.role == UISceneSession.Role.carTemplateApplication {
+            sceneIsActive = true
             ensureAudioSessionActive()
             if !rootDidAppear {
                 log("sceneDidBecomeActive: root not appeared yet, retrying")
@@ -130,10 +130,16 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     func sceneWillResignActive(_ scene: UIScene) {
         log("sceneWillResignActive role=\(scene.session.role.rawValue)")
+        if scene.session.role == UISceneSession.Role.carTemplateApplication {
+            sceneIsActive = false
+        }
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         log("sceneDidEnterBackground role=\(scene.session.role.rawValue)")
+        if scene.session.role == UISceneSession.Role.carTemplateApplication {
+            sceneIsActive = false
+        }
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
