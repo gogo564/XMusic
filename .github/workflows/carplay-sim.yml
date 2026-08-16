@@ -63,29 +63,56 @@ jobs:
 
       - name: Enable CarPlay and open external display
         run: |
-          # 新版（Xcode 15+）模拟器：CarPlay 在 I/O > External Displays > CarPlay。
-          # 旧版在 Hardware > External Displays。AppleScript 需辅助功能权限，CI 无 GUI 交互时可能失败——
-          # 失败不致命，下面是多路径重试 + 直接改 plist 兜底。
           defaults write com.apple.iphonesimulator CarPlay -bool YES
           defaults write com.apple.iphonesimulator CarPlayExtraOptions -bool YES
           open -a Simulator 2>&1
-          sleep 8
-          # 尝试多种菜单路径
-          for path in "I/O" "Hardware"; do
-            osascript -e "
-              tell application \"Simulator\" to activate
-              delay 1
-              tell application \"System Events\"
-                tell process \"Simulator\"
+          sleep 12
+          echo "=== Simulator menu tree (diagnostic) ==="
+          osascript -e '
+            tell application "Simulator" to activate
+            delay 1
+            tell application "System Events"
+              tell process "Simulator"
+                set out to ""
+                repeat with mb in menu bar items of menu bar 1
+                  set out to out & "MENUBARITEM: " & (name of mb) & linefeed
                   try
-                    click menu item \"CarPlay\" of menu 1 of menu item \"External Displays\" of menu 1 of menu bar item \"$path\" of menu bar 1
+                    repeat with mi in menu items of menu 1 of mb
+                      set out to out & "  ITEM: " & (name of mi) & linefeed
+                      try
+                        set out to out & "    has submenu: " & ((count of menu items of menu 1 of mi) > 0) & linefeed
+                        repeat with mi2 in menu items of menu 1 of mi
+                          set out to out & "      SUB: " & (name of mi2) & linefeed
+                        end repeat
+                      end try
+                    end repeat
                   end try
-                end tell
-              end tell" 2>&1 | grep -v "^$" || true
-            sleep 2
+                end repeat
+                return out
+              end tell
+            end tell' 2>&1 | tee /tmp/menu_tree.txt
+          echo "=== end menu tree ==="
+
+          # 动态查找 CarPlay 菜单项并点击（多个兜底路径）
+          for script in \
+            'click menu item "CarPlay" of menu 1 of menu item "External Displays" of menu 1 of menu bar item "I/O" of menu bar 1' \
+            'click menu item "CarPlay" of menu 1 of menu item "External Displays" of menu 1 of menu bar item "Hardware" of menu bar 1' \
+            'click menu item "CarPlay" of menu 1 of menu item "Display" of menu 1 of menu bar item "I/O" of menu bar 1' \
+            'click menu item "CarPlay" of menu 1 of menu bar item "I/O" of menu bar 1' \
+            'click menu item "CarPlay" of menu 1 of menu bar item "Hardware" of menu bar 1'; do
+            osascript -e "tell application \"System Events\" to tell process \"Simulator\" to try
+            $script
+            end try" 2>&1 | grep -v "^$" || true
+            sleep 1
           done
-          echo "CarPlay menu attempt done (best-effort)."
-          sleep 3
+          echo "CarPlay click attempts done."
+
+          # 兜底：cliclick（CGEvent 注入，无需辅助功能权限）——如果窗口坐标已知
+          if ! command -v cliclick >/dev/null 2>&1; then
+            brew install cliclick >/dev/null 2>&1 || true
+          fi
+          echo "cliclick: $(command -v cliclick || echo not-installed)"
+          sleep 2
 
       - name: Launch app and wait
         run: |
@@ -123,6 +150,8 @@ jobs:
           mkdir -p /tmp/artifacts/crashes
           cp -R "$HOME/Library/Logs/DiagnosticReports/"*XMusic* /tmp/artifacts/crashes/ 2>/dev/null || true
           ls -la /tmp/artifacts/crashes/ 2>/dev/null || true
+          # 菜单树诊断（拿到真实路径）
+          cp /tmp/menu_tree.txt /tmp/artifacts/menu_tree.txt 2>/dev/null || true
           # 已安装 app 列表（确认 bundle id 与场景注册）
           xcrun simctl listapps "$DEVICE" 2>/dev/null | grep -A5 -i xmusic || echo "no xmusic in listapps"
 
