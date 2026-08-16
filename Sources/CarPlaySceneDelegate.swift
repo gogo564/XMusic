@@ -143,7 +143,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             let template = CPListTemplate(title: "LX音乐", sections: [section])
             rootTemplate = template
             log("created root template instance")
-            setRootTemplateAnimatedFalse()
+            setRootTemplate()
         } else {
             // 已有根模板：更新内容。保留强引用，不重建实例。
             let section = CPListSection(items: placeholder ? [loadingItem()] : makeRootItems())
@@ -151,13 +151,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         }
     }
 
-    private func setRootTemplateAnimatedFalse() {
+    private func setRootTemplate() {
         guard let controller = interfaceController, let template = rootTemplate else {
             log("setRootTemplate skipped: no controller or rootTemplate")
             return
         }
-        // 与成功案例一致：只在 didConnect 设置一次根模板，不重试、不干预 scene 生命周期。
-        controller.setRootTemplate(template, animated: false, completion: nil)
+        // 与成功案例 RadioCarPlay 一致：只在 didConnect 设置一次根模板，animated: true，不干预 scene 生命周期。
+        controller.setRootTemplate(template, animated: true, completion: nil)
         log("called setRootTemplate (retained instance)")
     }
 

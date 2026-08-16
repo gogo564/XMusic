@@ -1,10 +1,10 @@
 import UIKit
 import AVFoundation
-import SwiftUI
 
 // AppDelegate 由 XmusicApp 通过 @UIApplicationDelegateAdaptor 注入。
-// 纯 SwiftUI 生命周期下 CarPlay scene 经常连不上（didConnect 不触发 -> 黑屏），
-// 这里显式返回 CarPlay 场景配置，确保 CarPlaySceneDelegate 被正确实例化。
+// CarPlay 场景配置完全走 Info.plist 的 UIApplicationSceneManifest（与成功案例
+// RadioCarPlay 一致：纯 SwiftUI @main + Info.plist，不实现 configurationForConnecting）。
+// 这里只保留全局一次性的音频会话配置。
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
 
@@ -14,26 +14,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         configureAudioSession()
         return true
-    }
-
-    func application(
-        _ application: UIApplication,
-        configurationForConnecting connectingSceneSession: UISceneSession,
-        options: UIScene.ConnectionOptions
-    ) -> UISceneConfiguration {
-        if connectingSceneSession.role == UISceneSession.Role.carTemplateApplication {
-            let config = UISceneConfiguration(
-                name: "CarPlayConfiguration",
-                sessionRole: connectingSceneSession.role
-            )
-            config.delegateClass = CarPlaySceneDelegate.self
-            return config
-        }
-        // 其余场景（窗口/主 UI）交给 SwiftUI 生命周期管理
-        return UISceneConfiguration(
-            name: "Default Configuration",
-            sessionRole: connectingSceneSession.role
-        )
     }
 
     // CarPlay 音频 App 必须有 playback 类别 + 激活，否则车机不显示/无响应。
