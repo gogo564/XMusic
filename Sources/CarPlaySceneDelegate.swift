@@ -335,7 +335,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         template.emptyViewTitleVariants = ["加载中…"]
         controller.pushTemplate(template, animated: true) { [weak self] _, _ in
             Task { @MainActor in
-                let tags = await self.fetchTagsRetrying(source: "kw")
+                let tags = await self?.fetchTagsRetrying(source: "kw") ?? []
                 var items = [self?.makeListEntry(
                     title: "推荐",
                     detail: "热门歌单",
