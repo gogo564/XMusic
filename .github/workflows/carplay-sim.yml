@@ -107,29 +107,9 @@ jobs:
           echo "CarPlay click attempts done."
 
           sleep 3
-          # 诊断：列出全部 Simulator 窗口（用 CGWindowList，不依赖辅助功能，无 AppleEvent 超时问题）
+          # 诊断：列出全部 Simulator 窗口（CGWindowList，不依赖辅助功能，无 AppleEvent 超时）
           echo "=== Simulator windows after CarPlay click ==="
-          cat > /tmp/winenum.swift <<'SWIFT'
-import CoreGraphics
-import Foundation
-let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-if let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] {
-    for w in list {
-        guard let owner = w[kCGWindowOwnerName as String] as? String, owner == "Simulator" else { continue }
-        var name = w[kCGWindowName as String] as? String ?? ""
-        let layer = w[kCGWindowLayer as String] as? Int ?? 0
-        let num = w[kCGWindowNumber as String] as? Int ?? 0
-        if let b = w[kCGWindowBounds as String] as? [String: Any] {
-            let x = b["X"] as? Double ?? 0
-            let y = b["Y"] as? Double ?? 0
-            let wd = b["Width"] as? Double ?? 0
-            let ht = b["Height"] as? Double ?? 0
-            print("name=\(name)|layer=\(layer)|id=\(num)|\(Int(x)),\(Int(y))|\(Int(wd)),\(Int(ht))")
-        }
-    }
-}
-SWIFT
-          xcrun swiftc -o /tmp/winenum /tmp/winenum.swift 2>&1 | tail -2
+          xcrun swiftc -o /tmp/winenum scripts/window_enum.swift 2>&1 | tail -2 || true
           /tmp/winenum 2>&1 | tee /tmp/sim_windows.txt
           echo "=== end windows ==="
 
