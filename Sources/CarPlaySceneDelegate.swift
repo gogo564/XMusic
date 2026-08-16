@@ -315,13 +315,27 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     // MARK: - 歌单广场
 
+    /// 服务器首次请求 songList/tags 可能返回空（冷缓存/上游未就绪），自动重试几次自愈。
+    @MainActor
+    private func fetchTagsRetrying(source: String) async -> [(name: String, id: String)] {
+        for attempt in 0..<3 {
+            if let tags = try? await LXAPIClient.shared.getSongListTags(source: source), !tags.isEmpty {
+                return tags
+            }
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+        return []
+    }
+
     private func pushPlaylistTags() {
         guard let controller = interfaceController else { return }
         let template = CPListTemplate(title: "歌单广场", sections: [CPListSection(items: [])])
         template.emptyViewTitleVariants = ["加载中…"]
         controller.pushTemplate(template, animated: true) { [weak self] _, _ in
             Task { @MainActor in
-                let tags = (try? await LXAPIClient.shared.getSongListTags(source: "kw")) ?? []
+                let tags = await self.fetchTagsRetrying(source: "kw")
                 var items = [self?.makeListEntry(
                     title: "推荐",
                     detail: "热门歌单",

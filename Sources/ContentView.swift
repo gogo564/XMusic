@@ -576,7 +576,6 @@ struct HomeView: View {
         squareLoading = true
         async let hot = LXAPIClient.shared.getHotSearch(source: source)
         async let b = LXAPIClient.shared.getLeaderBoards(source: source)
-        async let tags = LXAPIClient.shared.getSongListTags(source: source)
         hotKeywords = await (try? hot) ?? []
         let rawBoards = await (try? b) ?? []
         boards = rawBoards.compactMap { board in
@@ -586,8 +585,22 @@ struct HomeView: View {
             return nil
         }
         isLoadingBoards = false
-        squareTags = await (try? tags) ?? []
+        squareTags = await fetchTagsRetrying(source: source)
         await loadSquare(tagID: selectedTagID)
+    }
+
+    /// 服务器首次请求 songList/tags 可能返回空（冷缓存/上游未就绪），自动重试几次自愈。
+    @MainActor
+    private func fetchTagsRetrying(source: String) async -> [(name: String, id: String)] {
+        for attempt in 0..<3 {
+            if let tags = try? await LXAPIClient.shared.getSongListTags(source: source), !tags.isEmpty {
+                return tags
+            }
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+        return []
     }
 
     @MainActor
