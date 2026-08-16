@@ -93,13 +93,12 @@ jobs:
             end tell' 2>&1 | tee /tmp/menu_tree.txt
           echo "=== end menu tree ==="
 
-          # 动态查找 CarPlay 菜单项并点击（多个兜底路径）
+          # 动态查找 CarPlay 菜单项并点击（菜单树诊断确认：I/O > External Displays > CarPlay…，注意省略号）
           for script in \
+            'click menu item "CarPlay…" of menu 1 of menu item "External Displays" of menu 1 of menu bar item "I/O" of menu bar 1' \
             'click menu item "CarPlay" of menu 1 of menu item "External Displays" of menu 1 of menu bar item "I/O" of menu bar 1' \
-            'click menu item "CarPlay" of menu 1 of menu item "External Displays" of menu 1 of menu bar item "Hardware" of menu bar 1' \
-            'click menu item "CarPlay" of menu 1 of menu item "Display" of menu 1 of menu bar item "I/O" of menu bar 1' \
-            'click menu item "CarPlay" of menu 1 of menu bar item "I/O" of menu bar 1' \
-            'click menu item "CarPlay" of menu 1 of menu bar item "Hardware" of menu bar 1'; do
+            'click menu item "CarPlay…" of menu 1 of menu item "External Displays" of menu 1 of menu bar item "Hardware" of menu bar 1' \
+            'click menu item "External Displays" of menu 1 of menu bar item "I/O" of menu bar 1'; do
             osascript -e "tell application \"System Events\" to tell process \"Simulator\" to try
             $script
             end try" 2>&1 | grep -v "^$" || true

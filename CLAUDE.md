@@ -11,6 +11,11 @@
 
 XMusic 是一个基于 SwiftUI / AVFoundation 的 iOS 音乐播放器（fork 自 primitiver/xmusic），已改写为对接用户自己的 lx-sync-server（局域网音乐同步服务器）。支持核心播放、下载、以及服务器歌单同步（/api/data 的 defaultList / loveList / userList）。**最低支持 iOS 15.0，不使用 SwiftData（其仅 iOS 17+），最近播放用 UserDefaults 持久化。**
 
+## 服务器地址（用户提供）
+- 服务器外网地址：`gogo564.x3322.net:9527`
+- 汽水音源：`gogo564.x3322.net:3310`
+- （模拟器里配置的内网地址 `192.168.1.85:9527` 是旧的，已过期）
+
 ## 构建命令
 
 - **构建**：`xcodebuild -project XMusic.xcodeproj -scheme XMusic -configuration Debug build`
