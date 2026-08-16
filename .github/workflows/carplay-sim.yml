@@ -191,6 +191,9 @@ jobs:
 
           # 编译 CGEvent 点击工具（无需辅助功能权限，比 System Events click at 可靠）
           xcrun swiftc -o /tmp/window_click scripts/window_click.swift 2>&1 | tail -2 || true
+          # 准备 park 脚本（移动手机窗口 + AXRaise CarPlay）
+          cp scripts/park.sh /tmp/park.sh 2>&1 && chmod +x /tmp/park.sh
+          xcrun swiftc -o /tmp/winenum scripts/window_enum.swift 2>&1 | tail -2 || true
 
           # 在 CarPlay 主屏上点击 XMusic 图标（用户确认：左下第一格，4列x2行）。
           # CarPlay 窗口是宽屏（宽高比 ~1.5），手机窗口是竖屏（~0.45）——用宽高比识别。
@@ -221,60 +224,56 @@ jobs:
             isCarPlay=0
             awk "BEGIN{exit !($aspect >= 1.0)}" && isCarPlay=1
             if [ "$isCarPlay" = "1" ]; then
-              echo "  -> CarPlay window (wide). Raising CarPlay & parking phone window away."
-              # 根因：手机窗口(约302x668@361,29)完全覆盖CarPlay窗口(400x268@390,58)，
-              # 且CGEvent注入点击不会提升窗口z-order，导致点击都落在手机窗口上。
-              # 双修复：(1) 用AX把手机窗口移开到左下角(不与CarPlay重叠)；
-              #           (2) 用AX-Raise把CarPlay窗口置顶。
-              osascript -e '
-                tell application "Simulator" to activate
-                delay 1
-                tell application "System Events" to tell process "Simulator"
-                  set moved to false
-                  repeat with w in windows
-                    try
-                      if (name of w) contains "CarPlay" then
-                        perform action "AXRaise" of w
-                      else if (size of w) is not missing value then
-                        set s to size of w
-                        if (item 1 of s) < (item 2 of s) then
-                          set position of w to {20, 120}
-                          set moved to true
-                        end if
-                      end if
-                    end try
-                  end repeat
-                  return "phone-window-moved: " & moved
-                end tell' 2>&1 | tail -1 || true
+              echo "  -> CarPlay window found at $pos (${w}x${h}). Parking phone & raising CarPlay."
+              /tmp/park.sh "$x" "$y" "$w" "$h" 2>&1 | tail -2
               sleep 2
-              # 兜底：CGEvent 点击右缘可见区尝试激活（注入点击通常仅聚焦窗口而非置顶）
-              actx=$((x + w - 25)); acty=$((y + h / 2))
-              echo "  -> fallback CGEvent activation click at ($actx,$acty)"
-              /tmp/window_click "$actx" "$acty" 2>&1 | tail -1
-              sleep 1
-              # 首选：用户对照截图确认的 XMusic 图标坐标 (440,255)
-              echo "  -> Now first clicking XMusic at user-confirmed (440,255)."
-              trypoint 440 255
-              # 邻近兜底：围绕 (440,255) 半径约 14px 偏移
+              # 重新枚举窗口：读取移动后的最新位置
+              echo "=== windows after park (live) ==="
+              /tmp/winenum > /tmp/sim_windows2.txt 2>/dev/null || true
+              cat /tmp/sim_windows2.txt
+              newx=; newy=
+              while IFS='|' read -r n2 l2 i2 p2 d2; do
+                px=$(echo "$p2" | cut -d= -f2 | cut -d, -f1); py=$(echo "$p2" | cut -d= -f2 | cut -d, -f2)
+                w2=$(echo "$d2" | cut -d, -f1 | tr -d '\r'); h2=$(echo "$d2" | cut -d, -f2 | tr -d '\r')
+                [ "$w2" -lt 200 ] 2>/dev/null && continue
+                [ "$h2" -lt 150 ] 2>/dev/null && continue
+                [ "$(echo "$l2" | cut -d= -f2)" != "0" ] && continue
+                a2=$(awk "BEGIN{printf \"%.2f\", $w2/$h2}")
+                if awk "BEGIN{exit !($a2 >= 1.0)}"; then
+                  newx=$px; newy=$py; neww=$w2; newh=$h2
+                  break
+                fi
+              done < /tmp/sim_windows2.txt
+              # 若移动后 CarPlay 仍定位，用新坐标；否则退回旧 x,y
+              echo "  -> live CarPlay pos: ${newx:-$x},${newy:-$y}"
+              cxp=${newx:-$x}; cyp=${newy:-$y}; cw=${neww:-$w}; ch=${newh:-$h}
+              # 首选：CarPlay 窗口内相对坐标（用户之前确认图标=左下第一格，中心约 18%,75%）
+              echo "  -> First clicking XMusic at relative center (18%,75%) => $((cxp + cw*18/100)),$((cyp + ch*75/100))"
+              trypoint $((cxp + cw*18/100)) $((cyp + ch*75/100))
+              # 邻近兜底
+              [ "$found" = "1" ] && continue
               for dx in -14 14; do
                 for dy in -14 14; do
-                  trypoint $((440+dx)) $((255+dy))
+                  trypoint $((cxp + cw*18/100 + dx)) $((cyp + ch*75/100 + dy))
                   [ "$found" = "1" ] && break 2
                 done
               done
-              # 若未命中，4x2 全格扫描
+              # 保留用户确认的绝对坐标 (440,255) 作兜底（若手机窗口从未移动，此值仍对准）
+              [ "$found" = "1" ] && continue
+              trypoint 440 255
+              # 4x2 全格扫描
               [ "$found" = "1" ] && continue
               for fy in 25 75; do
                 for fx in 12 38 63 88; do
-                  trypoint $(( x + w * fx / 100 )) $(( y + h * fy / 100 ))
+                  trypoint $(( cxp + cw * fx / 100 )) $(( cyp + ch * fy / 100 ))
                   [ "$found" = "1" ] && break 2
                 done
               done
-              # 兜底：更密的网格（含中间行与中间列）
+              # 兜底：更密的网格
               [ "$found" = "1" ] && continue
               for fy in 15 35 55 75 90; do
                 for fx in 8 25 42 58 75 92; do
-                  trypoint $(( x + w * fx / 100 )) $(( y + h * fy / 100 ))
+                  trypoint $(( cxp + cw * fx / 100 )) $(( cyp + ch * fy / 100 ))
                   [ "$found" = "1" ] && break 2
                 done
               done
