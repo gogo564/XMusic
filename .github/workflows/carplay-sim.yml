@@ -154,30 +154,37 @@ jobs:
           echo "=== candidate windows ==="
           cat /tmp/sim_windows.txt
 
-          # 在 CarPlay 主屏上网格扫描点击 app 图标，直到日志出现 didConnect
-          # CarPlay 主屏图标网格：第一个 app（XMusic）通常在左上区域
+          # 在 CarPlay 主屏上点击 app 图标，直到日志出现 didConnect。
+          # 用户确认：主屏一页 8 图标（4列×2行），XMusic 图标在左下角第一个。
+          # 因此首选左下第一格（fx≈0.18/fy≈0.75），再全格扫描兜底。
           found=0
+          trypoint() {
+            cx=$1; cy=$2
+            osascript -e "tell application \"System Events\" to click at {${cx}, ${cy}}" 2>/dev/null || true
+            sleep 1
+            if grep -q "didConnect" "$LOGFILE" 2>/dev/null; then
+              echo "SUCCESS: didConnect detected after click at ($cx,$cy)"
+              found=1
+            fi
+          }
           while IFS='|' read -r _name _layer _id pos dims; do
+            [ "$found" = "1" ] && break
             pos=$(echo "$pos" | cut -d= -f2)
             x=$(echo "$pos" | cut -d, -f1); y=$(echo "$pos" | cut -d, -f2)
             w=$(echo "$dims" | cut -d, -f1); h=$(echo "$dims" | cut -d, -f2)
             w=${w%$'\r'}; h=${h%$'\r'}
             [ "$w" -lt 200 ] 2>/dev/null && continue
             [ "$h" -lt 150 ] 2>/dev/null && continue
-            # 只点普通窗口（layer=0），跳过菜单栏/系统层
             layer=$(echo "$_layer" | cut -d= -f2)
             echo "Trying window: layer=$layer pos=$pos dims=$w x $h"
-            for fy in 0.15 0.25 0.35 0.45 0.55; do
-              for fx in 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8; do
-                # cx = x + int(w*fx/100), cy = y + int(h*fy/100)
-                cx=$(( x + w * fx / 100 )); cy=$(( y + h * fy / 100 ))
-                osascript -e "tell application \"System Events\" to click at {${cx}, ${cy}}" 2>/dev/null || true
-                sleep 1
-                if grep -q "didConnect" "$LOGFILE" 2>/dev/null; then
-                  echo "SUCCESS: didConnect detected after click at ($cx,$cy)"
-                  found=1
-                  break 2
-                fi
+            # 首选：左下第一格（CarPlay 8图标网格，XMusic 所在）
+            trypoint $(( x + w * 18 / 100 )) $(( y + h * 75 / 100 ))
+            [ "$found" = "1" ] && continue
+            # 兜底：全格扫描（4列x2行 + 若干中间行）
+            for fy in 0.25 0.5 0.75; do
+              for fx in 0.18 0.43 0.68 0.93; do
+                trypoint $(( x + w * fx / 100 )) $(( y + h * fy / 100 ))
+                [ "$found" = "1" ] && break 2
               done
             done
           done < /tmp/sim_windows.txt
