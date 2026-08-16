@@ -37,7 +37,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section(header: Text("服务器")) {
-                TextField("地址（如 http://192.168.1.85:9527）", text: $baseURL)
+                TextField("地址（如 http://gogo564.x3322.net:9527）", text: $baseURL)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
                 TextField("用户名", text: $username)
@@ -51,7 +51,7 @@ struct SettingsView: View {
                     .autocapitalization(.none)
             }
             Section(header: Text("汽水音乐服务")) {
-                TextField("汽水服务地址（如 http://192.168.1.85:3310）", text: $sodaBaseURL)
+                TextField("汽水服务地址（如 http://gogo564.x3322.net:3310）", text: $sodaBaseURL)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
                 Text("清空则隐藏汽水源；推荐/电台/播放均通过该服务。")
