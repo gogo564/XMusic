@@ -17,13 +17,15 @@ jobs:
       - name: Generate xcodeproj with XcodeGen
         run: xcodegen generate --project . 2>&1
 
-      - name: Build for simulator (unsigned)
+      - name: Build for simulator (Xcode ad-hoc signed)
         run: |
           LOG=$(mktemp)
+          # 模拟器目标让 Xcode 自己签名（ad-hoc + 自动嵌入 CODE_SIGN_ENTITLEMENTS），
+          # 不要 CODE_SIGNING_ALLOWED=NO —— 那会产出未签名包，simctl launch 会被 SBMainWorkspace 拒绝。
           xcodebuild -project XMusic.xcodeproj -scheme XMusic \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath /tmp/simdd \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
             build 2>&1 | tee "$LOG"
           RC=${PIPESTATUS[0]}
           gzip "$LOG" && mv "$LOG.gz" /tmp/sim_build_log.gz
@@ -54,38 +56,47 @@ jobs:
             echo "ERROR: no .app found"
             exit 1
           fi
-          brew install ldid >/dev/null 2>&1 || true
-          BIN="$APP/XMusic"
-          if [ -f "$BIN" ]; then
-            ldid -SXMusic.entitlements "$BIN"
-            echo "Signed with ldid + entitlements"
-          fi
+          # 模拟器构建保持 Xcode 签名（CODE_SIGNING_ALLOWED=NO 时用 ad-hoc）。
+          # 注意：不在模拟器上用 ldid 重签——ldid 签名会让模拟器拒绝启动（SBMainWorkspace）。
           xcrun simctl install "$DEVICE" "$APP"
           echo "Installed."
 
       - name: Enable CarPlay and open external display
         run: |
-          # 打开 CarPlay 外接屏：旧版用 defaults + 菜单，新版经 AppleScript 点击 I/O > External Displays > CarPlay
+          # 新版（Xcode 15+）模拟器：CarPlay 在 I/O > External Displays > CarPlay。
+          # 旧版在 Hardware > External Displays。AppleScript 需辅助功能权限，CI 无 GUI 交互时可能失败——
+          # 失败不致命，下面是多路径重试 + 直接改 plist 兜底。
           defaults write com.apple.iphonesimulator CarPlay -bool YES
           defaults write com.apple.iphonesimulator CarPlayExtraOptions -bool YES
           open -a Simulator 2>&1
           sleep 8
-          # 用 AppleScript 走系统菜单打开 CarPlay 窗口
-          osascript -e '
-            tell application "Simulator" to activate
-            delay 1
-            tell application "System Events"
-              tell process "Simulator"
-                click menu item "CarPlay" of menu 1 of menu item "External Displays" of menu 1 of menu bar item "I/O" of menu bar 1
-              end tell
-            end tell' 2>&1 || echo "AppleScript click failed (fallback to defaults only)"
-          sleep 5
+          # 尝试多种菜单路径
+          for path in "I/O" "Hardware"; do
+            osascript -e "
+              tell application \"Simulator\" to activate
+              delay 1
+              tell application \"System Events\"
+                tell process \"Simulator\"
+                  try
+                    click menu item \"CarPlay\" of menu 1 of menu item \"External Displays\" of menu 1 of menu bar item \"$path\" of menu bar 1
+                  end try
+                end tell
+              end tell" 2>&1 | grep -v "^$" || true
+            sleep 2
+          done
+          echo "CarPlay menu attempt done (best-effort)."
+          sleep 3
 
       - name: Launch app and wait
         run: |
           DEVICE=$(cat /tmp/device_udid)
-          xcrun simctl launch "$DEVICE" xmusic.XMusic 2>&1 || echo "launch failed (device non-interactive, will retry via open)"
-          sleep 25
+          # 等 SpringBoard 完全就绪再启动，避免 SBMainWorkspace 拒绝
+          xcrun simctl bootstatus "$DEVICE" -b 2>&1 | tail -1
+          sleep 3
+          xcrun simctl install "$DEVICE" "$(find /tmp/simdd/Build/Products -name XMusic.app -type d | head -1)" 2>&1 || true
+          # 前台启动（-f 强制前台），并打印返回码
+          xcrun simctl launch --terminate-running-process "$DEVICE" xmusic.XMusic 2>&1 || echo "LAUNCH_RC=$?"
+          sleep 30
 
       - name: Screenshot CarPlay window
         run: |
@@ -96,8 +107,9 @@ jobs:
           # 整屏截图（含 CarPlay 窗口）
           screencapture -x /tmp/artifacts/full_screen.png 2>&1 || echo "screencapture failed"
           ls -la /tmp/artifacts/
-          # 应用沙盒日志
+          # 应用沙盒日志（Log.write 专用通道，比 unified log 可靠）
           CONTAINER=$(xcrun simctl get_app_container "$DEVICE" xmusic.XMusic data 2>/dev/null || true)
+          echo "Container: $CONTAINER"
           if [ -n "$CONTAINER" ] && [ -f "$CONTAINER/Documents/xmusic.log" ]; then
             cp "$CONTAINER/Documents/xmusic.log" /tmp/artifacts/xmusic.log
             echo "=== xmusic.log ==="
@@ -106,7 +118,13 @@ jobs:
             echo "No xmusic.log found; grabbing unified log instead"
           fi
           # 统一日志（CarPlay 相关）
-          xcrun simctl spawn "$DEVICE" log show --last 2m --predicate 'process == "XMusic"' 2>/dev/null | tail -80 > /tmp/artifacts/unified_log.txt || true
+          xcrun simctl spawn "$DEVICE" log show --last 3m --predicate 'process == "XMusic" OR eventMessage CONTAINS "CarPlay"' 2>/dev/null | tail -120 > /tmp/artifacts/unified_log.txt || true
+          # 崩溃报告
+          mkdir -p /tmp/artifacts/crashes
+          cp -R "$HOME/Library/Logs/DiagnosticReports/"*XMusic* /tmp/artifacts/crashes/ 2>/dev/null || true
+          ls -la /tmp/artifacts/crashes/ 2>/dev/null || true
+          # 已安装 app 列表（确认 bundle id 与场景注册）
+          xcrun simctl listapps "$DEVICE" 2>/dev/null | grep -A5 -i xmusic || echo "no xmusic in listapps"
 
       - name: Upload artifacts
         if: always()
