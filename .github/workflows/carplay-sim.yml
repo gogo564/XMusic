@@ -146,15 +146,34 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b 2>&1 | tail -1
           sleep 3
           xcrun simctl install "$DEVICE" "$(find /tmp/simdd/Build/Products -name XMusic.app -type d | head -1)" 2>&1 || true
-          # 注入自动登录开关：配置页 onAppear 会自动点“测试连接并登录”，确保手机端登录成功
-          xcrun simctl spawn "$DEVICE" defaults write xmusic.XMusic autoLoginOnLaunch -bool true 2>&1 || true
           # 前台启动（-f 强制前台），并打印返回码
           xcrun simctl launch --terminate-running-process "$DEVICE" xmusic.XMusic 2>&1 || echo "LAUNCH_RC=$?"
-          # 给自动登录 + 歌单刷新留时间（未注入前传统流程是等 30s）
-          sleep 45
-          # 验证登录结果：读 token 是否已写入 UserDefaults
+          sleep 15
+
+      - name: Phone screen - scroll to bottom and tap Test-Connection login
+        run: |
+          DEVICE=$(cat /tmp/device_udid)
+          # 编译滚动 + 点击工具
+          xcrun swiftc -o /tmp/window_scroll scripts/window_scroll.swift 2>&1 | tail -2 || true
+          xcrun swiftc -o /tmp/window_click scripts/window_click.swift 2>&1 | tail -2 || true
+          ls -la /tmp/window_scroll /tmp/window_click 2>&1 || true
+
+          # 配置页在手机窗口（竖屏，用户确认按钮坐标 ~500,538）。
+          # 列表较长，需先滚动到底部让“测试连接并登录”可见。
+          # 手机窗口中心约 (512, 330)；在其上滚动 6 次。
+          for i in 1 2 3 4 5 6; do
+            /tmp/window_scroll 512 330 -20 2>&1 | tail -1
+            sleep 1
+          done
+
+          # 点“测试连接并登录”（用户确认坐标 ~500,538）
+          /tmp/window_click 500 538 2>&1 | tail -1
+          # 再留时间等 login + 歌单刷新
+          sleep 20
+
+          # 验证登录：token 是否写入
           echo "=== login token check ==="
-          xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>&1 | head -c 200 || echo "NO TOKEN"
+          xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>&1 | head -c 120 || echo "NO TOKEN"
           echo ""
 
       - name: Click XMusic icon on CarPlay home screen
