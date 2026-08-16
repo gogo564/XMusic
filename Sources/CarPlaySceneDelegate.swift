@@ -116,7 +116,10 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private func ensureAudioSessionActive() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.allowAirPlay, .allowBluetooth])
+            // 注意：.allowBluetooth 只对 playAndRecord/record 类别有效，配 .playback 会抛
+            // kAudioSessionUnspecifiedError('what')，导致激活失败 -> scene 被系统切后台 -> 黑屏。
+            // 与 PlayerManager 手机端一致的配置（playback + 无 options）已验证可用。
+            try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
             // CarPlay 音频 app 需要接收远程控制事件，否则车机不认为它是活跃的音频 app
             UIApplication.shared.beginReceivingRemoteControlEvents()

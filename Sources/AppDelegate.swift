@@ -36,11 +36,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         )
     }
 
-    // CarPlay 音频 App 必须有 playback 类别 + 激活，否则车机不显示/无响应
+    // CarPlay 音频 App 必须有 playback 类别 + 激活，否则车机不显示/无响应。
+    // .allowBluetooth 只对 playAndRecord/record 有效，配 .playback 会抛 kAudioSessionUnspecifiedError。
     private func configureAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.allowAirPlay, .allowBluetooth])
+            try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
         } catch {
             NSLog("AppDelegate AVAudioSession configure error: \(error)")
