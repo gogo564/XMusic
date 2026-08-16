@@ -268,6 +268,12 @@ struct SettingsView: View {
                 .allowsHitTesting(false)
         }
         .onAppear(perform: load)
+        .onAppear {
+            // CI 注入开关：配置页出现即自动执行“测试连接并登录”，避免 UI 坐标点击不可靠
+            if UserDefaults.standard.bool(forKey: "autoLoginOnLaunch") && AppConfigStore.shared.token == nil {
+                Task { await testConnection() }
+            }
+        }
         .onChange(of: quality) { newQ in
             var cfg = AppConfigStore.shared.config
             cfg.defaultQuality = newQ
