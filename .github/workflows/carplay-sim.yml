@@ -221,8 +221,16 @@ jobs:
             isCarPlay=0
             awk "BEGIN{exit !($aspect >= 1.0)}" && isCarPlay=1
             if [ "$isCarPlay" = "1" ]; then
-              echo "  -> CarPlay window (wide). First clicking XMusic at user-confirmed (440,255)."
+              echo "  -> CarPlay window (wide). Bringing it to front first."
+              # 手机窗口(大致 pos 361,29 尺寸302x668)覆盖 CarPlay 左侧。
+              # 点击 CarPlay 窗口右缘未被遮挡的可见区 x≈x+w-25, y≈y+h/2,
+              # 该点击会激活并把 CarPlay 窗口前置，之后坐标才真正落在 CarPlay 主屏。
+              actx=$((x + w - 25)); acty=$((y + h / 2))
+              echo "  -> pre-click activation at ($actx,$acty) to raise CarPlay window"
+              /tmp/window_click "$actx" "$acty" 2>&1 | tail -1
+              sleep 2
               # 首选：用户对照截图确认的 XMusic 图标坐标 (440,255)
+              echo "  -> CarPlay raised. First clicking XMusic at user-confirmed (440,255)."
               trypoint 440 255
               # 邻近兜底：围绕 (440,255) 半径约 14px 偏移
               for dx in -14 14; do
