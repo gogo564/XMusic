@@ -169,8 +169,10 @@ jobs:
           found=0
           trypoint() {
             cx=$1; cy=$2
-            osascript -e "tell application \"System Events\" to click at {${cx}, ${cy}}" 2>/dev/null || true
-            sleep 1
+            local err
+            err=$(osascript -e "tell application \"System Events\" to click at {${cx}, ${cy}}" 2>&1 || true)
+            echo "click($cx,$cy) -> ${err:-ok}"
+            sleep 2
             if grep -q "didConnect" "$LOGFILE" 2>/dev/null; then
               echo "SUCCESS: didConnect detected after click at ($cx,$cy)"
               found=1
@@ -192,19 +194,24 @@ jobs:
             isCarPlay=0
             awk "BEGIN{exit !($aspect >= 1.0)}" && isCarPlay=1
             if [ "$isCarPlay" = "1" ]; then
-              echo "  -> CarPlay window (wide). Clicking XMusic at bottom-left."
-              # XMusic 图标：左下第一格 (fx≈18%, fy≈75%)
-              trypoint $(( x + w * 18 / 100 )) $(( y + h * 75 / 100 ))
+              echo "  -> CarPlay window (wide). Scanning 4x2 icon grid."
+              # CarPlay 主屏 4列x2行图标网格：行中心 y≈25%/75%，列中心 x≈12%/38%/63%/88%
+              for fy in 25 75; do
+                for fx in 12 38 63 88; do
+                  trypoint $(( x + w * fx / 100 )) $(( y + h * fy / 100 ))
+                  [ "$found" = "1" ] && break 2
+                done
+              done
+              # 兜底：更密的网格（含中间行与中间列）
               [ "$found" = "1" ] && continue
-              # 兜底：4x2 全格扫描
-              for fx in 18 43 68 93; do
-                for fy in 25 75; do
+              for fy in 15 35 55 75 90; do
+                for fx in 8 25 42 58 75 92; do
                   trypoint $(( x + w * fx / 100 )) $(( y + h * fy / 100 ))
                   [ "$found" = "1" ] && break 2
                 done
               done
             else
-              # 手机竖屏窗口也兜底试一次左下第一格
+              # 手机竖屏窗口也兜底试一次
               trypoint $(( x + w * 18 / 100 )) $(( y + h * 75 / 100 ))
             fi
           done < /tmp/sim_windows.txt
