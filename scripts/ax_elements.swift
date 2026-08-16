@@ -1,9 +1,9 @@
 import ApplicationServices
+import AppKit
 import Foundation
 
-// 用法: ax_elements <pid_或_app名>
-// 遍历指定进程(默认 Simulator)的 AX 树，输出所有按钮/图标的标题与坐标。
-// 用于定位 CarPlay 主屏窗口内真实的 app 图标按钮坐标（替代盲猜像素）。
+// 用法: ax_elements <进程名>
+// 遍历指定进程的 AX 树，输出所有按钮/图标的标题与坐标。
 let target = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "Simulator"
 
 func element(_ el: AXUIElement, _ attr: String) -> AnyObject? {
@@ -48,16 +48,16 @@ func walk(_ el: AXUIElement, _ depth: Int, _ path: String) {
     }
 }
 
-// 查找进程
-func pidFor(_ name: String) -> pid_t? {
-    let apps = NSWorkspace.shared.runningApplications
-    for app in apps where app.localizedName == name || app.bundleIdentifier?.contains(name) == true {
-        return app.processIdentifier
+var pid: pid_t = -1
+for app in NSWorkspace.shared.runningApplications {
+    let nm = app.localizedName ?? ""
+    let bid = app.bundleIdentifier ?? ""
+    if nm == target || bid.lowercased().contains(target.lowercased()) {
+        pid = app.processIdentifier
+        break
     }
-    return nil
 }
-
-guard let pid = pidFor(target) else {
+guard pid != -1 else {
     print("no process: \(target)")
     exit(1)
 }
