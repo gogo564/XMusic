@@ -107,22 +107,30 @@ jobs:
           echo "CarPlay click attempts done."
 
           sleep 3
-          # 诊断：点击 CarPlay 后枚举 Simulator 全部窗口（名字/位置/尺寸），确认外部显示窗口存在
+          # 诊断：列出全部 Simulator 窗口（用 CGWindowList，不依赖辅助功能，无 AppleEvent 超时问题）
           echo "=== Simulator windows after CarPlay click ==="
-          osascript -e '
-            tell application "Simulator" to activate
-            delay 1
-            tell application "System Events" to tell process "Simulator"
-              set out to ""
-              repeat with w in windows
-                try
-                  set {px, py} to position of w
-                  set {sw, sh} to size of w
-                  set out to out & (name of w) & "|" & px & "," & py & "|" & sw & "," & sh & linefeed
-                end try
-              end repeat
-              return out
-            end tell' 2>&1 | tee /tmp/sim_windows.txt
+          cat > /tmp/winenum.swift <<'SWIFT'
+import CoreGraphics
+import Foundation
+let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+if let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] {
+    for w in list {
+        guard let owner = w[kCGWindowOwnerName as String] as? String, owner == "Simulator" else { continue }
+        var name = w[kCGWindowName as String] as? String ?? ""
+        let layer = w[kCGWindowLayer as String] as? Int ?? 0
+        let num = w[kCGWindowNumber as String] as? Int ?? 0
+        if let b = w[kCGWindowBounds as String] as? [String: Any] {
+            let x = b["X"] as? Double ?? 0
+            let y = b["Y"] as? Double ?? 0
+            let wd = b["Width"] as? Double ?? 0
+            let ht = b["Height"] as? Double ?? 0
+            print("name=\(name)|layer=\(layer)|id=\(num)|\(Int(x)),\(Int(y))|\(Int(wd)),\(Int(ht))")
+        }
+    }
+}
+SWIFT
+          xcrun swiftc -o /tmp/winenum /tmp/winenum.swift 2>&1 | tail -2
+          /tmp/winenum 2>&1 | tee /tmp/sim_windows.txt
           echo "=== end windows ==="
 
       - name: Launch app and wait
@@ -144,21 +152,23 @@ jobs:
           # 先清空日志基线，方便精确判断 didConnect 是否出现
           : > "$LOGFILE" 2>/dev/null || true
 
-          # 解析 Simulator 窗口列表，取非手机的 CarPlay 外部显示窗口
-          # 格式: 名字|x,y|w,h
+          # 解析窗口列表（CGWindowList 格式: name=..|layer=N|id=N|x,y|w,h）
           echo "=== candidate windows ==="
           cat /tmp/sim_windows.txt
 
           # 在 CarPlay 主屏上网格扫描点击 app 图标，直到日志出现 didConnect
           # CarPlay 主屏图标网格：第一个 app（XMusic）通常在左上区域
           found=0
-          while IFS='|' read -r name pos dims; do
-            [ -z "$name" ] && continue
+          while IFS='|' read -r _name _layer _id pos dims; do
+            pos=$(echo "$pos" | cut -d= -f2)
             x=$(echo "$pos" | cut -d, -f1); y=$(echo "$pos" | cut -d, -f2)
             w=$(echo "$dims" | cut -d, -f1); h=$(echo "$dims" | cut -d, -f2)
-            [ "$w" -lt 200 ] && continue
-            echo "Trying window: $name ($w x $h at $x,$y)"
-            # 候选网格点：图标行区域（高度 10%~45%），每一格都试，点完即查日志
+            w=${w%$'\r'}; h=${h%$'\r'}
+            [ "$w" -lt 200 ] 2>/dev/null && continue
+            [ "$h" -lt 150 ] 2>/dev/null && continue
+            # 只点普通窗口（layer=0），跳过菜单栏/系统层
+            layer=$(echo "$_layer" | cut -d= -f2)
+            echo "Trying window: layer=$layer pos=$pos dims=$w x $h"
             for fy in 0.15 0.25 0.35 0.45 0.55; do
               for fx in 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8; do
                 # cx = x + int(w*fx/100), cy = y + int(h*fy/100)
@@ -194,8 +204,8 @@ jobs:
           else
             echo "No xmusic.log found; grabbing unified log instead"
           fi
-          # 统一日志（CarPlay 相关）
-          xcrun simctl spawn "$DEVICE" log show --last 3m --predicate 'process == "XMusic" OR eventMessage CONTAINS "CarPlay"' 2>/dev/null | tail -120 > /tmp/artifacts/unified_log.txt || true
+          # 统一日志（CarPlay 框架 + XMusic 进程全输出）
+          xcrun simctl spawn "$DEVICE" log show --last 3m --predicate 'process == "XMusic" OR subsystem == "com.apple.CarPlay" OR subsystem CONTAINS "carkit" OR eventMessage CONTAINS "CarPlay"' 2>/dev/null | tail -200 > /tmp/artifacts/unified_log.txt || true
           # 崩溃报告
           mkdir -p /tmp/artifacts/crashes
           cp -R "$HOME/Library/Logs/DiagnosticReports/"*XMusic* /tmp/artifacts/crashes/ 2>/dev/null || true
