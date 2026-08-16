@@ -1,19 +1,11 @@
 import CarPlay
 import UIKit
-import AVFoundation
 
 @MainActor
-final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPInterfaceControllerDelegate {
+final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
 
     private var interfaceController: CPInterfaceController?
     private var rootTemplate: CPListTemplate?
-    private var rootDidAppear = false
-    private var sceneIsActive = false
-    // iOS 15 上模板切换动画进行中再次 setRootTemplate 会打断切换，导致 templateDidAppear 永不触发
-    // （黑屏）。因此重试必须是低频率单次重设，而不是 0.5s 无限轰炸。
-    private var lastRootSetAttempt: Date = .distantPast
-    private let rootSetMaxAttempts = 3
-    private var rootSetAttempts = 0
 
     nonisolated private func log(_ message: String) {
         Log.write("[CarPlay] \(message)")
@@ -27,36 +19,15 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     ) {
         log("didConnect")
         self.interfaceController = interfaceController
-        interfaceController.delegate = self
-        // CarPlay 音频 app：连接即确保 audio session 激活 + 接收远程控制事件，
-        // 否则系统可能在 scene 激活后立即把它切回后台（黑屏）。
-        ensureAudioSessionActive()
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
-        // iOS 15 上 setRootTemplate completion 不回调，不能用 topTemplate/completion 判断成功。
-        // 模板必须被强引用持有（rootTemplate 属性），否则系统会释放 -> 黑屏。
-        rootDidAppear = false
-        rootSetAttempts = 0
-        lastRootSetAttempt = .distantPast
+        // 关键：只在连接时设置一次，不要在 scene 生命周期里重设——
+        // 每次 sceneDidBecomeActive 再 setRootTemplate 会打断系统已完成的呈现。
         buildRootTemplate(placeholder: true)
         Task { @MainActor in
             log("loading data")
             await PlaylistStore.shared.refresh()
             log("data loaded, updating root")
             buildRootTemplate(placeholder: false)
-        }
-    }
-
-    // MARK: - CPInterfaceControllerDelegate
-
-    // iOS 15 上接口控制器的布尔回调不可靠，用模板生命周期回调判断根模板是否真正呈现。
-    func templateWillAppear(_ aTemplate: CPTemplate, animated: Bool) {
-        log("templateWillAppear type=\(type(of: aTemplate))")
-    }
-
-    func templateDidAppear(_ aTemplate: CPTemplate, animated: Bool) {
-        log("templateDidAppear type=\(type(of: aTemplate)) isRoot=\(aTemplate === rootTemplate)")
-        if aTemplate === rootTemplate {
-            rootDidAppear = true
         }
     }
 
@@ -67,56 +38,22 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         log("didDisconnect")
         self.interfaceController = nil
         rootTemplate = nil
-        rootDidAppear = false
-        sceneIsActive = false
-        rootSetAttempts = 0
-        lastRootSetAttempt = .distantPast
     }
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         log("willConnectToSession role=\(session.role.rawValue)")
-        // CarPlay 渲染用模板而非 UIWindow，这里只记录日志，不做 window 创建
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         log("sceneDidBecomeActive role=\(scene.session.role.rawValue)")
-        if scene.session.role == UISceneSession.Role.carTemplateApplication {
-            sceneIsActive = true
-            ensureAudioSessionActive()
-            if !rootDidAppear {
-                log("sceneDidBecomeActive: root not appeared yet, retrying")
-                setRootTemplateAnimatedFalse()
-            }
-        }
-    }
-
-    private func ensureAudioSessionActive() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            // 注意：.allowBluetooth 只对 playAndRecord/record 类别有效，配 .playback 会抛
-            // kAudioSessionUnspecifiedError('what')，导致激活失败 -> scene 被系统切后台 -> 黑屏。
-            // 与 PlayerManager 手机端一致的配置（playback + 无 options）已验证可用。
-            try session.setCategory(.playback, mode: .default)
-            try session.setActive(true)
-            // CarPlay 音频 app 需要接收远程控制事件，否则车机不认为它是活跃的音频 app
-            UIApplication.shared.beginReceivingRemoteControlEvents()
-        } catch {
-            log("ensureAudioSessionActive error: \(error)")
-        }
     }
 
     func sceneWillResignActive(_ scene: UIScene) {
         log("sceneWillResignActive role=\(scene.session.role.rawValue)")
-        if scene.session.role == UISceneSession.Role.carTemplateApplication {
-            sceneIsActive = false
-        }
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         log("sceneDidEnterBackground role=\(scene.session.role.rawValue)")
-        if scene.session.role == UISceneSession.Role.carTemplateApplication {
-            sceneIsActive = false
-        }
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
@@ -192,8 +129,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         return items
     }
 
-    // 根模板只创建一次并强引用持有（否则系统会释放 -> 黑屏）。
-    // 数据加载完成/重试时复用同一实例，仅 updateSections 刷新内容。
+    // 根模板只创建一次并强引用持有（iOS 15 上系统可能释放未持有的模板 -> 黑屏），
+    // 数据加载完成时复用同一实例，仅 updateSections 刷新内容。
     private func buildRootTemplate(placeholder: Bool) {
         guard let controller = interfaceController else {
             log("buildRootTemplate skipped: no interfaceController")
@@ -219,25 +156,9 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             log("setRootTemplate skipped: no controller or rootTemplate")
             return
         }
-        let now = Date()
-        guard now.timeIntervalSince(lastRootSetAttempt) >= 2.0 else {
-            log("setRootTemplate throttled (last attempt <2s ago)")
-            return
-        }
-        guard !rootDidAppear else {
-            log("setRootTemplate skipped: root already appeared")
-            return
-        }
-        guard rootSetAttempts < rootSetMaxAttempts else {
-            log("setRootTemplate skipped: max attempts reached (\(rootSetMaxAttempts))")
-            return
-        }
-        lastRootSetAttempt = now
-        rootSetAttempts += 1
-        // animated:false 避免 iOS15 动画阻塞；completion 在 iOS15 上不会回调，不依赖它。
-        // 关键：不能频繁调用——动画进行中再次 setRootTemplate 会打断切换，模板永不呈现。
+        // 与成功案例一致：只在 didConnect 设置一次根模板，不重试、不干预 scene 生命周期。
         controller.setRootTemplate(template, animated: false, completion: nil)
-        log("called setRootTemplate (retained instance) attempt=\(rootSetAttempts)")
+        log("called setRootTemplate (retained instance)")
     }
 
     private func loadingItem() -> CPListItem {
