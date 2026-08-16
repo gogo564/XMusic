@@ -7,9 +7,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     private var interfaceController: CPInterfaceController?
     private var rootTemplate: CPListTemplate?
-    private var retryTimer: Timer?
     private var rootDidAppear = false
     private var sceneIsActive = false
+    // iOS 15 上模板切换动画进行中再次 setRootTemplate 会打断切换，导致 templateDidAppear 永不触发
+    // （黑屏）。因此重试必须是低频率单次重设，而不是 0.5s 无限轰炸。
+    private var lastRootSetAttempt: Date = .distantPast
+    private let rootSetMaxAttempts = 3
+    private var rootSetAttempts = 0
 
     nonisolated private func log(_ message: String) {
         Log.write("[CarPlay] \(message)")
@@ -28,11 +32,12 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         // 否则系统可能在 scene 激活后立即把它切回后台（黑屏）。
         ensureAudioSessionActive()
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
-        buildRootTemplate(placeholder: true)
         // iOS 15 上 setRootTemplate completion 不回调，不能用 topTemplate/completion 判断成功。
         // 模板必须被强引用持有（rootTemplate 属性），否则系统会释放 -> 黑屏。
-        // 强制重试：每 0.5s 检查一次，只要根模板未真正呈现就重设，直到 templateDidAppear 或断开。
-        startRootRetry()
+        rootDidAppear = false
+        rootSetAttempts = 0
+        lastRootSetAttempt = .distantPast
+        buildRootTemplate(placeholder: true)
         Task { @MainActor in
             log("loading data")
             await PlaylistStore.shared.refresh()
@@ -55,45 +60,17 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         }
     }
 
-    private func startRootRetry() {
-        retryTimer?.invalidate()
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
-            Task { @MainActor [weak self] in
-                guard let self else {
-                    timer.invalidate()
-                    return
-                }
-                guard self.interfaceController != nil else {
-                    timer.invalidate()
-                    return
-                }
-                guard self.sceneIsActive, !self.rootDidAppear else {
-                    // scene 未激活时设根模板无意义，跳过；active 且已出现则停表。
-                    if self.rootDidAppear {
-                        self.log("root appeared, stopping retry")
-                        timer.invalidate()
-                    }
-                    return
-                }
-                self.log("retry setRootTemplate rootDidAppear=false")
-                self.setRootTemplateAnimatedFalse()
-            }
-        }
-        retryTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
-    }
-
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
         log("didDisconnect")
-        retryTimer?.invalidate()
-        retryTimer = nil
         self.interfaceController = nil
         rootTemplate = nil
         rootDidAppear = false
         sceneIsActive = false
+        rootSetAttempts = 0
+        lastRootSetAttempt = .distantPast
     }
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
@@ -242,9 +219,25 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             log("setRootTemplate skipped: no controller or rootTemplate")
             return
         }
+        let now = Date()
+        guard now.timeIntervalSince(lastRootSetAttempt) >= 2.0 else {
+            log("setRootTemplate throttled (last attempt <2s ago)")
+            return
+        }
+        guard !rootDidAppear else {
+            log("setRootTemplate skipped: root already appeared")
+            return
+        }
+        guard rootSetAttempts < rootSetMaxAttempts else {
+            log("setRootTemplate skipped: max attempts reached (\(rootSetMaxAttempts))")
+            return
+        }
+        lastRootSetAttempt = now
+        rootSetAttempts += 1
         // animated:false 避免 iOS15 动画阻塞；completion 在 iOS15 上不会回调，不依赖它。
+        // 关键：不能频繁调用——动画进行中再次 setRootTemplate 会打断切换，模板永不呈现。
         controller.setRootTemplate(template, animated: false, completion: nil)
-        log("called setRootTemplate (retained instance)")
+        log("called setRootTemplate (retained instance) attempt=\(rootSetAttempts)")
     }
 
     private func loadingItem() -> CPListItem {
