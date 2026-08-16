@@ -221,16 +221,39 @@ jobs:
             isCarPlay=0
             awk "BEGIN{exit !($aspect >= 1.0)}" && isCarPlay=1
             if [ "$isCarPlay" = "1" ]; then
-              echo "  -> CarPlay window (wide). Bringing it to front first."
-              # 手机窗口(大致 pos 361,29 尺寸302x668)覆盖 CarPlay 左侧。
-              # 点击 CarPlay 窗口右缘未被遮挡的可见区 x≈x+w-25, y≈y+h/2,
-              # 该点击会激活并把 CarPlay 窗口前置，之后坐标才真正落在 CarPlay 主屏。
-              actx=$((x + w - 25)); acty=$((y + h / 2))
-              echo "  -> pre-click activation at ($actx,$acty) to raise CarPlay window"
-              /tmp/window_click "$actx" "$acty" 2>&1 | tail -1
+              echo "  -> CarPlay window (wide). Raising CarPlay & parking phone window away."
+              # 根因：手机窗口(约302x668@361,29)完全覆盖CarPlay窗口(400x268@390,58)，
+              # 且CGEvent注入点击不会提升窗口z-order，导致点击都落在手机窗口上。
+              # 双修复：(1) 用AX把手机窗口移开到左下角(不与CarPlay重叠)；
+              #           (2) 用AX-Raise把CarPlay窗口置顶。
+              osascript -e '
+                tell application "Simulator" to activate
+                delay 1
+                tell application "System Events" to tell process "Simulator"
+                  set moved to false
+                  repeat with w in windows
+                    try
+                      if (name of w) contains "CarPlay" then
+                        perform action "AXRaise" of w
+                      else if (size of w) is not missing value then
+                        set s to size of w
+                        if (item 1 of s) < (item 2 of s) then
+                          set position of w to {20, 120}
+                          set moved to true
+                        end if
+                      end if
+                    end try
+                  end repeat
+                  return "phone-window-moved: " & moved
+                end tell' 2>&1 | tail -1 || true
               sleep 2
+              # 兜底：CGEvent 点击右缘可见区尝试激活（注入点击通常仅聚焦窗口而非置顶）
+              actx=$((x + w - 25)); acty=$((y + h / 2))
+              echo "  -> fallback CGEvent activation click at ($actx,$acty)"
+              /tmp/window_click "$actx" "$acty" 2>&1 | tail -1
+              sleep 1
               # 首选：用户对照截图确认的 XMusic 图标坐标 (440,255)
-              echo "  -> CarPlay raised. First clicking XMusic at user-confirmed (440,255)."
+              echo "  -> Now first clicking XMusic at user-confirmed (440,255)."
               trypoint 440 255
               # 邻近兜底：围绕 (440,255) 半径约 14px 偏移
               for dx in -14 14; do
