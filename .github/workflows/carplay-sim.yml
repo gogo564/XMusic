@@ -105,10 +105,28 @@ jobs:
             sleep 1
           done
           echo "CarPlay click attempts done."
-
           sleep 3
-          # 诊断：列出全部 Simulator 窗口（CGWindowList，不依赖辅助功能，无 AppleEvent 超时）
-          echo "=== Simulator windows after CarPlay click ==="
+          # TV Out Extended Setup 配置面板出现：底部有 Load/Save/Run 三个按钮。
+          # 必须点 Run 才会应用外接显示并进入 CarPlay。优先用按钮名点击（辅助功能可用），失败则坐标兜底。
+          echo "=== Clicking Run button on TV Out Extended Setup panel ==="
+          osascript -e '
+            tell application "System Events" to tell process "Simulator"
+              set clickedRun to false
+              repeat with w in windows
+                try
+                  repeat with b in buttons of w
+                    if name of b is "Run" then
+                      click b
+                      set clickedRun to true
+                      return "Clicked Run button by name"
+                    end if
+                  end repeat
+                end try
+              end repeat
+              return "Run button not found by name: " & clickedRun
+            end tell' 2>&1 || true
+          sleep 4
+          echo "=== Windows after clicking Run ==="
           xcrun swiftc -o /tmp/winenum scripts/window_enum.swift 2>&1 | tail -2 || true
           /tmp/winenum 2>&1 | tee /tmp/sim_windows.txt
           echo "=== end windows ==="
