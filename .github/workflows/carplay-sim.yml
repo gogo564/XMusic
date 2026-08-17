@@ -301,23 +301,25 @@ jobs:
                 try
                   set p to position of w
                   set s to size of w
-                  set out to out & (name of w) & "|pos=" & (item 1 of p) & "," & (item 2 of p) & "|size=" & (item 1 of s) & "," & (item 2 of s) & "|"
+                  set n to name of w
+                  if n contains "CarPlay" then
+                    set out to (item 1 of p) & "," & (item 2 of p) & "|" & (item 1 of s) & "," & (item 2 of s)
+                  end if
                 end try
               end repeat
               return out
             end tell' 2>&1)
-          echo "Windows: $CARPLAY_POS"
+          echo "CarPlay raw: $CARPLAY_POS"
 
-          CARPLAY_DATA=$(echo "$CARPLAY_POS" | tr '|' '\n' | grep "CarPlay" | head -1)
-          if [ -z "$CARPLAY_DATA" ]; then
+          if [ -z "$CARPLAY_POS" ]; then
             echo "ERROR: CarPlay window not found"
             exit 0
           fi
           
-          CX=$(echo "$CARPLAY_DATA" | grep -o 'pos=[0-9]*' | cut -d= -f2)
-          CY=$(echo "$CARPLAY_DATA" | grep -o ',[0-9]*' | head -1 | cut -d, -f2)
-          CW=$(echo "$CARPLAY_DATA" | grep -o 'size=[0-9]*' | cut -d= -f2)
-          CH=$(echo "$CARPLAY_DATA" | sed 's/.*size=[0-9]*,//' | tr -d ' ')
+          CX=$(echo "$CARPLAY_POS" | cut -d'|' -f1 | cut -d, -f1 | tr -d ' ')
+          CY=$(echo "$CARPLAY_POS" | cut -d'|' -f1 | cut -d, -f2 | tr -d ' ')
+          CW=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f1 | tr -d ' ')
+          CH=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f2 | tr -d ' ')
           echo "CarPlay at ($CX,$CY) size ${CW}x${CH}"
 
           IX=$((CX + CW * 20 / 100))
