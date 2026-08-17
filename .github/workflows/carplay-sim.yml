@@ -264,108 +264,90 @@ jobs:
           echo "LOGFILE=$LOGFILE"
           : > "$LOGFILE" 2>/dev/null || true
 
-          echo "=== Step 1: Bring CarPlay window to front ==="
+          xcrun swiftc -o /tmp/window_click scripts/window_click.swift 2>&1 | tail -2 || true
+
+          echo "=== Step 1: Bring CarPlay window to front, move iPhone away ==="
           osascript -e '
             tell application "Simulator" to activate
             delay 0.5
             tell application "System Events" to tell process "Simulator"
+              set carplayRaised to false
+              set iphoneMoved to false
               repeat with w in windows
                 try
                   if name of w contains "CarPlay" then
                     set position of w to {50, 200}
                     set size of w to {800, 500}
                     perform action "AXRaise" of w
+                    set carplayRaised to true
                   end if
+                end try
+                try
                   if name of w contains "iOS" then
-                    set position of w to {1200, 800}
+                    set position of w to {-500, -500}
+                    set iphoneMoved to true
                   end if
                 end try
               end repeat
-              return "DONE"
+              return "raised=" & carplayRaised & " moved=" & iphoneMoved
             end tell' 2>&1
-          sleep 2
+          sleep 3
 
-          echo "=== Step 2: Try AX accessibility on CarPlay window ==="
-          osascript -e '
+          echo "=== Step 2: Verify CarPlay position ==="
+          CARPLAY_POS=$(osascript -e '
             tell application "System Events" to tell process "Simulator"
+              set out to ""
               repeat with w in windows
                 try
-                  if name of w contains "CarPlay" then
-                    set out to "Window: " & (name of w) & linefeed
-                    set out to out & "Role: " & (role of w) & linefeed
-                    set out to out & "Position: " & (position of w) & linefeed
-                    set out to out & "Size: " & (size of w) & linefeed
-                    set out to out & "Children count: " & (count of UI elements of w) & linefeed
-                    repeat with elem in UI elements of w
-                      try
-                        set out to out & "  Element: role=" & (role of elem) & " desc=" & (description of elem) & " pos=" & (position of elem) & linefeed
-                      end try
-                    end repeat
-                    return out
-                  end if
+                  set p to position of w
+                  set s to size of w
+                  set out to out & (name of w) & "|pos=" & (item 1 of p) & "," & (item 2 of p) & "|size=" & (item 1 of s) & "," & (item 2 of s) & "|"
                 end try
               end repeat
-              return "NO_CARPLAY"
-            end tell' 2>&1 | tee /tmp/ax_dump.txt
+              return out
+            end tell' 2>&1)
+          echo "Windows: $CARPLAY_POS"
 
-          echo "=== Step 3: Try to find and click XMusic via AX ==="
-          osascript -e '
-            tell application "System Events" to tell process "Simulator"
-              repeat with w in windows
-                try
-                  if name of w contains "CarPlay" then
-                    set p to position of w
-                    set s to size of w
-                    set cx to (item 1 of p) + (item 1 of s) * 20 / 100
-                    set cy to (item 2 of p) + (item 2 of s) * 60 / 100
-                    perform action "AXPress" of w at {cx, cy}
-                    return "AXPress at " & cx & "," & cy
-                  end if
-                end try
-              end repeat
-              return "NO_CARPLAY"
-            end tell' 2>&1
+          CARPLAY_DATA=$(echo "$CARPLAY_POS" | tr '|' '\n' | grep "CarPlay" | head -1)
+          if [ -z "$CARPLAY_DATA" ]; then
+            echo "ERROR: CarPlay window not found"
+            exit 0
+          fi
+          
+          CX=$(echo "$CARPLAY_DATA" | grep -o 'pos=[0-9]*' | cut -d= -f2)
+          CY=$(echo "$CARPLAY_DATA" | grep -o ',[0-9]*' | head -1 | cut -d, -f2)
+          CW=$(echo "$CARPLAY_DATA" | grep -o 'size=[0-9]*' | cut -d= -f2)
+          CH=$(echo "$CARPLAY_DATA" | sed 's/.*size=[0-9]*,//' | tr -d ' ')
+          echo "CarPlay at ($CX,$CY) size ${CW}x${CH}"
+
+          IX=$((CX + CW * 20 / 100))
+          IY=$((CY + CH * 60 / 100))
+          echo "Target icon center: ($IX,$IY)"
+
+          echo "=== Step 3: CGEvent click + grid scan ==="
+          /tmp/window_click "$IX" "$IY" 2>&1
           sleep 3
 
           if grep -q "didConnect" "$LOGFILE" 2>&1; then
             echo "SUCCESS: didConnect detected"
           else
-            echo "=== didConnect not found, trying CGEvent grid scan ==="
-            xcrun swiftc -o /tmp/window_click scripts/window_click.swift 2>/dev/null || true
-            
-            CARPLAY_POS=$(osascript -e '
-              tell application "System Events" to tell process "Simulator"
-                repeat with w in windows
-                  try
-                    if name of w contains "CarPlay" then
-                      set p to position of w
-                      set s to size of w
-                      return (item 1 of p) & "," & (item 2 of p) & "|" & (item 1 of s) & "," & (item 2 of s)
-                    end if
-                  end try
-                end repeat
-                return "NOT_FOUND"
-              end tell' 2>&1)
-            
-            if [ "$CARPLAY_POS" != "NOT_FOUND" ]; then
-              CX=$(echo "$CARPLAY_POS" | cut -d'|' -f1 | cut -d, -f1)
-              CY=$(echo "$CARPLAY_POS" | cut -d'|' -f1 | cut -d, -f2)
-              CW=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f1)
-              CH=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f2)
-              IX=$((CX + CW * 20 / 100))
-              IY=$((CY + CH * 60 / 100))
-              
-              for dy in -60 -40 -20 0 20 40 60; do
-                for dx in -60 -40 -20 0 20 40 60; do
-                  TX=$((IX+dx)); TY=$((IY+dy))
-                  /tmp/window_click "$TX" "$TY" 2>&1 | tail -1
-                  sleep 0.5
-                  if grep -q "didConnect" "$LOGFILE" 2>&1; then
-                    echo "SUCCESS: didConnect at ($TX,$TY)"
-                    break 2
-                  fi
-                done
+            echo "didConnect not found, scanning grid..."
+            FOUND=0
+            for dy in -80 -60 -40 -20 0 20 40 60 80; do
+              for dx in -80 -60 -40 -20 0 20 40 60 80; do
+                TX=$((IX+dx)); TY=$((IY+dy))
+                /tmp/window_click "$TX" "$TY" 2>&1 | tail -1
+                sleep 0.5
+                if grep -q "didConnect" "$LOGFILE" 2>&1; then
+                  echo "SUCCESS: didConnect at ($TX,$TY)"
+                  FOUND=1
+                  break 2
+                fi
               done
+              if [ "$FOUND" = "1" ]; then break; fi
+            done
+            if [ "$FOUND" = "0" ]; then
+              echo "FAILED: didConnect never triggered after full scan"
             fi
           fi
 
