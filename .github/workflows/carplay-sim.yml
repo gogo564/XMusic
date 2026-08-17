@@ -237,26 +237,36 @@ jobs:
           xcrun swiftc -o /tmp/window_click scripts/window_click.swift 2>&1 | tail -2 || true
           ls -la /tmp/window_scroll /tmp/window_click 2>&1 || true
 
-          echo "=== Step 1: Dismiss keyboard by tapping outside ==="
-          /tmp/window_click 300 150 2>&1 | tail -1
+          echo "=== Step 1: Dismiss keyboard — press Return key ==="
+          xcrun simctl keyboard "$DEVICE" type Return 2>&1 || true
+          sleep 2
+
+          echo "=== Step 1b: Tap non-editable area to dismiss keyboard ==="
+          /tmp/window_click 300 130 2>&1 | tail -1
           sleep 2
 
           echo "=== Step 2: Scroll down to find login button ==="
           for i in 1 2 3 4 5 6 7 8; do
             /tmp/window_scroll 500 400 -30 2>&1 | tail -1
-            sleep 1
+            sleep 0.5
           done
+          sleep 1
 
-          echo "=== Step 3: Click '测试连接并登录' button ==="
+          echo "=== Step 3: Screenshot before click ==="
+          xcrun simctl io "$DEVICE" screenshot /tmp/before_click.png 2>&1 || true
+
+          echo "=== Step 4: Click '测试连接并登录' button ==="
           /tmp/window_click 500 538 2>&1 | tail -1
           sleep 3
-          # 再点一次确保命中
           /tmp/window_click 500 538 2>&1 | tail -1
           sleep 20
 
           echo "=== login token check ==="
           xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>&1 | head -c 120 || echo "NO TOKEN"
           echo ""
+
+          echo "=== Screenshot after login ==="
+          xcrun simctl io "$DEVICE" screenshot /tmp/after_login.png 2>&1 || true
 
       - name: Click XMusic icon on CarPlay home screen
         run: |
@@ -355,6 +365,9 @@ jobs:
           cp /tmp/window_dump.txt /tmp/artifacts/window_dump.txt 2>/dev/null || true
           cp /tmp/window_dump_post_run.txt /tmp/artifacts/window_dump_post_run.txt 2>/dev/null || true
           cp /tmp/sim_windows_post_run.txt /tmp/artifacts/sim_windows_post_run.txt 2>/dev/null || true
+          # 中间截图
+          cp /tmp/before_click.png /tmp/artifacts/before_click.png 2>/dev/null || true
+          cp /tmp/after_login.png /tmp/artifacts/after_login.png 2>/dev/null || true
           # 已安装 app 列表（确认 bundle id 与场景注册）
           xcrun simctl listapps "$DEVICE" 2>/dev/null | grep -A5 -i xmusic || echo "no xmusic in listapps"
 
