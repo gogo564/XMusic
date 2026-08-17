@@ -2,7 +2,9 @@ import CarPlay
 import UIKit
 
 @MainActor
-final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPInterfaceControllerDelegate {
+final class CarPlaySceneDelegate: UIResponder,
+    @preconcurrency CPTemplateApplicationSceneDelegate,
+    @preconcurrency CPInterfaceControllerDelegate {
 
     private var interfaceController: CPInterfaceController?
     private var rootTemplate: CPListTemplate?
