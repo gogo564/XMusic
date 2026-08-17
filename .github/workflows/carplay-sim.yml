@@ -338,8 +338,8 @@ jobs:
           CH=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f2)
           echo "CarPlay at ($CX,$CY) size ${CW}x${CH}"
 
-          IX=$((CX + CW * 18 / 100))
-          IY=$((CY + CH * 75 / 100))
+          IX=$((CX + CW * 20 / 100))
+          IY=$((CY + CH * 60 / 100))
           echo "Clicking XMusic icon at ($IX,$IY)"
           /tmp/window_click "$IX" "$IY" 2>&1 | tail -1
           sleep 3
