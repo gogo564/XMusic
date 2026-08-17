@@ -2,7 +2,7 @@ import CarPlay
 import UIKit
 
 @MainActor
-final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPInterfaceControllerDelegate {
+final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPInterfaceControllerDelegate, CPNowPlayingTemplateDelegate {
 
     private var interfaceController: CPInterfaceController?
     private var rootTemplate: CPListTemplate?
@@ -20,6 +20,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         log("didConnect")
         self.interfaceController = interfaceController
         interfaceController.delegate = self
+        CPNowPlayingTemplate.shared.delegate = self
+        log("CPNowPlayingTemplate delegate set")
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
         // 关键：只在连接时设置一次，不要在 scene 生命周期里重设——
         // 每次 sceneDidBecomeActive 再 setRootTemplate 会打断系统已完成的呈现。
@@ -362,5 +364,18 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     func templateDidDisappear(_ aTemplate: CPTemplate, animated: Bool) {
         log("templateDidDisappear \(type(of: aTemplate)) animated=\(animated)")
+    }
+
+    // MARK: - CPNowPlayingTemplateDelegate
+
+    func nowPlayingTemplate(_ nowPlayingTemplate: CPNowPlayingTemplate, playActionPressedWithCompletionHandler completionHandler: @escaping () -> Void) {
+        log("Now Playing playActionPressed")
+        PlayerManager.shared.togglePlayPause()
+        completionHandler()
+    }
+
+    func nowPlayingTemplate(_ nowPlayingTemplate: CPNowPlayingTemplate, moreActionPressedWithCompletionHandler completionHandler: @escaping () -> Void) {
+        log("Now Playing moreActionPressed")
+        completionHandler()
     }
 }

@@ -96,7 +96,7 @@ final class PlayerManager: ObservableObject {
 
     private func setupAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay, .allowBluetooth])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("🔊 [Player] Audio Session Error: \(error.localizedDescription)")
