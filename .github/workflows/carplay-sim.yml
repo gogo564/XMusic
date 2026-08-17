@@ -301,11 +301,12 @@ jobs:
                   if name of w contains "CarPlay" then
                     set p to position of w
                     set s to size of w
-                    set px to item 1 of p as integer
-                    set py to item 2 of p as integer
-                    set sw to item 1 of s as integer
-                    set sh to item 2 of s as integer
-                    return px & "," & py & "|" & sw & "," & sh
+                    set oldDelims to AppleScript's text item delimiters
+                    set AppleScript's text item delimiters to ","
+                    set posStr to p as string
+                    set sizeStr to s as string
+                    set AppleScript's text item delimiters to oldDelims
+                    return posStr & "|" & sizeStr
                   end if
                 end try
               end repeat
