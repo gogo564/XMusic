@@ -278,8 +278,41 @@ jobs:
 
           xcrun swiftc -o /tmp/window_click scripts/window_click.swift 2>&1 | tail -2 || true
 
-          echo "=== Finding CarPlay window via System Events ==="
-          CARPLAY_INFO=$(osascript -e '
+          echo "=== Step 1: Bring CarPlay window to front ==="
+          osascript -e '
+            tell application "Simulator" to activate
+            delay 0.5
+            tell application "System Events" to tell process "Simulator"
+              repeat with w in windows
+                try
+                  if name of w contains "CarPlay" then
+                    set position of w to {50, 200}
+                    set size of w to {800, 500}
+                    perform action "AXRaise" of w
+                    return "RAISED: " & (name of w)
+                  end if
+                end try
+              end repeat
+              return "NO_CARPLAY_WINDOW"
+            end tell' 2>&1
+          sleep 2
+
+          echo "=== Step 2: Dump windows after raise ==="
+          osascript -e '
+            tell application "System Events" to tell process "Simulator"
+              set out to ""
+              repeat with w in windows
+                try
+                  set p to position of w
+                  set s to size of w
+                  set out to out & "WINDOW: " & (name of w) & " pos=" & (item 1 of p) & "," & (item 2 of p) & " size=" & (item 1 of s) & "," & (item 2 of s) & linefeed
+                end try
+              end repeat
+              return out
+            end tell' 2>&1 | tee /tmp/window_positions.txt
+
+          echo "=== Step 3: Get CarPlay window position ==="
+          CARPLAY_POS=$(osascript -e '
             tell application "System Events" to tell process "Simulator"
               repeat with w in windows
                 try
@@ -292,21 +325,19 @@ jobs:
               end repeat
               return "NOT_FOUND"
             end tell' 2>&1)
-          echo "CarPlay window: $CARPLAY_INFO"
+          echo "CarPlay: $CARPLAY_POS"
 
-          if [ "$CARPLAY_INFO" = "NOT_FOUND" ]; then
+          if [ "$CARPLAY_POS" = "NOT_FOUND" ]; then
             echo "ERROR: CarPlay window not found"
             exit 0
           fi
 
-          CX=$(echo "$CARPLAY_INFO" | cut -d'|' -f1 | cut -d, -f1)
-          CY=$(echo "$CARPLAY_INFO" | cut -d'|' -f1 | cut -d, -f2)
-          CW=$(echo "$CARPLAY_INFO" | cut -d'|' -f2 | cut -d, -f1)
-          CH=$(echo "$CARPLAY_INFO" | cut -d'|' -f2 | cut -d, -f2)
+          CX=$(echo "$CARPLAY_POS" | cut -d'|' -f1 | cut -d, -f1)
+          CY=$(echo "$CARPLAY_POS" | cut -d'|' -f1 | cut -d, -f2)
+          CW=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f1)
+          CH=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f2)
           echo "CarPlay at ($CX,$CY) size ${CW}x${CH}"
 
-          # XMusic 图标在 CarPlay 主屏左下角第一格（4列x2行布局）
-          # 相对位置约 18% 从左, 75% 从上
           IX=$((CX + CW * 18 / 100))
           IY=$((CY + CH * 75 / 100))
           echo "Clicking XMusic icon at ($IX,$IY)"
@@ -316,9 +347,9 @@ jobs:
           if grep -q "didConnect" "$LOGFILE" 2>/dev/null; then
             echo "SUCCESS: didConnect detected"
           else
-            echo "WARN: didConnect not found, trying nearby points..."
-            for dx in -20 -10 0 10 20; do
-              for dy in -20 -10 0 10 20; do
+            echo "didConnect not found, scanning grid..."
+            for dy in -30 -15 0 15 30; do
+              for dx in -30 -15 0 15 30; do
                 /tmp/window_click $((IX+dx)) $((IY+dy)) 2>&1 | tail -1
                 sleep 1
                 if grep -q "didConnect" "$LOGFILE" 2>/dev/null; then
@@ -329,7 +360,7 @@ jobs:
             done
           fi
 
-          echo "=== Final log check ==="
+          echo "=== Final log ==="
           cat "$LOGFILE" 2>/dev/null || echo "empty"
 
       - name: Screenshot CarPlay window
@@ -368,6 +399,7 @@ jobs:
           # 中间截图
           cp /tmp/before_click.png /tmp/artifacts/before_click.png 2>/dev/null || true
           cp /tmp/after_login.png /tmp/artifacts/after_login.png 2>/dev/null || true
+          cp /tmp/window_positions.txt /tmp/artifacts/window_positions.txt 2>/dev/null || true
           # 已安装 app 列表（确认 bundle id 与场景注册）
           xcrun simctl listapps "$DEVICE" 2>/dev/null | grep -A5 -i xmusic || echo "no xmusic in listapps"
 
