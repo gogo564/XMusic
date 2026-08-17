@@ -8,6 +8,8 @@ final class CarPlaySceneDelegate: UIResponder,
 
     private var interfaceController: CPInterfaceController?
     private var rootTemplate: CPListTemplate?
+    private var rootTemplateSucceeded = false
+    private var pendingRefresh = false
 
     nonisolated private func log(_ message: String) {
         Log.write("[CarPlay] \(message)")
@@ -23,14 +25,20 @@ final class CarPlaySceneDelegate: UIResponder,
         self.interfaceController = interfaceController
         interfaceController.delegate = self
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
-        // 关键：只在连接时设置一次，不要在 scene 生命周期里重设——
-        // 每次 sceneDidBecomeActive 再 setRootTemplate 会打断系统已完成的呈现。
         buildRootTemplate(placeholder: true)
+        // 数据加载完成后，只在根模板已成功呈现时刷新内容；
+        // 若还没成功（setRootTemplate completion 未回调），先标记，
+        // 等 sceneDidBecomeActive 兜底重试成功后再刷新。
         Task { @MainActor in
             log("loading data")
             await PlaylistStore.shared.refresh()
-            log("data loaded, updating root")
-            buildRootTemplate(placeholder: false)
+            if rootTemplateSucceeded {
+                log("data loaded, updating root")
+                buildRootTemplate(placeholder: false)
+            } else {
+                log("data loaded, deferring root update")
+                pendingRefresh = true
+            }
         }
     }
 
@@ -49,6 +57,13 @@ final class CarPlaySceneDelegate: UIResponder,
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         log("sceneDidBecomeActive role=\(scene.session.role.rawValue)")
+        // 兜底：CarPlay 场景重新激活时，若根模板尚未成功呈现则重试。
+        // didConnect 时系统可能尚未就绪导致 setRootTemplate completion 不回调；
+        // 场景真正成为前台后重设通常能成功。若已成功则不再重设以免打断。
+        if let controller = interfaceController, rootTemplate != nil, !rootTemplateSucceeded {
+            log("sceneDidBecomeActive retrying setRootTemplate")
+            setRootTemplate()
+        }
     }
 
     func sceneWillResignActive(_ scene: UIScene) {
@@ -159,12 +174,21 @@ final class CarPlaySceneDelegate: UIResponder,
             log("setRootTemplate skipped: no controller or rootTemplate")
             return
         }
-        // 与成功案例 RadioCarPlay 一致：只在 didConnect 设置一次根模板，animated: true，不干预 scene 生命周期。
+        // 与成功案例 RadioCarPlay 一致：animated: true。
         controller.setRootTemplate(template, animated: true) { [weak self] success, error in
+            guard let self else { return }
             if let error = error {
-                self?.log("setRootTemplate FAILED success=\(success) error=\(error.localizedDescription)")
+                self.log("setRootTemplate FAILED success=\(success) error=\(error.localizedDescription)")
             } else {
-                self?.log("setRootTemplate OK success=\(success)")
+                self.log("setRootTemplate OK success=\(success)")
+            }
+            if success {
+                self.rootTemplateSucceeded = true
+                if self.pendingRefresh {
+                    self.log("flushing deferred root update")
+                    self.pendingRefresh = false
+                    self.buildRootTemplate(placeholder: false)
+                }
             }
         }
         log("called setRootTemplate (retained instance)")
