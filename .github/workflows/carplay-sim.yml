@@ -294,32 +294,34 @@ jobs:
           sleep 3
 
           echo "=== Step 2: Verify CarPlay position ==="
-          CARPLAY_POS=$(osascript -e '
+          CARPLAY_RAW=$(osascript -e '
             tell application "System Events" to tell process "Simulator"
-              set out to ""
               repeat with w in windows
                 try
-                  set p to position of w
-                  set s to size of w
-                  set n to name of w
-                  if n contains "CarPlay" then
-                    set out to (item 1 of p) & "," & (item 2 of p) & "|" & (item 1 of s) & "," & (item 2 of s)
+                  if name of w contains "CarPlay" then
+                    set p to position of w
+                    set s to size of w
+                    set px to item 1 of p as integer
+                    set py to item 2 of p as integer
+                    set sw to item 1 of s as integer
+                    set sh to item 2 of s as integer
+                    return px & "," & py & "|" & sw & "," & sh
                   end if
                 end try
               end repeat
-              return out
+              return "NOT_FOUND"
             end tell' 2>&1)
-          echo "CarPlay raw: $CARPLAY_POS"
+          echo "CarPlay raw: $CARPLAY_RAW"
 
-          if [ -z "$CARPLAY_POS" ]; then
+          if [ "$CARPLAY_RAW" = "NOT_FOUND" ] || [ -z "$CARPLAY_RAW" ]; then
             echo "ERROR: CarPlay window not found"
             exit 0
           fi
           
-          CX=$(echo "$CARPLAY_POS" | cut -d'|' -f1 | cut -d, -f1 | tr -d ' ')
-          CY=$(echo "$CARPLAY_POS" | cut -d'|' -f1 | cut -d, -f2 | tr -d ' ')
-          CW=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f1 | tr -d ' ')
-          CH=$(echo "$CARPLAY_POS" | cut -d'|' -f2 | cut -d, -f2 | tr -d ' ')
+          CX=$(echo "$CARPLAY_RAW" | cut -d'|' -f1 | cut -d, -f1)
+          CY=$(echo "$CARPLAY_RAW" | cut -d'|' -f1 | cut -d, -f2)
+          CW=$(echo "$CARPLAY_RAW" | cut -d'|' -f2 | cut -d, -f1)
+          CH=$(echo "$CARPLAY_RAW" | cut -d'|' -f2 | cut -d, -f2)
           echo "CarPlay at ($CX,$CY) size ${CW}x${CH}"
 
           IX=$((CX + CW * 20 / 100))
