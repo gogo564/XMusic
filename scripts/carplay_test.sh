@@ -385,48 +385,61 @@ EOFSCRIPT
 
   echo "=== System Events AXPress on CarPlay window buttons ==="
   cat > /tmp/click_carplay_buttons.scpt << 'EOFSCRIPT'
+    set outList to {}
     tell application "System Events" to tell process "Simulator"
       repeat with w in windows
         try
           if name of w contains "CarPlay" then
-            repeat with b in buttons of w
+            set btnArray to buttons of w
+            set btnCount to count of btnArray
+            repeat with idx from 1 to btnCount
+              set b to item idx of btnArray
               try
-                set bname to name of b as text
+                set bname to ""
+                try
+                  set bname to name of b as text
+                end try
                 set bpos to position of b
                 set bsize to size of b
-                set bx to item 1 of bpos
-                set by to item 2 of bpos
-                set bw to item 1 of bsize
-                set bh to item 2 of bsize
-                set cx to bx + (bw div 2)
-                set cy to by + (bh div 2)
-                set AppleScript's text item delimiters to "|"
-                set descr to bname & "@" & cx & "," & cy
+                set posX to item 1 of bpos
+                set posY to item 2 of bpos
+                set sizeW to item 1 of bsize
+                set sizeH to item 2 of bsize
+                set centerX to posX + (sizeW div 2)
+                set centerY to posY + (sizeH div 2)
+                set AppleScript's text item delimiters to "@"
+                set oneInfo to (bname as text) & centerX & "," & centerY & "@" & sizeW & "x" & sizeH
                 set AppleScript's text item delimiters to ""
-                click b
-                delay 2
-                return descr
+                set end of outList to oneInfo
               end try
             end repeat
           end if
         end try
       end repeat
-      return "NO_CARPLAY_BUTTONS"
     end tell
+    if (count of outList) = 0 then
+      return "NO_CARPLAY_BUTTONS"
+    end if
+    set AppleScript's text item delimiters to linefeed
+    return outList as text
 EOFSCRIPT
-  # 依次点击 CarPlay 窗口里的每个按钮，每点击一次检查 didConnect
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    RESULT=$(osascript /tmp/click_carplay_buttons.scpt 2>&1 || true)
-    echo "AXPress attempt $i: $RESULT"
-    if [ "$RESULT" = "NO_CARPLAY_BUTTONS" ]; then
-      echo "No more buttons in CarPlay window"
-      break
-    fi
-    sleep 1
-    if grep -q "didConnect" "$LOGFILE" 2>&1; then
-      echo "SUCCESS: didConnect detected after AXPress"
-      FOUND=1
-      break
+  BTN_INFO=$(osascript /tmp/click_carplay_buttons.scpt 2>&1 || true)
+  echo "CarPlay buttons:"
+  echo "$BTN_INFO"
+  echo "=== Now clicking each button center via System Events click at ==="
+  echo "$BTN_INFO" | grep -v "NO_CARPLAY_BUTTONS" | while IFS= read -r line; do
+    if [ -n "$line" ] && [[ "$line" == *"@"* ]]; then
+      POS="${line%%@*}"; POS="${POS##*@}"
+      CX_BTN=$(echo "$POS" | cut -d, -f1)
+      CY_BTN=$(echo "$POS" | cut -d, -f2)
+      echo "Clicking button at ($CX_BTN,$CY_BTN)"
+      osascript -e "tell application \"System Events\" to tell process \"Simulator\" to click at {$CX_BTN, $CY_BTN}" 2>&1 | tail -1
+      sleep 2
+      if grep -q "didConnect" "$LOGFILE" 2>&1; then
+        echo "SUCCESS: didConnect detected after button click at ($CX_BTN,$CY_BTN)"
+        FOUND=1
+        break
+      fi
     fi
   done
 fi
