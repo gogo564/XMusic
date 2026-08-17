@@ -20,12 +20,6 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         log("didConnect")
         self.interfaceController = interfaceController
         interfaceController.delegate = self
-        // CPNowPlayingTemplate.shared.delegate 仅 iOS 16+ 可用；
-        // iOS 15 上 Now Playing 通过 MPRemoteCommandCenter 自动工作。
-        if #available(iOS 16.0, *) {
-            CPNowPlayingTemplate.shared.delegate = self
-            log("CPNowPlayingTemplate delegate set (iOS 16+)")
-        }
         // Apple 要求 didConnect 返回前必须设置根模板，否则黑屏。
         // 关键：只在连接时设置一次，不要在 scene 生命周期里重设——
         // 每次 sceneDidBecomeActive 再 setRootTemplate 会打断系统已完成的呈现。
@@ -368,22 +362,5 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     func templateDidDisappear(_ aTemplate: CPTemplate, animated: Bool) {
         log("templateDidDisappear \(type(of: aTemplate)) animated=\(animated)")
-    }
-}
-
-// MARK: - CPNowPlayingTemplateDelegate (iOS 16+)
-
-@available(iOS 16.0, *)
-extension CarPlaySceneDelegate: CPNowPlayingTemplateDelegate {
-
-    func nowPlayingTemplate(_ nowPlayingTemplate: CPNowPlayingTemplate, playActionPressedWithCompletionHandler completionHandler: @escaping () -> Void) {
-        log("Now Playing playActionPressed")
-        PlayerManager.shared.togglePlayPause()
-        completionHandler()
-    }
-
-    func nowPlayingTemplate(_ nowPlayingTemplate: CPNowPlayingTemplate, moreActionPressedWithCompletionHandler completionHandler: @escaping () -> Void) {
-        log("Now Playing moreActionPressed")
-        completionHandler()
     }
 }
