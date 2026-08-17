@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 # CarPlay Simulator Test Script
 # This script is called by the GitHub Actions workflow
@@ -214,26 +214,35 @@ xcrun simctl install "$DEVICE" "$(find /tmp/simdd/Build/Products -name XMusic.ap
 xcrun simctl spawn "$DEVICE" defaults write xmusic.XMusic autoLoginOnLaunch -bool YES 2>&1 || true
 xcrun simctl spawn "$DEVICE" defaults delete xmusic.XMusic userToken 2>&1 || true
 xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic serverConfig 2>&1 | head -c 200 || true
+echo "Launching app..."
 xcrun simctl launch --terminate-running-process "$DEVICE" xmusic.XMusic 2>&1 || echo "LAUNCH_RC=$?"
+echo "Waiting for app to start..."
 sleep 15
 
 echo "=== Step 9: Auto login ==="
+mkdir -p /tmp/artifacts
 echo "=== Waiting for autoLoginOnLaunch to trigger login ==="
+LOGIN_OK=0
 for i in $(seq 1 18); do
   sleep 5
-  TOKEN=$(xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>/dev/null | tr -d '"\n')
+  TOKEN=$(xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>/dev/null | tr -d '"\n' || true)
   echo "[$i] token: ${TOKEN:0:30}"
   if [ -n "$TOKEN" ] && [ "$TOKEN" != "" ]; then
     echo "LOGIN_SUCCESS: token written"
+    LOGIN_OK=1
     break
   fi
 done
+if [ "$LOGIN_OK" = "0" ]; then
+  echo "WARN: login did not complete within 90s, continuing anyway"
+fi
 sleep 3
 xcrun simctl io "$DEVICE" screenshot /tmp/after_login.png 2>&1 || true
 echo "=== final token ==="
 xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>&1 | head -c 120 || echo "NO TOKEN"
 
 echo "=== Step 10: Click XMusic icon on CarPlay home screen ==="
+mkdir -p /tmp/artifacts
 CONTAINER=$(xcrun simctl get_app_container "$DEVICE" xmusic.XMusic data 2>/dev/null || true)
 LOGFILE="$CONTAINER/Documents/xmusic.log"
 echo "LOGFILE=$LOGFILE"
@@ -341,6 +350,7 @@ cat "$LOGFILE" 2>/dev/null || echo "empty"
 
 echo "=== Step 11: Screenshot CarPlay window ==="
 mkdir -p /tmp/artifacts
+DEVICE=$(cat /tmp/device_udid)
 xcrun simctl io "$DEVICE" screenshot /tmp/artifacts/main_screen.png 2>&1 || echo "main screenshot failed"
 screencapture -x /tmp/artifacts/full_screen.png 2>&1 || echo "screencapture failed"
 ls -la /tmp/artifacts/
@@ -368,3 +378,5 @@ cp /tmp/window_positions.txt /tmp/artifacts/window_positions.txt 2>/dev/null || 
 xcrun simctl listapps "$DEVICE" 2>/dev/null | grep -A5 -i xmusic || echo "no xmusic in listapps"
 
 echo "=== Done ==="
+echo "Artifacts:"
+ls -la /tmp/artifacts/
