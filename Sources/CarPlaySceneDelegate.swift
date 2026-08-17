@@ -160,7 +160,13 @@ final class CarPlaySceneDelegate: UIResponder,
             return
         }
         // 与成功案例 RadioCarPlay 一致：只在 didConnect 设置一次根模板，animated: true，不干预 scene 生命周期。
-        controller.setRootTemplate(template, animated: true, completion: nil)
+        controller.setRootTemplate(template, animated: true) { [weak self] success, error in
+            if let error = error {
+                self?.log("setRootTemplate FAILED success=\(success) error=\(error.localizedDescription)")
+            } else {
+                self?.log("setRootTemplate OK success=\(success)")
+            }
+        }
         log("called setRootTemplate (retained instance)")
     }
 
