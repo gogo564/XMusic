@@ -294,24 +294,29 @@ jobs:
           sleep 3
 
           echo "=== Step 2: Verify CarPlay position ==="
-          CARPLAY_RAW=$(osascript -e '
+          cat > /tmp/get_carplay_pos.scpt << 'EOFSCRIPT'
             tell application "System Events" to tell process "Simulator"
               repeat with w in windows
                 try
                   if name of w contains "CarPlay" then
                     set p to position of w
                     set s to size of w
-                    set oldDelims to AppleScript's text item delimiters
+                    set px to item 1 of p
+                    set py to item 2 of p
+                    set sw to item 1 of s
+                    set sh to item 2 of s
                     set AppleScript's text item delimiters to ","
-                    set posStr to p as string
-                    set sizeStr to s as string
-                    set AppleScript's text item delimiters to oldDelims
+                    set posStr to {px, py} as string
+                    set sizeStr to {sw, sh} as string
+                    set AppleScript's text item delimiters to {""}
                     return posStr & "|" & sizeStr
                   end if
                 end try
               end repeat
               return "NOT_FOUND"
-            end tell' 2>&1)
+            end tell
+EOFSCRIPT
+          CARPLAY_RAW=$(osascript /tmp/get_carplay_pos.scpt 2>&1)
           echo "CarPlay raw: $CARPLAY_RAW"
 
           if [ "$CARPLAY_RAW" = "NOT_FOUND" ] || [ -z "$CARPLAY_RAW" ]; then
