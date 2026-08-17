@@ -5,8 +5,21 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  carplay-test:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - run: echo "CarPlay test successful"
+        with:
+          clean: true
+
+      - name: Run CarPlay test
+        run: |
+          chmod +x scripts/carplay_test.sh
+          scripts/carplay_test.sh
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarPlay-Test-Result
+          path: /tmp/artifacts/**/*
