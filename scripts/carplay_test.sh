@@ -318,15 +318,19 @@ IX=$((CX + CW * 20 / 100))
 IY=$((CY + CH * 60 / 100))
 echo "Target icon center: ($IX,$IY)"
 
-echo "=== CGEvent click + grid scan ==="
+echo "=== CGEvent click at icon center ==="
 /tmp/window_click "$IX" "$IY" 2>&1
 sleep 3
 
 if grep -q "didConnect" "$LOGFILE" 2>&1; then
   echo "SUCCESS: didConnect detected"
+  FOUND=1
 else
-  echo "didConnect not found, scanning grid..."
   FOUND=0
+fi
+
+if [ "$FOUND" = "0" ]; then
+  echo "didConnect not found, scanning grid via CGEvent..."
   for dy in -80 -60 -40 -20 0 20 40 60 80; do
     for dx in -80 -60 -40 -20 0 20 40 60 80; do
       TX=$((IX+dx)); TY=$((IY+dy))
@@ -340,9 +344,122 @@ else
     done
     if [ "$FOUND" = "1" ]; then break; fi
   done
-  if [ "$FOUND" = "0" ]; then
-    echo "FAILED: didConnect never triggered after full scan"
-  fi
+fi
+
+if [ "$FOUND" = "0" ]; then
+  echo "=== Dump full CarPlay window UI tree (diagnostic) ==="
+  cat > /tmp/dump_carplay_tree.scpt << 'EOFSCRIPT'
+    tell application "System Events" to tell process "Simulator"
+      set out to ""
+      repeat with w in windows
+        try
+          if name of w contains "CarPlay" then
+            set out to out & "WINDOW: " & (name of w) & " pos=" & (position of w as text) & " size=" & (size of w as text) & linefeed
+            repeat with el in entire contents of w
+              try
+                set r to role of el as text
+                set elName to ""
+                try
+                  set elName to name of el as text
+                end try
+                set elPos to ""
+                try
+                  set elPos to position of el as text
+                end try
+                set elSize to ""
+                try
+                  set elSize to size of el as text
+                end try
+                set out to out & "  [" & r & "] name='" & elName & "' pos=" & elPos & " size=" & elSize & linefeed
+              end try
+            end repeat
+            return out
+          end if
+        end try
+      end repeat
+      return "NO_CARPLAY_WINDOW"
+    end tell
+EOFSCRIPT
+  osascript /tmp/dump_carplay_tree.scpt 2>&1 | tee /tmp/artifacts/carplay_ui_tree.txt
+  echo "=== end carplay UI tree ==="
+
+  echo "=== System Events AXPress on CarPlay window buttons ==="
+  cat > /tmp/click_carplay_buttons.scpt << 'EOFSCRIPT'
+    tell application "System Events" to tell process "Simulator"
+      repeat with w in windows
+        try
+          if name of w contains "CarPlay" then
+            repeat with b in buttons of w
+              try
+                set bname to name of b as text
+                set bpos to position of b
+                set bsize to size of b
+                set bx to item 1 of bpos
+                set by to item 2 of bpos
+                set bw to item 1 of bsize
+                set bh to item 2 of bsize
+                set cx to bx + (bw div 2)
+                set cy to by + (bh div 2)
+                set AppleScript's text item delimiters to "|"
+                set descr to bname & "@" & cx & "," & cy
+                set AppleScript's text item delimiters to ""
+                click b
+                delay 2
+                return descr
+              end try
+            end repeat
+          end if
+        end try
+      end repeat
+      return "NO_CARPLAY_BUTTONS"
+    end tell
+EOFSCRIPT
+  # 依次点击 CarPlay 窗口里的每个按钮，每点击一次检查 didConnect
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    RESULT=$(osascript /tmp/click_carplay_buttons.scpt 2>&1 || true)
+    echo "AXPress attempt $i: $RESULT"
+    if [ "$RESULT" = "NO_CARPLAY_BUTTONS" ]; then
+      echo "No more buttons in CarPlay window"
+      break
+    fi
+    sleep 1
+    if grep -q "didConnect" "$LOGFILE" 2>&1; then
+      echo "SUCCESS: didConnect detected after AXPress"
+      FOUND=1
+      break
+    fi
+  done
+fi
+
+if [ "$FOUND" = "0" ]; then
+  echo "=== System Events click at icon position ==="
+  cat > /tmp/click_carplay_pos.scpt << 'EOFSCRIPT'
+    on run argv
+      set clickX to item 1 of argv as real
+      set clickY to item 2 of argv as real
+      tell application "System Events" to tell process "Simulator"
+        click at {clickX, clickY}
+        return "CLICKED"
+      end tell
+    end run
+EOFSCRIPT
+  for dy in -60 -40 -20 0 20 40 60; do
+    for dx in -60 -40 -20 0 20 40 60; do
+      TX=$((IX+dx)); TY=$((IY+dy))
+      osascript /tmp/click_carplay_pos.scpt "$TX" "$TY" 2>&1 | tail -1
+      sleep 0.5
+      if grep -q "didConnect" "$LOGFILE" 2>&1; then
+        echo "SUCCESS: didConnect at ($TX,$TY) via System Events"
+        FOUND=1
+        break 2
+      fi
+    done
+    if [ "$FOUND" = "1" ]; then break; fi
+  done
+fi
+
+if [ "$FOUND" = "0" ]; then
+  echo "FAILED: didConnect never triggered after all methods"
 fi
 
 echo "=== Final log ==="
@@ -371,6 +488,7 @@ cp /tmp/menu_tree.txt /tmp/artifacts/menu_tree.txt 2>/dev/null || true
 cp /tmp/sim_windows.txt /tmp/artifacts/sim_windows.txt 2>/dev/null || true
 cp /tmp/window_dump.txt /tmp/artifacts/window_dump.txt 2>/dev/null || true
 cp /tmp/window_dump_post_run.txt /tmp/artifacts/window_dump_post_run.txt 2>/dev/null || true
+cp /tmp/carplay_ui_tree.txt /tmp/artifacts/carplay_ui_tree.txt 2>/dev/null || true
 cp /tmp/sim_windows_post_run.txt /tmp/artifacts/sim_windows_post_run.txt 2>/dev/null || true
 cp /tmp/before_click.png /tmp/artifacts/before_click.png 2>/dev/null || true
 cp /tmp/after_login.png /tmp/artifacts/after_login.png 2>/dev/null || true
