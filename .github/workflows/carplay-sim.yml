@@ -133,29 +133,40 @@ jobs:
             end tell' 2>&1 | tee /tmp/window_dump.txt
           echo "=== end window dump ==="
 
-          echo "=== Clicking Run button (by name) ==="
+          echo "=== Clicking Run button (by name + AXPress) ==="
           osascript -e '
+            tell application "Simulator" to activate
+            delay 0.5
             tell application "System Events" to tell process "Simulator"
               repeat with w in windows
                 try
-                  repeat with b in buttons of w
-                    if name of b is "Run" then
-                      click b
-                      return "CLICKED_RUN_BY_NAME"
-                    end if
-                  end repeat
+                  if name of w is "TV Out Extended Setup" then
+                    repeat with b in buttons of w
+                      if name of b is "Run" then
+                        click b
+                        delay 0.2
+                        click b
+                        return "CLICKED_RUN_BY_NAME"
+                      end if
+                    end repeat
+                  end if
                 end try
               end repeat
-              return "RUN_NOT_FOUND"
+              return "TV_Out_panel_not_found"
             end tell' 2>&1 || true
 
-          echo "=== Fallback: keyboard Enter to click Run ==="
+          echo "=== Fallback: keyboard Return to confirm Run ==="
           osascript -e '
             tell application "Simulator" to activate
-            delay 0.3
+            delay 0.5
             tell application "System Events" to keystroke return
           ' 2>&1 || true
           sleep 5
+
+          echo "=== Checking Run result (windows now) ==="
+          xcrun swiftc -o /tmp/winenum scripts/window_enum.swift 2>&1 | tail -2 || true
+          /tmp/winenum 2>&1 | tee /tmp/sim_windows_post_run.txt
+          echo "=== end ==="
 
           echo "=== Checking if CarPlay window appeared ==="
           xcrun swiftc -o /tmp/winenum scripts/window_enum.swift 2>&1 | tail -2 || true
@@ -163,25 +174,44 @@ jobs:
           CARPLAY_WINS=$(awk -F'aspect=' '$2+0 >= 1.0' /tmp/sim_windows.txt | wc -l | tr -d ' ')
           echo "CarPlay windows found: $CARPLAY_WINS"
           if [ "$CARPLAY_WINS" -lt 1 ]; then
-            echo "WARN: CarPlay window not found, retrying Run button..."
+            echo "WARN: CarPlay window not found. Dumping windows again..."
+            osascript -e '
+              tell application "System Events" to tell process "Simulator"
+                set out to ""
+                repeat with w in windows
+                  set out to out & "WINDOW: " & (name of w) & linefeed
+                  try
+                    repeat with b in buttons of w
+                      set out to out & "  BUTTON: \"" & (name of b) & "\"" & linefeed
+                    end repeat
+                  end try
+                end repeat
+                return out
+              end tell' 2>&1 | tee /tmp/window_dump_post_run.txt
+            echo "WARN: Retrying Run button..."
             osascript -e '
               tell application "Simulator" to activate
               delay 1
-              tell application "System Events"
-                tell process "Simulator"
-                  repeat with w in windows
-                    try
+              tell application "System Events" to tell process "Simulator"
+                repeat with w in windows
+                  try
+                    if name of w is "TV Out Extended Setup" then
                       repeat with b in buttons of w
                         if name of b is "Run" then
                           click b
                           return "RETRY_CLICKED_RUN"
                         end if
                       end repeat
-                    end try
-                  end repeat
-                  return "RETRY_RUN_NOT_FOUND"
-                end tell
+                    end if
+                  end try
+                end repeat
+                return "RETRY_PANEL_GONE"
               end tell' 2>&1 || true
+            osascript -e '
+              tell application "Simulator" to activate
+              delay 0.3
+              tell application "System Events" to keystroke return
+            ' 2>&1 || true
             sleep 5
             /tmp/winenum 2>&1 | tee /tmp/sim_windows.txt
             CARPLAY_WINS=$(awk -F'aspect=' '$2+0 >= 1.0' /tmp/sim_windows.txt | wc -l | tr -d ' ')
@@ -370,6 +400,8 @@ jobs:
           cp /tmp/sim_windows.txt /tmp/artifacts/sim_windows.txt 2>/dev/null || true
           # 窗口+按钮 dump 诊断
           cp /tmp/window_dump.txt /tmp/artifacts/window_dump.txt 2>/dev/null || true
+          cp /tmp/window_dump_post_run.txt /tmp/artifacts/window_dump_post_run.txt 2>/dev/null || true
+          cp /tmp/sim_windows_post_run.txt /tmp/artifacts/sim_windows_post_run.txt 2>/dev/null || true
           # 已安装 app 列表（确认 bundle id 与场景注册）
           xcrun simctl listapps "$DEVICE" 2>/dev/null | grep -A5 -i xmusic || echo "no xmusic in listapps"
 
