@@ -226,47 +226,32 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b 2>&1 | tail -1
           sleep 3
           xcrun simctl install "$DEVICE" "$(find /tmp/simdd/Build/Products -name XMusic.app -type d | head -1)" 2>&1 || true
+          # 注入 autoLoginOnLaunch：SettingsView.onAppear 检测到开关就会自动执行"测试连接并登录"，
+          # 避免 UI 滚动/坐标点击不可靠（用户指出登录按钮在设置页最底部，之前点到了"汽水账号验证"）。
+          xcrun simctl spawn "$DEVICE" defaults write xmusic.XMusic autoLoginOnLaunch -bool YES 2>&1 || true
+          xcrun simctl spawn "$DEVICE" defaults write xmusic.XMusic userToken -string "" 2>&1 || true
           # 前台启动（-f 强制前台），并打印返回码
           xcrun simctl launch --terminate-running-process "$DEVICE" xmusic.XMusic 2>&1 || echo "LAUNCH_RC=$?"
           sleep 15
 
-      - name: Phone screen - login
+      - name: Phone screen - auto login (autoLoginOnLaunch)
         run: |
           DEVICE=$(cat /tmp/device_udid)
-          xcrun swiftc -o /tmp/window_scroll scripts/window_scroll.swift 2>&1 | tail -2 || true
-          xcrun swiftc -o /tmp/window_click scripts/window_click.swift 2>&1 | tail -2 || true
-          ls -la /tmp/window_scroll /tmp/window_click 2>&1 || true
-
-          echo "=== Step 1: Dismiss keyboard — press Return key ==="
-          xcrun simctl keyboard "$DEVICE" type Return 2>&1 || true
-          sleep 2
-
-          echo "=== Step 1b: Tap non-editable area to dismiss keyboard ==="
-          /tmp/window_click 300 130 2>&1 | tail -1
-          sleep 2
-
-          echo "=== Step 2: Scroll down to find login button ==="
-          for i in 1 2 3 4 5 6 7 8; do
-            /tmp/window_scroll 500 400 -30 2>&1 | tail -1
-            sleep 0.5
+          echo "=== Waiting for autoLoginOnLaunch to trigger login ==="
+          # 轮询等待 token 写入（最多 90 秒）
+          for i in $(seq 1 18); do
+            sleep 5
+            TOKEN=$(xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>/dev/null | tr -d '"\n')
+            echo "[$i] token: ${TOKEN:0:30}"
+            if [ -n "$TOKEN" ] && [ "$TOKEN" != "" ]; then
+              echo "LOGIN_SUCCESS: token written"
+              break
+            fi
           done
-          sleep 1
-
-          echo "=== Step 3: Screenshot before click ==="
-          xcrun simctl io "$DEVICE" screenshot /tmp/before_click.png 2>&1 || true
-
-          echo "=== Step 4: Click '测试连接并登录' button ==="
-          /tmp/window_click 500 538 2>&1 | tail -1
           sleep 3
-          /tmp/window_click 500 538 2>&1 | tail -1
-          sleep 20
-
-          echo "=== login token check ==="
-          xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>&1 | head -c 120 || echo "NO TOKEN"
-          echo ""
-
-          echo "=== Screenshot after login ==="
           xcrun simctl io "$DEVICE" screenshot /tmp/after_login.png 2>&1 || true
+          echo "=== final token ==="
+          xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic userToken 2>&1 | head -c 120 || echo "NO TOKEN"
 
       - name: Click XMusic icon on CarPlay home screen
         run: |
