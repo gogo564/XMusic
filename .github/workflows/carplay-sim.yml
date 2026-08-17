@@ -229,7 +229,10 @@ jobs:
           # 注入 autoLoginOnLaunch：SettingsView.onAppear 检测到开关就会自动执行"测试连接并登录"，
           # 避免 UI 滚动/坐标点击不可靠（用户指出登录按钮在设置页最底部，之前点到了"汽水账号验证"）。
           xcrun simctl spawn "$DEVICE" defaults write xmusic.XMusic autoLoginOnLaunch -bool YES 2>&1 || true
-          xcrun simctl spawn "$DEVICE" defaults write xmusic.XMusic userToken -string "" 2>&1 || true
+          # 关键：必须让 token 为 nil（用 defaults delete），否则 needsConfig=false 直接进首页，
+          # 设置页不出现，autoLoginOnLaunch 的 onAppear 就不会触发自动登录。
+          xcrun simctl spawn "$DEVICE" defaults delete xmusic.XMusic userToken 2>&1 || true
+          xcrun simctl spawn "$DEVICE" defaults read xmusic.XMusic serverConfig 2>&1 | head -c 200 || true
           # 前台启动（-f 强制前台），并打印返回码
           xcrun simctl launch --terminate-running-process "$DEVICE" xmusic.XMusic 2>&1 || echo "LAUNCH_RC=$?"
           sleep 15
