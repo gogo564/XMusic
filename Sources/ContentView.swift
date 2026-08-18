@@ -297,6 +297,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "我的汽水歌单", icon: "list.star")
+                    .padding(.horizontal)
 
                 if sodaMyPlaylists.isEmpty {
                     Text("未获取到我的歌单（需汽水登录态）")
@@ -383,6 +384,7 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "汽水推荐歌单", icon: "sparkles", subtitle: SodaAPIClient.shared.isConfigured ? nil : "未配置汽水服务")
+                    .padding(.horizontal)
 
                 if isLoadingBoards {
                     HStack {
@@ -452,6 +454,7 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "汽水电台", icon: "dot.radiowaves.left.and.right")
+                    .padding(.horizontal)
 
                 if sodaRadios.isEmpty {
                     Text("暂无电台")
