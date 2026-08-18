@@ -56,7 +56,7 @@ struct CarPlayRootView: View {
                     CarPlayNavLink(
                         title: "最近播放",
                         count: recentStore.items.count,
-                        coverURL: recentStore.items.first?.song.imageURL ?? ""
+                        coverURL: recentStore.items.first?.song?.imageURL ?? ""
                     ) {
                         CarPlaySongList(title: "最近播放", songs: recentStore.items.compactMap { $0.song })
                     }
@@ -121,7 +121,7 @@ private struct CarPlayListRow: View {
                         .foregroundColor(Color.gray.opacity(0.7))
                 )
         } else {
-            LXCachedImage(urlString: coverURL, size: 44, cornerRadius: 8, placeholder: "music.note")
+            LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 44, cornerRadius: 8)
         }
     }
 }
@@ -189,9 +189,9 @@ private struct CarPlayNowPlayingRow: View {
                 HStack {
                     LXCachedImage(
                         urlString: player.currentSong?.imageURL ?? "",
+                        placeholder: "music.note",
                         size: 44,
-                        cornerRadius: 8,
-                        placeholder: "music.note"
+                        cornerRadius: 8
                     )
                     CarPlayListRow(
                         title: player.currentSong?.name ?? "未在播放",
@@ -230,9 +230,9 @@ private struct CarPlayPlayerView: View {
                 HStack(alignment: .center, spacing: 16) {
                     LXCachedImage(
                         urlString: player.currentSong?.imageURL ?? "",
+                        placeholder: "music.note",
                         size: min(geo.size.height - 24, 160),
-                        cornerRadius: 10,
-                        placeholder: "music.note"
+                        cornerRadius: 10
                     )
 
                     VStack(alignment: .leading, spacing: 8) {
