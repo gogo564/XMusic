@@ -2,8 +2,14 @@ import SwiftUI
 
 // CarPlay 窗口自绘 UI(参考 CarTube 的 UIWindowSceneSessionRoleCarPlay 路线,
 // 不依赖 CPInterfaceController 模板系统,绕开 TrollStore 下模板渲染被拒的问题)。
-// 排版参考音流/汽水的 CPListTemplate 风格:统一行高、左标题右副标题、
-// 固定大字号、分组清晰。iOS 15 兼容:用 NavigationView,不用 NavigationStack。
+//
+// 关键点:
+// 1) CarPlay 系统把 contentSizeCategory 设为 accessibility 极大档,SwiftUI 默认
+//    .font(.system(size:)) 会随 Dynamic Type 缩放导致文字超大、超出横屏(426x240)显示不全,
+//    所以整棵树固定 .environment(\.sizeCategory, .large)。
+// 2) 播放页用 ScrollView + GeometryReader,高度不足时滚动而不被裁切。
+// 3) iOS 15 兼容:NavigationView,不用 NavigationStack;nowplaying 行避免 NavigationLink
+//    内嵌 Button(点击冲突导致空白),用 overlay 按钮 + .borderless。
 
 struct CarPlayRootView: View {
     @StateObject private var playlistStore = PlaylistStore.shared
@@ -52,6 +58,8 @@ struct CarPlayRootView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("LX音乐")
+            // 关键:锁定字体缩放,CarPlay 上 accessibility 档会让文字过大溢出
+            .environment(\.sizeCategory, .large)
         }
         .navigationViewStyle(.stack)
         .onAppear {
@@ -63,7 +71,7 @@ struct CarPlayRootView: View {
     }
 }
 
-// 列表项通用排版:固定两行(标题 + 副标题),模拟 CPListTemplate 的行样式
+// 列表项排版:标题 + 副标题,统一字号(参考音流/汽水列表的整洁感)
 private struct CarPlayListRowLabel: View {
     let title: String
     let subtitle: String
@@ -71,11 +79,11 @@ private struct CarPlayListRowLabel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 22, weight: .regular))
+                .font(.system(size: 18, weight: .medium))
                 .lineLimit(1)
             if !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.system(size: 14, weight: .regular))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
@@ -120,100 +128,127 @@ private struct CarPlaySongList: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle(title)
+        .environment(\.sizeCategory, .large)
     }
 }
 
-// 车机上的"正在播放"入口行
+// "正在播放"入口行:整行可点击进播放页,播放/暂停作为独立 borderless 按钮放右侧
+// (避免 NavigationLink 内嵌 Button 在 iOS 15 点击冲突导致空白页)
 private struct CarPlayNowPlayingRow: View {
     @StateObject private var player = PlayerManager.shared
 
     var body: some View {
-        NavigationLink {
-            CarPlayPlayerView()
-        } label: {
-            HStack {
-                // 封面占位:统一尺寸,避免大小参差
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(width: 56, height: 56)
-                CarPlayListRowLabel(
-                    title: player.currentSong?.name ?? "未在播放",
-                    subtitle: player.currentSong?.singer ?? ""
-                )
-                Spacer()
-                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 40))
-                    .foregroundColor(.accentColor)
+        ZStack(alignment: .trailing) {
+            NavigationLink {
+                CarPlayPlayerView()
+            } label: {
+                HStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.gray.opacity(0.25))
+                        .frame(width: 44, height: 44)
+                    CarPlayListRowLabel(
+                        title: player.currentSong?.name ?? "未在播放",
+                        subtitle: player.currentSong?.singer ?? ""
+                    )
+                    Spacer()
+                    // 占位,保持整行可点;真正按钮在 overlay
+                    Color.clear.frame(width: 48, height: 44)
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+
+            Button {
+                player.togglePlayPause()
+            } label: {
+                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundColor(.accentColor)
+                    .padding(.trailing, 8)
+            }
+            .buttonStyle(.borderless)
         }
     }
 }
 
-// 车机上的完整播放页:歌名/歌手 + 歌词 + 进度条 + 播放控制
+// 车机播放页:歌名/歌手 + 歌词 + 进度 + 控制,ScrollView 防裁切
 private struct CarPlayPlayerView: View {
     @StateObject private var player = PlayerManager.shared
 
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
-            VStack(spacing: 6) {
-                Text(player.currentSong?.name ?? "未在播放")
-                    .font(.system(size: 22, weight: .bold))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                Text(player.currentSong?.singer ?? "")
-                    .font(.system(size: 18, weight: .regular))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 14) {
+                    VStack(spacing: 4) {
+                        Text(player.currentSong?.name ?? "未在播放")
+                            .font(.system(size: 22, weight: .bold))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                        Text(player.currentSong?.singer ?? "")
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    .padding(.top, 12)
 
-            if let line = currentLyricLine() {
-                Text(line)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
-                    .lineLimit(3)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                    .id(player.currentLyricIndex)
-            }
+                    if let line = currentLyricLine() {
+                        Text(line)
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(3)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 8)
+                            .id(player.currentLyricIndex)
+                    }
 
-            VStack(spacing: 6) {
-                ProgressView(value: player.currentTime, total: max(player.duration, 1))
-                    .padding(.horizontal)
-                HStack {
-                    Text(timeStr(player.currentTime))
-                    Spacer()
-                    Text(timeStr(player.duration))
-                }
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
-                .padding(.horizontal)
-            }
+                    VStack(spacing: 4) {
+                        ProgressView(value: player.currentTime, total: max(player.duration, 1))
+                            .padding(.horizontal, 8)
+                        HStack {
+                            Text(timeStr(player.currentTime))
+                            Spacer()
+                            Text(timeStr(player.duration))
+                        }
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
+                    }
+                    .padding(.top, 4)
 
-            HStack(spacing: 48) {
-                Button {
-                    player.playPrevious()
-                } label: {
-                    Image(systemName: "backward.fill").font(.system(size: 34))
-                }
-                Button {
-                    player.togglePlayPause()
-                } label: {
-                    Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 56))
-                }
-                Button {
-                    player.playNext()
-                } label: {
-                    Image(systemName: "forward.fill").font(.system(size: 34))
-                }
-            }
-            .padding(.top, 6)
+                    HStack(spacing: 56) {
+                        Button {
+                            player.playPrevious()
+                        } label: {
+                            Image(systemName: "backward.fill").font(.system(size: 30))
+                        }
+                        .buttonStyle(.borderless)
 
-            Spacer()
+                        Button {
+                            player.togglePlayPause()
+                        } label: {
+                            Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                .font(.system(size: 52))
+                        }
+                        .buttonStyle(.borderless)
+
+                        Button {
+                            player.playNext()
+                        } label: {
+                            Image(systemName: "forward.fill").font(.system(size: 30))
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(.top, 4)
+
+                    Spacer(minLength: 12)
+                }
+                .frame(minHeight: geo.size.height)
+                .padding(.horizontal, 12)
+            }
         }
         .navigationTitle("正在播放")
         .navigationBarTitleDisplayMode(.inline)
+        .environment(\.sizeCategory, .large)
         .onAppear {
             Log.write("[CarPlay] CarPlayPlayerView 出现 song=\(player.currentSong?.name ?? "nil")")
         }
