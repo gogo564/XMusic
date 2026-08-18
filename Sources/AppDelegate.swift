@@ -1,14 +1,9 @@
 import UIKit
 import AVFoundation
 
-// @main 入口使用 UIApplicationDelegate 生命周期(参考音流/flutter_carplay 与
-// vanities/carplay-swiftui:纯 SwiftUI @main App 生命周期下 CarPlay 模板场景
-// 可能不被车机正常接受)。
-// 场景配置完全由 Info.plist 的 UIApplicationSceneManifest 声明
-// (UIWindowSceneSessionRoleCarPlay -> CarPlaySceneDelegate,
-//  UIWindowSceneSessionRoleApplication -> PhoneSceneDelegate),与 CarTube 一致。
+// @main 已移至 XmusicApp(SwiftUI App + WindowGroup,见 XmusicApp.swift)。
+// 本类通过 @UIApplicationDelegateAdaptor 注入,仅负责音频会话配置。
 
-@main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(

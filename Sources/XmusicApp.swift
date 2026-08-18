@@ -1,8 +1,21 @@
 import SwiftUI
 
-// @main 已移至 AppDelegate(参考音流/flutter_carplay 与 vanities/carplay-swiftui:
-// CarPlay 模板场景在纯 SwiftUI @main App 生命周期下可能不被车机正常接受)。
-// 这里只保留根视图与工厂方法,供 SceneDelegate 包装进 UIHostingController。
+// @main 使用纯 SwiftUI App 生命周期 + WindowGroup(手机 UI 自动由 WindowGroup 提供,
+// 与 CarTube 完全一致:CarTube = SwiftUI @main + WindowGroup,Info.plist 只声明
+// UIWindowSceneSessionRoleCarPlay -> CarPlaySceneDelegate)。
+// 之前用 UIApplicationDelegate @main + 手动声明双场景,iOS 15 在 CarPlay 场景连接时
+// 系统创建 FBSSceneParameters 崩溃(见崩溃日志 BackboardServices/frontboard)。
+
+@main
+struct XMusicApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    var body: some Scene {
+        WindowGroup {
+            makeRootView()
+        }
+    }
+}
 
 func makeRootView() -> some View {
     let theme = ThemeManager.shared
