@@ -20,15 +20,6 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
-    func application(
-        _ application: UIApplication,
-        configurationForConnecting connectingSceneSession: UISceneSession,
-        options: UIScene.ConnectionOptions
-    ) -> UISceneConfiguration? {
-        Log.write("[AppDelegate] configurationForConnecting role=\(connectingSceneSession.role.rawValue)")
-        return nil
-    }
-
     // CarPlay 音频 App 必须有 playback 类别 + 激活,否则车机不显示/无响应。
     // .allowBluetooth 只对 playAndRecord/record 有效,配 .playback 会抛 kAudioSessionUnspecifiedError。
     private func configureAudioSession() {
