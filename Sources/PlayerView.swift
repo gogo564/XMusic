@@ -193,7 +193,7 @@ struct PlayerView: View {
     // MARK: - Body Area (cover <-> full-height lyrics)
 
     private func bodyArea(width: CGFloat) -> some View {
-        let coverSize = min(width * 0.74, 320)
+        let coverSize = min(width * 0.84, 380)
         return ZStack {
             if showInPlaceLyrics {
                 fullLyricsView
@@ -300,7 +300,7 @@ struct PlayerView: View {
         let idx = playerManager.currentLyricIndex
         guard !lines.isEmpty, idx >= 0, idx < lines.count else { return [] }
         var out: [VisibleLyric] = []
-        for offset in -2...2 {
+        for offset in -4...4 {
             let li = idx + offset
             if lines.indices.contains(li) {
                 out.append(VisibleLyric(id: li, diff: offset, text: lines[li].text))
