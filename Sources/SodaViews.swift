@@ -27,7 +27,7 @@ struct SodaTrackListView: View {
             } else {
                 ForEach(Array(songs.enumerated()), id: \.element.id) { idx, song in
                     SongRow(song: song, showSource: true) { s in
-                        player.play(song: s, in: songs, index: idx, presentPlayer: false, sceneName: title)
+                        player.play(song: s, in: songs, index: idx, sceneName: title)
                         registerQueueRefresh()
                     }
                 }
@@ -161,10 +161,14 @@ struct SodaModeChipsView: View {
 }
 
 /// 汽水场景模式列表：45 个场景 + 常用三模式优先，点击进入该模式推荐流播放。
+/// 注意：这里不用 NavigationLink 再 push 一层歌单——iOS 15 NavigationView 两层 push 后
+/// 弹全屏播放器再下拉关闭时导航栈会回退导致歌单消失（首页标签只有一层 push 正常）。
+/// 因此点击模式后就地显示歌单（同层替换内容），歌单左上角提供返回模式列表按钮。
 struct SodaModeListView: View {
     @State private var modes: [SodaAPIClient.SodaFeedMode] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var selectedMode: SodaAPIClient.SodaFeedMode?
 
     private let gridColumns = [
         GridItem(.flexible(), spacing: 15),
@@ -173,31 +177,9 @@ struct SodaModeListView: View {
     ]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                if isLoading {
-                    HStack { Spacer(); ProgressView(); Spacer() }.padding(30)
-                } else if let errorMessage {
-                    VStack(spacing: 10) {
-                        Text("模式加载失败").font(.headline)
-                        Text(errorMessage).font(.caption).foregroundColor(.secondary)
-                        Button("重试") { Task { await loadModes() } }.buttonStyle(.bordered)
-                    }
-                    .frame(maxWidth: .infinity).padding(30)
-                } else {
-                    modeGrid
-                }
-            }
-            .padding(.vertical)
-        }
-        .navigationTitle("场景音乐")
-        .onAppear { Task { await loadModes() } }
-    }
-
-    private var modeGrid: some View {
-        LazyVGrid(columns: gridColumns, spacing: 18) {
-            ForEach(modes) { m in
-                NavigationLink(destination: SodaTrackListView(
+        Group {
+            if let m = selectedMode {
+                SodaTrackListView(
                     title: m.text,
                     load: {
                         try await SodaAPIClient.shared.dailyMixTracks(
@@ -205,7 +187,50 @@ struct SodaModeListView: View {
                             mode: m.type == "preference_mode" ? m.mode : nil
                         )
                     }
-                )) {
+                )
+                .navigationBarBackButtonHidden(false)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if isLoading {
+                            HStack { Spacer(); ProgressView(); Spacer() }.padding(30)
+                        } else if let errorMessage {
+                            VStack(spacing: 10) {
+                                Text("模式加载失败").font(.headline)
+                                Text(errorMessage).font(.caption).foregroundColor(.secondary)
+                                Button("重试") { Task { await loadModes() } }.buttonStyle(.bordered)
+                            }
+                            .frame(maxWidth: .infinity).padding(30)
+                        } else {
+                            modeGrid
+                        }
+                    }
+                    .padding(.vertical)
+                }
+            }
+        }
+        .navigationTitle(selectedMode?.text ?? "场景音乐")
+        .toolbar {
+            if selectedMode != nil {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        selectedMode = nil
+                    } label: {
+                        Image(systemName: "chevron.left")
+                        Text("场景")
+                    }
+                }
+            }
+        }
+        .onAppear { Task { await loadModes() } }
+    }
+
+    private var modeGrid: some View {
+        LazyVGrid(columns: gridColumns, spacing: 18) {
+            ForEach(modes) { m in
+                Button {
+                    selectedMode = m
+                } label: {
                     modeCell(m)
                 }
                 .buttonStyle(.plain)
