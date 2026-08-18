@@ -173,12 +173,12 @@ final class CarPlaySceneDelegate: UIResponder,
             log("setRootTemplate skipped: no controller or rootTemplate")
             return
         }
-        // 与音流（flutter_carplay）一致：iOS 15 上只能用同步版 setRootTemplate(_:animated:)。
-        // 带 completion 的版本在 iOS 15 有 bug，completion 永不回调 -> 模板从未呈现 -> 黑屏。
-        // （同步版在 iOS 15 被标记 deprecated，但正是可行方案，flutter_carplay 同样这么用。）
-        controller.setRootTemplate(template, animated: true)
+        // 与成功案例一致(RadioCarPlay / flutter_carplay / vanities):completion 传 nil。
+        // 之前尝试 completion 闭包与 iOS 15 同步版行为一致 —— 问题不在 API 形式,
+        // 而在场景生命周期架构(现已是 UIApplicationDelegate + 显式双场景)。
+        controller.setRootTemplate(template, animated: true, completion: nil)
         rootTemplateSucceeded = true
-        log("setRootTemplate called (sync, deprecated-but-working)")
+        log("called setRootTemplate (animated, completion: nil)")
     }
 
     private func loadingItem() -> CPListItem {

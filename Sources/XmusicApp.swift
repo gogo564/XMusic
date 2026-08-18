@@ -1,62 +1,54 @@
 import SwiftUI
 
-@main
-struct XmusicApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var player = PlayerManager.shared
-    @StateObject private var playlistStore = PlaylistStore.shared
-    @StateObject private var downloader = DownloadService.shared
-    @StateObject private var recentStore = RecentStore.shared
-    @StateObject private var libraryStore = LibraryStore.shared
-    @StateObject private var networkMonitor = NetworkMonitor.shared
-    @StateObject private var theme = ThemeManager.shared
-    @State private var needsConfig = false
+// @main 已移至 AppDelegate(参考音流/flutter_carplay 与 vanities/carplay-swiftui:
+// CarPlay 模板场景在纯 SwiftUI @main App 生命周期下可能不被车机正常接受)。
+// 这里只保留根视图与工厂方法,供 SceneDelegate 包装进 UIHostingController。
 
-    var body: some Scene {
-        WindowGroup {
-            RootView(needsConfig: $needsConfig)
-                .environmentObject(player)
-                .environmentObject(playlistStore)
-                .environmentObject(downloader)
-                .environmentObject(recentStore)
-                .environmentObject(libraryStore)
-                .environmentObject(networkMonitor)
-                .environmentObject(theme)
-                .tint(theme.accent)
-                .preferredColorScheme(theme.isDark ? .dark : .light)
-                .onAppear {
-                    needsConfig = AppConfigStore.shared.token == nil
-                    if !needsConfig {
-                        Task {
-                            await playlistStore.refresh()
-                            await libraryStore.loadIfNeeded()
-                        }
-                    }
-                }
-        }
-    }
+func makeRootView() -> some View {
+    let theme = ThemeManager.shared
+    return RootView()
+        .environmentObject(PlayerManager.shared)
+        .environmentObject(PlaylistStore.shared)
+        .environmentObject(DownloadService.shared)
+        .environmentObject(RecentStore.shared)
+        .environmentObject(LibraryStore.shared)
+        .environmentObject(NetworkMonitor.shared)
+        .environmentObject(theme)
+        .tint(theme.accent)
+        .preferredColorScheme(theme.isDark ? .dark : .light)
 }
 
 struct RootView: View {
-    @Binding var needsConfig: Bool
+    @State private var needsConfig = false
     @EnvironmentObject var networkMonitor: NetworkMonitor
 
     var body: some View {
-        if needsConfig {
-            NavigationView {
-                SettingsView(needsConfig: $needsConfig)
-            }
-            .navigationViewStyle(.stack)
-        } else if networkMonitor.isConnected {
-            ContentView()
-                .sheet(isPresented: $needsConfig) {
-                    NavigationView {
-                        SettingsView(needsConfig: $needsConfig)
-                    }
-                    .navigationViewStyle(.stack)
+        Group {
+            if needsConfig {
+                NavigationView {
+                    SettingsView(needsConfig: $needsConfig)
                 }
-        } else {
-            OfflineView()
+                .navigationViewStyle(.stack)
+            } else if networkMonitor.isConnected {
+                ContentView()
+                    .sheet(isPresented: $needsConfig) {
+                        NavigationView {
+                            SettingsView(needsConfig: $needsConfig)
+                        }
+                        .navigationViewStyle(.stack)
+                    }
+            } else {
+                OfflineView()
+            }
+        }
+        .onAppear {
+            needsConfig = AppConfigStore.shared.token == nil
+            if !needsConfig {
+                Task {
+                    await PlaylistStore.shared.refresh()
+                    await LibraryStore.shared.loadIfNeeded()
+                }
+            }
         }
     }
 }
