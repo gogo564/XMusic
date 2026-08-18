@@ -358,7 +358,19 @@ struct HomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "场景音乐", icon: "theatermasks")
+                HStack {
+                    SectionHeader(title: "场景音乐", icon: "theatermasks")
+                    Spacer()
+                    if SodaAPIClient.shared.isConfigured {
+                        NavigationLink(destination: SodaModeListView()) {
+                            Text("查看全部")
+                                .font(.subheadline)
+                                .foregroundColor(ThemeManager.shared.accent)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+
                 if !SodaAPIClient.shared.isConfigured {
                     Text("未配置汽水服务，无法加载场景模式")
                         .font(.subheadline)
