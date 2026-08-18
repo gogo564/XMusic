@@ -211,8 +211,8 @@ struct SodaModeListView: View {
         }
         .navigationTitle(selectedMode?.text ?? "场景音乐")
         .toolbar {
-            if selectedMode != nil {
-                ToolbarItem(placement: .navigationBarLeading) {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if selectedMode != nil {
                     Button {
                         selectedMode = nil
                     } label: {
