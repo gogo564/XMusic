@@ -57,11 +57,10 @@ final class CarPlaySceneDelegate: UIResponder,
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         log("sceneDidBecomeActive role=\(scene.session.role.rawValue)")
-        // 兜底：CarPlay 场景重新激活时，若根模板尚未成功呈现则重试。
-        // didConnect 时系统可能尚未就绪导致 setRootTemplate completion 不回调；
-        // 场景真正成为前台后重设通常能成功。若已成功则不再重设以免打断。
-        if let controller = interfaceController, rootTemplate != nil, !rootTemplateSucceeded {
-            log("sceneDidBecomeActive retrying setRootTemplate")
+        // 兜底（flutter_carplay 同款 force 更新）：场景激活时若车机当前没有任何根模板，
+        // 说明之前的 setRootTemplate 未被接受（黑屏），强制重设。已呈现则不打扰。
+        if let controller = interfaceController, controller.rootTemplate == nil, rootTemplate != nil {
+            log("becomeActive: no root presented, forcing re-set")
             setRootTemplate()
         }
     }
@@ -174,24 +173,12 @@ final class CarPlaySceneDelegate: UIResponder,
             log("setRootTemplate skipped: no controller or rootTemplate")
             return
         }
-        // 与成功案例 RadioCarPlay 一致：animated: true。
-        controller.setRootTemplate(template, animated: true) { [weak self] success, error in
-            guard let self else { return }
-            if let error = error {
-                self.log("setRootTemplate FAILED success=\(success) error=\(error.localizedDescription)")
-            } else {
-                self.log("setRootTemplate OK success=\(success)")
-            }
-            if success {
-                self.rootTemplateSucceeded = true
-                if self.pendingRefresh {
-                    self.log("flushing deferred root update")
-                    self.pendingRefresh = false
-                    self.buildRootTemplate(placeholder: false)
-                }
-            }
-        }
-        log("called setRootTemplate (retained instance)")
+        // 与音流（flutter_carplay）一致：iOS 15 上只能用同步版 setRootTemplate(_:animated:)。
+        // 带 completion 的版本在 iOS 15 有 bug，completion 永不回调 -> 模板从未呈现 -> 黑屏。
+        // （同步版在 iOS 15 被标记 deprecated，但正是可行方案，flutter_carplay 同样这么用。）
+        controller.setRootTemplate(template, animated: true)
+        rootTemplateSucceeded = true
+        log("setRootTemplate called (sync, deprecated-but-working)")
     }
 
     private func loadingItem() -> CPListItem {
