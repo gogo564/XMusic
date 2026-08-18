@@ -27,14 +27,12 @@
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
+		<true/>
 		<key>UISceneConfigurations</key>
 		<dict>
-			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<key>UIWindowSceneSessionRoleCarPlay</key>
 			<array>
 				<dict>
-					<key>UISceneClassName</key>
-					<string>CPTemplateApplicationScene</string>
 					<key>UISceneConfigurationName</key>
 					<string>CarPlayConfiguration</string>
 					<key>UISceneDelegateClassName</key>
