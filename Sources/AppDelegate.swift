@@ -15,8 +15,18 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        Log.write("[AppDelegate] didFinishLaunchingWithOptions")
         configureAudioSession()
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration? {
+        Log.write("[AppDelegate] configurationForConnecting role=\(connectingSceneSession.role.rawValue)")
+        return nil
     }
 
     // CarPlay 音频 App 必须有 playback 类别 + 激活,否则车机不显示/无响应。

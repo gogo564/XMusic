@@ -13,11 +13,15 @@ final class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
         willConnectTo session: UISceneSession,
         options connectionOptions: UIScene.ConnectionOptions
     ) {
-        guard let windowScene = scene as? UIWindowScene else { return }
-
+        Log.write("[Phone] willConnectToSession role=\(session.role.rawValue)")
+        guard let windowScene = scene as? UIWindowScene else {
+            Log.write("[Phone] scene is not UIWindowScene")
+            return
+        }
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = UIHostingController(rootView: makeRootView())
         self.window = window
         window.makeKeyAndVisible()
+        Log.write("[Phone] window shown bounds=\(window.bounds)")
     }
 }

@@ -33,8 +33,6 @@
 			<key>UIWindowSceneSessionRoleCarPlay</key>
 			<array>
 				<dict>
-					<key>UISceneConfigurationName</key>
-					<string>CarPlayConfiguration</string>
 					<key>UISceneDelegateClassName</key>
 					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
 				</dict>
