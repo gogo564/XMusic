@@ -24,7 +24,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
         switch connectingSceneSession.role {
-        case UIWindowScene.SessionRole.carPlay:
+        case UISceneSessionRole.carPlay:
             let config = UISceneConfiguration(
                 name: "CarPlayConfiguration",
                 sessionRole: connectingSceneSession.role
