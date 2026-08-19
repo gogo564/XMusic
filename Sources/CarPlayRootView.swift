@@ -1,5 +1,12 @@
 import SwiftUI
 
+private enum Tab: String, CaseIterable, Identifiable {
+    case playlists = "歌单"
+    case recent = "最近"
+    case nowPlaying = "正在播放"
+    var id: String { rawValue }
+}
+
 // CarPlay 窗口自绘 UI(参考 CarTube 的 UIWindowSceneSessionRoleCarPlay 路线,
 // 不依赖 CPInterfaceController 模板系统,绕开 TrollStore 下模板渲染被拒的问题)。
 //
@@ -19,52 +26,25 @@ struct CarPlayRootView: View {
     @StateObject private var recentStore = RecentStore.shared
     @State private var loaded = false
 
+    @State private var selectedTab: Tab = .playlists
+
     var body: some View {
         NavigationView {
-            List {
-                if player.currentSong != nil {
-                    Section {
-                        CarPlayNowPlayingRow()
-                    }
-                }
-                Section("本地歌单") {
-                    CarPlayNavLink(
-                        title: "我喜欢的音乐",
-                        count: playlistStore.songs(kind: .love, playlistID: "").count,
-                        coverURL: playlistStore.songs(kind: .love, playlistID: "").first?.imageURL ?? ""
-                    ) {
-                        CarPlaySongList(title: "我喜欢的音乐", songs: playlistStore.songs(kind: .love, playlistID: ""))
-                    }
-                    CarPlayNavLink(
-                        title: "默认列表",
-                        count: playlistStore.songs(kind: .defaultList, playlistID: "").count,
-                        coverURL: playlistStore.songs(kind: .defaultList, playlistID: "").first?.imageURL ?? ""
-                    ) {
-                        CarPlaySongList(title: "默认列表", songs: playlistStore.songs(kind: .defaultList, playlistID: ""))
-                    }
-                    ForEach(playlistStore.playlists, id: \.id) { pl in
-                        CarPlayNavLink(
-                            title: pl.name,
-                            count: playlistStore.songs(kind: .user, playlistID: pl.id).count,
-                            coverURL: playlistStore.songs(kind: .user, playlistID: pl.id).first?.imageURL ?? ""
-                        ) {
-                            CarPlaySongList(title: pl.name, songs: playlistStore.songs(kind: .user, playlistID: pl.id))
-                        }
-                    }
-                }
-                Section("最近播放") {
-                    CarPlayNavLink(
-                        title: "最近播放",
-                        count: recentStore.items.count,
-                        coverURL: recentStore.items.first?.song?.imageURL ?? ""
-                    ) {
-                        CarPlaySongList(title: "最近播放", songs: recentStore.items.compactMap { $0.song })
+            VStack(spacing: 0) {
+                CarPlayTabBar(selected: $selectedTab)
+                Group {
+                    switch selectedTab {
+                    case .playlists:
+                        playlistGrid
+                    case .recent:
+                        recentGrid
+                    case .nowPlaying:
+                        nowPlayingView
                     }
                 }
             }
-            .listStyle(.insetGrouped)
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             .navigationTitle("LX音乐")
+            .navigationBarTitleDisplayMode(.inline)
             // 关键:锁定字体缩放,CarPlay 上 accessibility 档会让文字过大溢出
             .environment(\.sizeCategory, .large)
         }
@@ -75,6 +55,110 @@ struct CarPlayRootView: View {
                 Task { await playlistStore.refresh() }
             }
         }
+    }
+
+    // MARK: - 2×2 大卡片网格(本地歌单)
+    private var playlistGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+                CarPlayCardNavLink(
+                    title: "我喜欢的音乐",
+                    count: playlistStore.songs(kind: .love, playlistID: "").count,
+                    coverURL: playlistStore.songs(kind: .love, playlistID: "").first?.imageURL ?? ""
+                ) {
+                    CarPlaySongList(title: "我喜欢的音乐", songs: playlistStore.songs(kind: .love, playlistID: ""))
+                }
+                CarPlayCardNavLink(
+                    title: "默认列表",
+                    count: playlistStore.songs(kind: .defaultList, playlistID: "").count,
+                    coverURL: playlistStore.songs(kind: .defaultList, playlistID: "").first?.imageURL ?? ""
+                ) {
+                    CarPlaySongList(title: "默认列表", songs: playlistStore.songs(kind: .defaultList, playlistID: ""))
+                }
+                ForEach(playlistStore.playlists, id: \.id) { pl in
+                    CarPlayCardNavLink(
+                        title: pl.name,
+                        count: playlistStore.songs(kind: .user, playlistID: pl.id).count,
+                        coverURL: playlistStore.songs(kind: .user, playlistID: pl.id).first?.imageURL ?? ""
+                    ) {
+                        CarPlaySongList(title: pl.name, songs: playlistStore.songs(kind: .user, playlistID: pl.id))
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    // MARK: - 最近播放网格
+    private var recentGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+                ForEach(recentStore.items.prefix(6), id: \.id) { item in
+                    if let song = item.song {
+                        CarPlayCardNavLink(
+                            title: song.name,
+                            count: 0,
+                            coverURL: song.imageURL
+                        ) {
+                            CarPlaySongList(title: "最近播放", songs: recentStore.items.compactMap { $0.song })
+                        }
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    // MARK: - 正在播放视图
+    private var nowPlayingView: some View {
+        VStack {
+            if player.currentSong != nil {
+                CarPlayPlayerView()
+            } else {
+                Spacer()
+                Text("当前没有正在播放的歌曲")
+                    .font(.system(size: 16))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+        }
+    }
+}
+
+// 顶部功能标签栏
+private struct CarPlayTabBar: View {
+    @Binding var selected: Tab
+    private let tabs: [(Tab, String)] = [
+        (.playlists, "list.bullet.rectangle"),
+        (.recent, "clock"),
+        (.nowPlaying, "play.circle"),
+    ]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(tabs, id: \.0) { tab, icon in
+                Button {
+                    selected = tab
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: icon)
+                            .font(.system(size: 20))
+                        Text(tab.rawValue)
+                            .font(.system(size: 14, weight: selected == tab ? .bold : .regular))
+                    }
+                    .foregroundColor(selected == tab ? Color(.systemOrange) : .gray)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(selected == tab ? Color(.systemOrange).opacity(0.18) : Color.clear)
+                    )
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 }
 
@@ -126,7 +210,7 @@ private struct CarPlayListRow: View {
     }
 }
 
-private struct CarPlayNavLink<Destination: View>: View {
+private struct CarPlayCardNavLink<Destination: View>: View {
     let title: String
     let count: Int
     let coverURL: String
@@ -143,7 +227,41 @@ private struct CarPlayNavLink<Destination: View>: View {
         NavigationLink {
             destination
         } label: {
-            CarPlayListRow(title: title, subtitle: "\(count) 首", coverURL: coverURL)
+            VStack(spacing: 6) {
+                artwork
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                if count > 0 {
+                    Text("\(count) 首")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(red: 0.13, green: 0.13, blue: 0.14))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private var artwork: some View {
+        if coverURL.isEmpty {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.gray.opacity(0.22))
+                .frame(height: 90)
+                .overlay(
+                    Image(systemName: "music.note")
+                        .font(.system(size: 30))
+                        .foregroundColor(Color.gray.opacity(0.7))
+                )
+        } else {
+            LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 90, cornerRadius: 10)
+                .frame(height: 90)
         }
     }
 }
@@ -173,48 +291,6 @@ private struct CarPlaySongList: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .environment(\.sizeCategory, .large)
-    }
-}
-
-// "正在播放"入口行:整行可点击进播放页,播放/暂停作为独立 borderless 按钮放右侧
-// (避免 NavigationLink 内嵌 Button 在 iOS 15 点击冲突导致空白页)
-private struct CarPlayNowPlayingRow: View {
-    @StateObject private var player = PlayerManager.shared
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            NavigationLink {
-                CarPlayPlayerView()
-            } label: {
-                HStack {
-                    LXCachedImage(
-                        urlString: player.currentSong?.imageURL ?? "",
-                        placeholder: "music.note",
-                        size: 44,
-                        cornerRadius: 8
-                    )
-                    CarPlayListRow(
-                        title: player.currentSong?.name ?? "未在播放",
-                        subtitle: player.currentSong?.singer ?? ""
-                    )
-                    Spacer()
-                    // 占位,保持整行可点;真正按钮在 overlay
-                    Color.clear.frame(width: 48, height: 44)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                player.togglePlayPause()
-            } label: {
-                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 30))
-                    .foregroundColor(.accentColor)
-                    .padding(.trailing, 8)
-            }
-            .buttonStyle(.borderless)
-        }
     }
 }
 
