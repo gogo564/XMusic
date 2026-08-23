@@ -65,6 +65,8 @@ final class PlayerManager: ObservableObject {
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
+    private var interruptionObserver: NSObjectProtocol?
+    private var wasPlayingBeforeInterruption = false
     private var lrc = LRC.parse(nil)
     private var shuffledIndices: [Int] = []
     private var prefetchTask: Task<Void, Never>?
@@ -85,6 +87,7 @@ final class PlayerManager: ObservableObject {
     private init() {
         self.quality = AppConfigStore.shared.config.defaultQuality
         setupAudioSession()
+        setupInterruptionHandling()
         setupPeriodicTimeObserver()
         observeEnd()
         setupRemoteCommands()
@@ -100,6 +103,51 @@ final class PlayerManager: ObservableObject {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("🔊 [Player] Audio Session Error: \(error.localizedDescription)")
+        }
+    }
+
+    /// 来电/闹钟等打断音频会话：打断时暂停，结束后复活会话并按中断前状态续播。
+    /// 不订阅到达的 interruptionNotification 会导致「来电不暂停、挂断不恢复」——
+    /// 来电时系统夺走音频但 isPlaying 仍为 true；挂断后会话已失活也不会自动恢复。
+    private func setupInterruptionHandling() {
+        guard interruptionObserver == nil else { return }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            guard let info = notification.userInfo,
+                  let rawType = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: rawType) else { return }
+
+            switch type {
+            case .began:
+                Log.write("📵 [Player] 音频被打断 (来电/闹钟) → 暂停")
+                self.wasPlayingBeforeInterruption = self.isPlaying
+                if self.isPlaying {
+                    self.player.pause()
+                    self.isPlaying = false
+                    self.updateNowPlaying()
+                }
+            case .ended:
+                Log.write("📞 [Player] 打断结束 → 复活会话")
+                try? AVAudioSession.sharedInstance().setActive(true)
+                let options = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+                let shouldResume = AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
+                // 来电/闹钟结束后默认续播；个别打断类型带 shouldResume 标志时更应恢复。
+                if self.wasPlayingBeforeInterruption || shouldResume {
+                    if self.player.currentItem == nil, self.currentSong != nil {
+                        self.resolveAndPlay(self.currentQueueSong)
+                    } else {
+                        self.player.play()
+                        self.isPlaying = true
+                        self.updateNowPlaying()
+                    }
+                }
+            @unknown default:
+                break
+            }
         }
     }
 
