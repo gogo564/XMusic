@@ -18,6 +18,10 @@ class MusicCacheManager: ObservableObject {
     // 线程安全：读写都在 cachedFilesLock 下进行。
     private var cachedFiles = Set<String>()
     private let cachedFilesLock = NSLock()
+
+    /// 汽水整首缓存的任务指纹集合（防重复入队）。读写受 sodaCacheLock 保护。
+    private var sodaCacheTasks = Set<String>()
+    private let sodaCacheLock = NSLock()
     
     private var cacheDirectory: URL? {
         guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
@@ -216,6 +220,86 @@ class MusicCacheManager: ObservableObject {
         task.resume()
     }
     
+    /// 汽水加密流整首后台缓存（播放即缓存）：
+    /// App 调 /song/stream 拿 CDN main_url + 密钥 → 直连汽水 CDN 拉加密字节 →
+    /// 客户端 SodaCTR 本地解密 → 落盘缓存目录（沿用 \(id)_\(quality).mp3 命名，
+    /// 使 isCached/cachedURL 命中，下次播放直接读本地文件，不再走 CDN + NAS 签名）。
+    /// 音频字节全程不过服务器，服务器只做签名/resolve。
+    func cacheSodaTrack(trackID: String, id: String, quality: String) {
+        guard !trackID.isEmpty, !isCached(id: id, quality: quality) else { return }
+        let taskKey = "soda_" + id + "_" + quality
+        sodaCacheLock.lock()
+        if sodaCacheTasks.contains(taskKey) {
+            sodaCacheLock.unlock()
+            return
+        }
+        sodaCacheTasks.insert(taskKey)
+        sodaCacheLock.unlock()
+        print("📥 [Cache] Soda whole-song caching start: \(id)_\(quality)")
+        let cacheTask = Task(priority: .utility) {
+            do {
+                let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
+                guard !stream.mainURL.isEmpty, let url = URL(string: stream.mainURL) else {
+                    self.finishSodaCache(taskKey)
+                    return
+                }
+                // 直连 CDN 拉取加密音频
+                let (bytes, response) = try await URLSession.shared.bytes(from: url)
+                let total = Int64(response.expectedContentLength)
+                var data = Data()
+                for try await chunk in bytes {
+                    data.append(chunk)
+                    if data.count > 256 * 1024 * 1024 {
+                        throw NSError(domain: "Cache", code: -6,
+                                      userInfo: [NSLocalizedDescriptionKey: "音频文件过大"])
+                    }
+                }
+                guard total <= 0 || !data.isEmpty else { throw NSError(domain: "Cache", code: -7, userInfo: [:]) }
+
+                // 客户端解密后落盘
+                let decrypted = try await Task.detached(priority: .utility) {
+                    try self.decryptSodaForCache(data, hexKey: stream.hexKey)
+                }.value
+                guard let dest = self.getFileURL(for: id, quality: quality) else {
+                    self.finishSodaCache(taskKey)
+                    return
+                }
+                if self.fileManager.fileExists(atPath: dest.path) {
+                    try self.fileManager.removeItem(at: dest)
+                }
+                try decrypted.write(to: dest)
+                self.addCachedFile(dest.lastPathComponent)
+                self.finishSodaCache(taskKey)
+                self.enforceCacheLimit()
+                print("✅ [Cache] Soda whole-song cached: \(id)_\(quality)")
+            } catch {
+                self.finishSodaCache(taskKey)
+                print("❌ [Cache] Soda whole-song cache failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func finishSodaCache(_ taskKey: String) {
+        sodaCacheLock.lock()
+        sodaCacheTasks.remove(taskKey)
+        sodaCacheLock.unlock()
+    }
+
+    /// 客户端解密汽水 CDN 音频字节（cenc-aes-ctr）→ 可播 m4a。无密钥或非 cenc 时原样返回。
+    private func decryptSodaForCache(_ data: Data, hexKey: String) throws -> Data {
+        guard hexKey.count == 32 else { return data }
+        do {
+            let parser = SodaCencParser(data)
+            let parsed = try parser.parse(keyHex: hexKey)
+            let ctr = SodaCTR(key: parsed.keyBytes)
+            let decrypted = try ctr.decryptRange(samples: parsed.samples, encryptedData: data,
+                                                 startSample: 0, endSample: parsed.samples.count)
+            return try parser.buildDecryptedFile(parsed: parsed, decryptedMdat: decrypted)
+        } catch {
+            return data // 非 cenc（明文直链）→ 原样落盘
+        }
+    }
+
     func clearCache() {
         guard let cacheDirectory = cacheDirectory else { return }
         do {

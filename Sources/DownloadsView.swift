@@ -130,7 +130,7 @@ struct DownloadsView: View {
                         if isEditing {
                             toggleSelection(d.id)
                         } else {
-                            downloader.playDownloaded(d)
+                            downloader.playDownloaded(d, in: downloadedSorted)
                         }
                     }
                     .swipeActions(edge: .trailing) {

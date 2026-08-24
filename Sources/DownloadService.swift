@@ -113,6 +113,21 @@ final class DownloadService: NSObject, ObservableObject {
         }
     }
 
+    /// 从已下载列表点播：把整个列表作为播放队列，保证连续播放 / 下一首圈在当前列表内。
+    func playDownloaded(_ d: DownloadedSong, in queue: [DownloadedSong]) {
+        let url = downloadsDir.appendingPathComponent(d.localFile)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let songs = queue.compactMap { d -> LXSong? in
+            guard let rawJSON = d.rawJSON, let data = rawJSON.data(using: .utf8) else { return nil }
+            return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]).flatMap { LXSong($0) }
+        }
+        if let idx = songs.firstIndex(where: { $0.id == d.id }) {
+            PlayerManager.shared.play(song: songs[idx], in: songs, index: idx)
+        } else {
+            playDownloaded(d)
+        }
+    }
+
     func download(_ song: LXSong, quality: String) {
         let songID = song.id + "_" + quality
         guard activeTasks[songID] == nil else { return }
@@ -137,32 +152,95 @@ final class DownloadService: NSObject, ObservableObject {
         }
     }
 
-    /// 汽水歌下载：调 qishui-api /song/play 获取解密后的完整音频（会员通道），直接保存到 Downloads 目录
-    @MainActor
+    /// 汽水歌下载（CDN 直连 + 客户端解密）：
+    /// App 调 /song/stream 拿 CDN main_url + 密钥 → 直连汽水 CDN 拉加密字节 → 本地 SodaCTR 解密 →
+    /// 落成可播 m4a。音频字节全程不过服务器，服务器只做签名/resolve。
     private func startSodaDownload(song: LXSong, quality: String) async {
+        let songKey = song.id + "_" + quality
         let trackID = song.songmid ?? ""
-        guard !trackID.isEmpty, let base = SodaAPIClient.shared.playbackBaseURL else {
-            activeTasks[song.id + "_" + quality] = nil
-            activeSongs[song.id + "_" + quality] = nil
+        guard !trackID.isEmpty else {
+            clearActive(songKey)
             return
         }
-        let mapped = SodaAPIClient.shared.qualityParam(quality)
-        var comps = URLComponents(string: base + "/song/play")
-        comps?.queryItems = [
-            URLQueryItem(name: "track_id", value: trackID),
-            URLQueryItem(name: "quality", value: mapped),
-        ]
-        guard let url = comps?.url else {
-            activeTasks[song.id + "_" + quality] = nil
-            activeSongs[song.id + "_" + quality] = nil
-            return
+        do {
+            let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
+            guard !stream.mainURL.isEmpty, let url = URL(string: stream.mainURL) else {
+                clearActive(songKey)
+                return
+            }
+            await MainActor.run { self.activeTasks[songKey] = 0.05 }
+
+            // 直连 CDN 顺序拉取加密音频（流式累加，按已收字节报进度）
+            let cdnSession = URLSession(configuration: .default)
+            let (bytes, response) = try await cdnSession.bytes(from: url)
+            let total = Int64(response.expectedContentLength)
+            var data = Data()
+            for try await chunk in bytes {
+                data.append(chunk)
+                if total > 0 {
+                    let p = min(Double(data.count) / Double(total), 0.9)
+                    await MainActor.run { self.activeTasks[songKey] = p }
+                }
+                if data.count > 256 * 1024 * 1024 {
+                    throw NSError(domain: "Download", code: -6,
+                                  userInfo: [NSLocalizedDescriptionKey: "音频文件过大"])
+                }
+            }
+
+            // 客户端解密（复用流式解密组件），后台执行，落成可播 m4a
+            let finalData = try await Task.detached(priority: .userInitiated) {
+                try self.decryptForDownload(data, hexKey: stream.hexKey)
+            }.value
+
+            let docsDir = self.downloadsDir
+            let idPart = song.songmid ?? song.id
+            let destName = "\(Date().timeIntervalSince1970)_\(idPart).m4a"
+            let dest = docsDir.appendingPathComponent(destName)
+            try? FileManager.default.removeItem(at: dest)
+            try finalData.write(to: dest)
+            let downloaded = DownloadedSong(
+                id: song.id,
+                name: song.name,
+                singer: song.singer,
+                source: "soda",
+                songmid: idPart,
+                quality: quality,
+                fileURL: dest.absoluteString,
+                createdAt: Date(),
+                localFile: destName,
+                rawJSON: song.jsonData.flatMap { String(data: $0, encoding: .utf8) }
+            )
+            DispatchQueue.main.async {
+                self.downloadedSongs.append(downloaded)
+                self.saveIndex()
+                self.activeTasks[songKey] = nil
+                self.activeSongs[songKey] = nil
+            }
+        } catch {
+            clearActive(songKey)
         }
-        var request = URLRequest(url: url)
-        request.setValue("audio/mp4", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 180
-        let task = session.downloadTask(with: request)
-        tasks[song.id + "_" + quality] = task
-        task.resume()
+    }
+
+    /// 客户端解密 CDN 音频字节 → 可播 m4a。无密钥或非 cenc 时原样返回。
+    private func decryptForDownload(_ data: Data, hexKey: String) throws -> Data {
+        guard hexKey.count == 32 else { return data }
+        do {
+            let parser = SodaCencParser(data)
+            let parsed = try parser.parse(keyHex: hexKey)
+            let ctr = SodaCTR(key: parsed.keyBytes)
+            let decrypted = try ctr.decryptRange(samples: parsed.samples, encryptedData: data,
+                                                 startSample: 0, endSample: parsed.samples.count)
+            return try parser.buildDecryptedFile(parsed: parsed, decryptedMdat: decrypted)
+        } catch {
+            // 非 cenc（明文直链）→ 原样返回，交由播放器识别
+            return data
+        }
+    }
+
+    @MainActor
+    private func clearActive(_ songKey: String) {
+        activeTasks[songKey] = nil
+        activeSongs[songKey] = nil
     }
 
     @MainActor

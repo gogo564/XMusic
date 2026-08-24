@@ -31,7 +31,7 @@ struct OfflineView: View {
                     } else {
                         ForEach(downloadedSongs) { song in
                             Button {
-                                playDownloaded(song)
+                                downloader.playDownloaded(song, in: downloadedSongs)
                             } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: "arrow.down.circle.fill")
@@ -62,7 +62,7 @@ struct OfflineView: View {
                     } else {
                         ForEach(cachedRecent, id: \.track.id) { item in
                             Button {
-                                player.play(song: item.song)
+                                playCached(item)
                             } label: {
                                 HStack(spacing: 12) {
                                     LXCachedImage(urlString: item.track.imageUrl ?? "", size: 44, cornerRadius: 8)
@@ -94,7 +94,13 @@ struct OfflineView: View {
         .navigationViewStyle(.stack)
     }
 
-    private func playDownloaded(_ song: DownloadedSong) {
-        downloader.playDownloaded(song)
+    private func playCached(_ item: (track: RecentTrack, song: LXSong)) {
+        // 传整个"已缓存"列表作为播放队列，保证连续播放 / 下一首都圈在当前列表内，不跳出到旧队列。
+        let queue = cachedRecent.map { $0.song }
+        if let idx = queue.firstIndex(where: { $0.id == item.song.id }) {
+            player.play(song: item.song, in: queue, index: idx)
+        } else {
+            player.play(song: item.song)
+        }
     }
 }

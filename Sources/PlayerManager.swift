@@ -503,7 +503,8 @@ final class PlayerManager: ObservableObject {
             do {
                 let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: mapped)
                 if stream.hexKey.count == 32 {
-                    // 加密流：走 sodastream:// 流式解密
+                    // 加密流：走 sodastream:// 流式解密；同时后台整首解密落盘（播放即缓存）
+                    MusicCacheManager.shared.cacheSodaTrack(trackID: trackID, id: song.id, quality: quality)
                     let customURL = SodaStreamLoader.customURL(trackID: trackID, quality: mapped)
                     return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
                 }

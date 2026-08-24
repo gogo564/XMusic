@@ -93,7 +93,13 @@ struct RecentPlaylistView: View {
     }
 
     private func playFromList(_ item: RecentTrack) {
-        playerManager.playFromRecent(item)
+        // 传整个"最近播放"列表作为播放队列，保证连续播放 / 下一首都圈在当前列表内，不跳出到旧队列。
+        let queue = recentStore.items.compactMap { $0.song }
+        if let idx = queue.firstIndex(where: { $0.id == item.id }) {
+            playerManager.play(song: item.song ?? queue[idx], in: queue, index: idx)
+        } else if let song = item.song {
+            playerManager.play(song: song)
+        }
         dismiss()
     }
 
