@@ -584,7 +584,13 @@ struct HomeView: View {
 
             ForEach(recentStore.items.prefix(5)) { item in
                 Button(action: {
-                    player.playFromRecent(item)
+                    // 用整个最近播放列表作队列，保证切歌不跳出当前列表
+                    let recents = recentStore.items.compactMap { $0.song }
+                    if let idx = recents.firstIndex(where: { $0.id == item.id }) {
+                        player.play(song: recents[idx], in: recents, index: idx)
+                    } else {
+                        player.playFromRecent(item)
+                    }
                 }) {
                     HStack {
                         AsyncImage(url: URL(string: (item.imageUrl ?? "").normalizedMusicUrl)) { image in

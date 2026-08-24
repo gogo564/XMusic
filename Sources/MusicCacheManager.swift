@@ -79,14 +79,13 @@ class MusicCacheManager: ObservableObject {
     }
 
     func isCached(id: String, quality: String) -> Bool {
-        guard let fileURL = getFileURL(for: id, quality: quality) else { return false }
-        guard fileManager.fileExists(atPath: fileURL.path) else { return false }
+        guard let fileURL = matchedCacheURL(for: id, quality: quality) else { return false }
         // Validate the cached file is actually valid audio data
         return isValidAudioFile(at: fileURL)
     }
 
     func cachedURL(for id: String, quality: String) -> URL? {
-        guard let fileURL = getFileURL(for: id, quality: quality), fileManager.fileExists(atPath: fileURL.path) else { return nil }
+        guard let fileURL = matchedCacheURL(for: id, quality: quality) else { return nil }
         // Validate the cached file is actually valid audio data
         guard isValidAudioFile(at: fileURL) else {
             print("⚠️ [Cache] Cached file is invalid, removing: \(id)_\(quality)")
@@ -260,7 +259,7 @@ class MusicCacheManager: ObservableObject {
                 let decrypted = try await Task.detached(priority: .utility) {
                     try self.decryptSodaForCache(data, hexKey: stream.hexKey)
                 }.value
-                guard let dest = self.getFileURL(for: id, quality: quality) else {
+                guard let dest = self.getSodaFileURL(for: id, quality: quality) else {
                     self.finishSodaCache(taskKey)
                     return
                 }
@@ -386,6 +385,41 @@ class MusicCacheManager: ObservableObject {
     
     private func getFileURL(for id: String, quality: String) -> URL? {
         return cacheDirectory?.appendingPathComponent("\(id)_\(quality).mp3")
+    }
+
+    /// 汽水缓存落盘用 .m4a：汽水解密后是 m4a 内容，若沿用 .mp3 扩展名，
+    /// AVPlayer 会按 MP3 解析 m4a 导致时长错乱/不播放/秒切歌。
+    private func getSodaFileURL(for id: String, quality: String) -> URL? {
+        return cacheDirectory?.appendingPathComponent("\(id)_\(quality).m4a")
+    }
+
+    /// 命中查询：优先 .m4a。若发现旧版误命名的 .mp3 汽水缓存（内容实为 m4a，
+    /// 以 ftyp 魔数判断），自动改名为 .m4a 修复，避免 AVPlayer 按 MP3 解析 m4a。
+    private func matchedCacheURL(for id: String, quality: String) -> URL? {
+        if let sodaURL = getSodaFileURL(for: id, quality: quality), fileManager.fileExists(atPath: sodaURL.path) {
+            return sodaURL
+        }
+        if let mp3URL = getFileURL(for: id, quality: quality), fileManager.fileExists(atPath: mp3URL.path) {
+            if isM4AContent(at: mp3URL), let sodaURL = getSodaFileURL(for: id, quality: quality) {
+                try? fileManager.moveItem(at: mp3URL, to: sodaURL)
+                removeCachedFile(mp3URL.lastPathComponent)
+                if fileManager.fileExists(atPath: sodaURL.path) {
+                    addCachedFile(sodaURL.lastPathComponent)
+                    return sodaURL
+                }
+            }
+            return mp3URL
+        }
+        return nil
+    }
+
+    /// 判断文件内容是否为 m4a/mp4（起始含 ftyp box），用于识别误命名为 .mp3 的汽水缓存。
+    private func isM4AContent(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let data = handle.readData(ofLength: 16)
+        guard data.count >= 8 else { return false }
+        return String(bytes: data[4..<8], encoding: .ascii) == "ftyp"
     }
 
     private func getLegacyFileURL(for id: String) -> URL? {

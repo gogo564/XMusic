@@ -79,6 +79,10 @@ final class PlayerManager: ObservableObject {
     private var nextItem: AVPlayerItem?
     private var nextItemKey = ""
     private var sodaFailTask: Task<Void, Never>?
+    /// 最近一次实际起播的时间戳。用于过滤 AVPlayer 换 item 时滞留投递的
+    /// AVPlayerItemDidPlayToEndTime 通知：刚起播（<1s）就收到结束通知，几乎都是
+    /// 缓存文件 seek 起始时间异常或旧 item 残留通知，不应触发自动切歌。
+    private var lastItemPlayStartTime = Date.distantPast
 
     /// 场景/推荐流队列播放到末尾时，调用此闭包拉取一批新歌替换队列。
     /// 由 SodaTrackListView 等视图注册；不注册则保持原有循环行为。
@@ -187,8 +191,12 @@ final class PlayerManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            guard let self = self else { return }
+            // 过滤滞留的结束通知：换 item 后 1 秒内就收到 DidPlayToEnd，几乎都是
+            // 旧 item 的残留通知或缓存文件 seek 时间异常误报，不是真的播完。
+            guard Date().timeIntervalSince(self.lastItemPlayStartTime) >= 1 else { return }
             Log.write("⏭️ [Player] DidPlayToEnd → auto next")
-            self?.playNext(auto: true)
+            self.playNext(auto: true)
         }
     }
 
@@ -646,6 +654,8 @@ final class PlayerManager: ObservableObject {
             item = makeItem(for: url)
         }
         player.replaceCurrentItem(with: item)
+        // 记录本次起播时间，供 DidPlayToEnd 守卫过滤旧 item 的滞留结束通知
+        lastItemPlayStartTime = Date()
         observeItemStatus(item)
         observeEnd()
         self.sourceName = sourceName
