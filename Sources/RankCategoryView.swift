@@ -116,6 +116,7 @@ struct RankSongsView: View {
         Task {
             do {
                 songs = try await LXAPIClient.shared.getLeaderBoardSongs(source: source, bangid: rankId)
+                player.silentSetPlaylist(songs)
             } catch {
                 songs = []
             }

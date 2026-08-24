@@ -70,6 +70,8 @@ struct SodaTrackListView: View {
         do {
             let tracks = try await load()
             songs = tracks.map { $0.toLXSong() }
+            // 进入该歌单即将其预置为播放队列，点任意一首/切歌都圈在当前歌单内
+            player.silentSetPlaylist(songs)
         } catch {
             errorMessage = error.localizedDescription
         }

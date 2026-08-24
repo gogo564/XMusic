@@ -271,6 +271,16 @@ final class PlayerManager: ObservableObject {
         }
     }
 
+    /// 静默预置队列：把浏览到的歌单设为播放队列，但**不触发播放、不打断当前正在播的歌**。
+    /// 供歌单详情页进入/加载完成后调用，实现「翻到哪个歌单就以哪个歌单为队列」——
+    /// 之后点播放器切歌/点列表任意一首都圈在当前歌单内，不会沿用上一个残留队列。
+    func silentSetPlaylist(_ songs: [LXSong], startIndex: Int = 0) {
+        guard !songs.isEmpty else { return }
+        queue = songs
+        queueRefreshHandler = nil
+        currentIndex = startIndex
+    }
+
     func setPlaylistFromRecent(_ tracks: [RecentTrack]) {
         let songs = tracks.compactMap { $0.song }
         if songs.isEmpty { return }

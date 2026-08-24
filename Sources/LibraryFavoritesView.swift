@@ -258,6 +258,7 @@ struct LibraryAlbumDetailView: View {
         errorMessage = nil
         do {
             songs = try await LXAPIClient.shared.getAlbumSongs(source: album.source, albumID: album.albumID, cover: album.picUrl)
+            player.silentSetPlaylist(songs)
         } catch {
             errorMessage = error.localizedDescription
         }
