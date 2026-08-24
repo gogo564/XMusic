@@ -142,6 +142,13 @@ class MusicCacheManager: ObservableObject {
         if headerData.count >= 8 {
             let ftypRange = 4..<min(8, headerData.count)
             if String(bytes: headerData[ftypRange], encoding: .ascii) == "ftyp" {
+                // 若容量仍是未被解密的加密文件（moov 数据前含 senc/sinf/tenc 加密 box），
+                // 判定无效：这种文件能读到时长但样本为密文，AVPlayer 解码必失败。
+                // （历史 bug 可能把未解密的加密字节落盘成 .m4a，需逐出以免误当可播缓存。）
+                if containsEncryptionBoxes(at: url) {
+                    print("⚠️ [Cache] Encrypted (undecrypted) cache, rejecting: \(url.lastPathComponent)")
+                    return false
+                }
                 return true
             }
         }
@@ -162,6 +169,27 @@ class MusicCacheManager: ObservableObject {
         }
 
         print("⚠️ [Cache] Unknown audio header: \(url.lastPathComponent), bytes: \(String(format: "%02X %02X %02X %02X", headerBytes[0], headerBytes[1], headerBytes[2], headerBytes[3]))")
+        return false
+    }
+
+    /// 检测 m4a 是否仍是未解密的加密文件：扫描文件头部区域里的 moov 结构，
+    /// 若存在 senc/sinf/tenc/saiz/saio 等 CENC 加密 box 则判定为未解密。
+    /// moov 通常位于文件前部且体积远小于音频数据，只读前 1MB 足够覆盖。
+    private func containsEncryptionBoxes(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return true }
+        defer { try? handle.close() }
+        let data = handle.readData(ofLength: 1024 * 1024)
+        guard data.count >= 8 else { return true }
+        // 在 moov box 内部扫描加密子 box 类型。直接把整个头部当连续字节搜索，
+        // 因为 senc/sinf/tenc/saiz/saio/schm/cenc 这些 ASCII 类型名极不可能出现在音频样本
+        // 明文里，误报风险可忽略。
+        let candidates = ["senc", "sinf", "tenc", "saiz", "saio"]
+        for c in candidates {
+            let needle = Data(c.utf8)
+            if data.range(of: needle) != nil {
+                return true
+            }
+        }
         return false
     }
     
@@ -284,19 +312,18 @@ class MusicCacheManager: ObservableObject {
         sodaCacheLock.unlock()
     }
 
-    /// 客户端解密汽水 CDN 音频字节（cenc-aes-ctr）→ 可播 m4a。无密钥或非 cenc 时原样返回。
+    /// 客户端解密汽水 CDN 音频字节（cenc-aes-ctr）→ 可播 m4a。
+    /// 无密钥（明文直链）原样返回；有密钥但解析/解密失败则抛错（缓存失败），
+    /// 绝不把未解密的加密字节落盘——否则会产生「假缓存」：能读到时长但样本仍是
+    /// 密文，AVPlayer 解码失败 → item failed / 无进度条 / 点播放无反应。
     private func decryptSodaForCache(_ data: Data, hexKey: String) throws -> Data {
         guard hexKey.count == 32 else { return data }
-        do {
-            let parser = SodaCencParser(data)
-            let parsed = try parser.parse(keyHex: hexKey)
-            let ctr = SodaCTR(key: parsed.keyBytes)
-            let decrypted = try ctr.decryptRange(samples: parsed.samples, encryptedData: data,
-                                                 startSample: 0, endSample: parsed.samples.count)
-            return try parser.buildDecryptedFile(parsed: parsed, decryptedMdat: decrypted)
-        } catch {
-            return data // 非 cenc（明文直链）→ 原样落盘
-        }
+        let parser = SodaCencParser(data)
+        let parsed = try parser.parse(keyHex: hexKey)
+        let ctr = SodaCTR(key: parsed.keyBytes)
+        let decrypted = try ctr.decryptRange(samples: parsed.samples, encryptedData: data,
+                                             startSample: 0, endSample: parsed.samples.count)
+        return try parser.buildDecryptedFile(parsed: parsed, decryptedMdat: decrypted)
     }
 
     func clearCache() {
