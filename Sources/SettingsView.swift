@@ -45,7 +45,7 @@ struct SettingsView: View {
                 NavigationLink(destination: accountSettings()) { navRow(icon: "person.crop.circle", title: "账号登录", subtitle: "QQ / 网易云") }
             }
             Section {
-                NavigationLink(destination: appearanceSettings()) { navRow(icon: "paintpalette", title: "外观与主题", subtitle: "\(theme.color.name) · \(theme.mode.name)") }
+                NavigationLink(destination: appearanceSettings()) { navRow(icon: "moon.fill", title: "外观与主题", subtitle: "\(theme.mode.name) · 纯黑月亮模式") }
                 NavigationLink(destination: playbackSettings()) { navRow(icon: "play.circle", title: "播放", subtitle: quality) }
             }
             // 连接动作
@@ -296,7 +296,7 @@ struct SettingsView: View {
     // MARK: - 外观与主题子页
     private func appearanceSettings() -> some View {
         Form {
-            Section(header: Text("外观")) {
+            Section(header: Text("外观模式")) {
                 Picker("模式", selection: $theme.mode) {
                     ForEach(ThemeMode.allCases) { m in
                         Text(m.name).tag(m)
@@ -306,36 +306,9 @@ struct SettingsView: View {
                 .onChange(of: theme.mode) { _ in
                     theme.updateForSystemAppearance()
                 }
-                HStack {
-                    Text("主题色")
-                    Spacer()
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(ThemeColor.allCases) { c in
-                                Button {
-                                    theme.color = c
-                                } label: {
-                                    Circle()
-                                        .fill(c.color)
-                                        .frame(width: 26, height: 26)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(theme.color == c ? Color.accentColor : Color.clear, lineWidth: 2.5)
-                                                .padding(-3)
-                                        )
-                                        .overlay(
-                                            Image(systemName: "checkmark")
-                                                .font(.system(size: 11, weight: .bold))
-                                                .foregroundColor(.white)
-                                                .opacity(theme.color == c ? 1 : 0)
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(c.name)
-                            }
-                        }
-                    }
-                }
+                Text("深色 = 纯黑月亮模式（背景全黑、文字高对比）；主题色已收敛为黑白极简。")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
             }
         }
         .navigationTitle("外观与主题")

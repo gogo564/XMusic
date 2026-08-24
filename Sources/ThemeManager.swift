@@ -93,6 +93,7 @@ final class ThemeManager: ObservableObject {
     func updateForSystemAppearance() {
         guard mode == .system else { return }
         isDark = UITraitCollection.current.userInterfaceStyle == .dark
+        AppDelegate.refreshGlobalAppearance()
     }
 
     private func applyMode() {
@@ -113,33 +114,30 @@ final class ThemeManager: ObservableObject {
                 .forEach { $0.overrideUserInterfaceStyle = .unspecified }
             isDark = UITraitCollection.current.userInterfaceStyle == .dark
         }
+        // 深/浅切换后刷新全局 appearance，让 List 背景实时跟随纯黑/白色
+        AppDelegate.refreshGlobalAppearance()
     }
 
-    /// 主题色（点缀层）——深色模式下把过暗的主题色自动提亮，确保 tint/accent 元素在深底上可读
+    /// 主题色（点缀层）——纯黑极简模式下去彩色：深色=近白点缀，亮色=深灰点缀。
+    /// 不再随用户主题色（themeColor 仍保留仅供记录/未来扩展，UI 层统一中性）。
     var accent: Color {
-        let c = color.uiColor
-        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-        if isDark && b < 0.48 {
-            return Color(hue: h, saturation: max(s, 0.25), brightness: 0.62, opacity: 1)
-        }
-        return color.color
+        isDark ? Color(white: 0.78) : Color(white: 0.13)
     }
     /// 主题色的柔和底（选中 chip / 图标小面积底）——纯黑白自适应，主题色只做内容不占大面积
     var accentSurface: Color {
-        isDark ? Color(white: 0.22) : Color(uiColor: .systemGray5)
+        isDark ? Color(white: 0.12) : Color(uiColor: .systemGray5)
     }
-    /// 卡片/分组底色（按深浅自适应，纯黑白高对比）
+    /// 卡片/分组底色（按深浅自适应，纯黑白高对比；深色=纯黑月亮模式）
     var cardBackground: Color {
-        isDark ? Color(white: 0.13) : Color(uiColor: .systemGray6)
+        isDark ? Color.black : Color(uiColor: .systemGray6)
     }
     /// 次级底色（按钮胶囊未选中）
     var chipBackground: Color {
-        isDark ? Color(white: 0.18) : Color(uiColor: .systemGray5)
+        isDark ? Color(white: 0.10) : Color(uiColor: .systemGray5)
     }
     /// 分隔/描边
     var separator: Color {
-        isDark ? Color(white: 1.0).opacity(0.08) : Color(white: 0.08)
+        isDark ? Color(white: 1.0).opacity(0.10) : Color(white: 0.08)
     }
     /// 主文字
     var primaryText: Color {
@@ -148,8 +146,9 @@ final class ThemeManager: ObservableObject {
     var secondaryText: Color {
         isDark ? Color.white.opacity(0.62) : Color(uiColor: .secondaryLabel)
     }
+    /// 页面主体背景：深色=纯黑，亮色=系统分组灰（月亮模式：整页黑）
     var pageBackground: Color {
-        isDark ? Color(red: 0.05, green: 0.05, blue: 0.07) : Color(uiColor: .systemGroupedBackground)
+        isDark ? Color.black : Color(uiColor: .systemGroupedBackground)
     }
     /// 渐变封面主体用：accent 派生比
     var gradientStart: Color { accent }
