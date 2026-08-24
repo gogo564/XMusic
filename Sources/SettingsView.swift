@@ -35,6 +35,106 @@ struct SettingsView: View {
     private let qualities = ["128k", "320k", "flac"]
 
     var body: some View {
+        List {
+            // 目录导航区
+            Section {
+                NavigationLink(destination: serverSettings()) { navRow(icon: "server.rack", title: "服务器", subtitle: baseURL.isEmpty ? "未配置" : baseURL) }
+                NavigationLink(destination: sodaSettings()) { navRow(icon: "speaker.wave.2", title: "汽水音乐服务", subtitle: sodaBaseURL.isEmpty ? "未配置" : "推荐/歌单/播放") }
+            }
+            Section {
+                NavigationLink(destination: accountSettings()) { navRow(icon: "person.crop.circle", title: "账号登录", subtitle: "QQ / 网易云") }
+            }
+            Section {
+                NavigationLink(destination: appearanceSettings()) { navRow(icon: "paintpalette", title: "外观与主题", subtitle: "\(theme.color.name) · \(theme.mode.name)") }
+                NavigationLink(destination: playbackSettings()) { navRow(icon: "play.circle", title: "播放", subtitle: quality) }
+            }
+            // 连接动作
+            Section {
+                Button {
+                    Task { await testConnection() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isTesting {
+                            ProgressView()
+                        } else {
+                            Text("测试连接并登录")
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(isTesting || baseURL.isEmpty)
+            }
+            if let msg = statusMessage {
+                Section {
+                    Text(msg)
+                        .foregroundColor(isError ? .red : .green)
+                        .font(.system(size: 13))
+                }
+            }
+            if AppConfigStore.shared.token != nil {
+                Section {
+                    Button("退出登录（清除 Token）", role: .destructive) {
+                        AppConfigStore.shared.clearToken()
+                        statusMessage = "已退出登录"
+                        isError = false
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .sheet(isPresented: $showQRLogin) {
+            SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/tx")!)
+        }
+        .sheet(isPresented: $showWyQRLogin) {
+            SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/wy")!)
+        }
+        .navigationTitle("设置")
+        .safeAreaInset(edge: .bottom) {
+            Color.clear
+                .frame(height: 120)
+                .allowsHitTesting(false)
+        }
+        .onAppear(perform: load)
+        .onAppear {
+            // CI 注入开关：配置页出现即自动执行“测试连接并登录”，避免 UI 坐标点击不可靠
+            if UserDefaults.standard.bool(forKey: "autoLoginOnLaunch") && AppConfigStore.shared.token == nil {
+                Task { await testConnection() }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("保存") { save() }
+                    .font(.body.weight(.semibold))
+            }
+        }
+    }
+
+    // MARK: - 目录行
+    private func navRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(theme.accent)
+                .frame(width: 28, height: 28)
+                .background(theme.accentSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.medium))
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - 服务器子页
+    private func serverSettings() -> some View {
         Form {
             Section(header: Text("服务器")) {
                 TextField("地址（如 http://gogo564.x3322.net:9527）", text: $baseURL)
@@ -50,6 +150,13 @@ struct SettingsView: View {
                 TextField("播放器密码 (Web播放器)", text: $playerPassword)
                     .autocapitalization(.none)
             }
+        }
+        .navigationTitle("服务器")
+    }
+
+    // MARK: - 汽水服务子页
+    private func sodaSettings() -> some View {
+        Form {
             Section(header: Text("汽水音乐服务")) {
                 TextField("汽水服务地址（如 http://gogo564.x3322.net:3310）", text: $sodaBaseURL)
                     .keyboardType(.URL)
@@ -143,12 +250,52 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
             }
-            Section(header: Text("播放")) {
-                Picker("默认音质", selection: $quality) {
-                    ForEach(qualities, id: \.self) { Text($0) }
+        }
+        .navigationTitle("汽水音乐服务")
+    }
+
+    // MARK: - 账号登录子页
+    private func accountSettings() -> some View {
+        Form {
+            Section(header: Text("QQ 音乐账号")) {
+                Button {
+                    showQRLogin = true
+                } label: {
+                    HStack {
+                        Label("扫码更换 QQ 音乐账号", systemImage: "qrcode")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
                 }
-                Toggle("源失效自动切换", isOn: $autoSwitch)
+                Text("用手机 QQ 扫描二维码登录后立即生效，原账号将被替换。")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
             }
+            Section(header: Text("网易云音乐账号")) {
+                Button {
+                    showWyQRLogin = true
+                } label: {
+                    HStack {
+                        Label("扫码更换网易云账号", systemImage: "qrcode")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Text("用网易云音乐 App 扫描二维码登录后立即生效，原账号将被替换（VIP 歌曲可正常播放）。")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .navigationTitle("账号登录")
+    }
+
+    // MARK: - 外观与主题子页
+    private func appearanceSettings() -> some View {
+        Form {
             Section(header: Text("外观")) {
                 Picker("模式", selection: $theme.mode) {
                     ForEach(ThemeMode.allCases) { m in
@@ -190,107 +337,21 @@ struct SettingsView: View {
                     }
                 }
             }
-            Section(header: Text("QQ 音乐账号")) {
-                Button {
-                    showQRLogin = true
-                } label: {
-                    HStack {
-                        Label("扫码更换 QQ 音乐账号", systemImage: "qrcode")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                    }
+        }
+        .navigationTitle("外观与主题")
+    }
+
+    // MARK: - 播放设置子页
+    private func playbackSettings() -> some View {
+        Form {
+            Section(header: Text("播放")) {
+                Picker("默认音质", selection: $quality) {
+                    ForEach(qualities, id: \.self) { Text($0) }
                 }
-                Text("用手机 QQ 扫描二维码登录后立即生效，原账号将被替换。")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            Section(header: Text("网易云音乐账号")) {
-                Button {
-                    showWyQRLogin = true
-                } label: {
-                    HStack {
-                        Label("扫码更换网易云账号", systemImage: "qrcode")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                Text("用网易云音乐 App 扫描二维码登录后立即生效，原账号将被替换（VIP 歌曲可正常播放）。")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            Section {
-                Button {
-                    Task { await testConnection() }
-                } label: {
-                    HStack {
-                        Spacer()
-                        if isTesting {
-                            ProgressView()
-                        } else {
-                            Text("测试连接并登录")
-                        }
-                        Spacer()
-                    }
-                }
-                .disabled(isTesting || baseURL.isEmpty)
-            }
-            if let msg = statusMessage {
-                Section {
-                    Text(msg)
-                        .foregroundColor(isError ? .red : .green)
-                        .font(.system(size: 13))
-                }
-            }
-            if AppConfigStore.shared.token != nil {
-                Section {
-                    Button("退出登录（清除 Token）", role: .destructive) {
-                        AppConfigStore.shared.clearToken()
-                        statusMessage = "已退出登录"
-                        isError = false
-                    }
-                }
+                Toggle("源失效自动切换", isOn: $autoSwitch)
             }
         }
-        .sheet(isPresented: $showQRLogin) {
-            SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/tx")!)
-        }
-        .sheet(isPresented: $showWyQRLogin) {
-            SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/wy")!)
-        }
-        .navigationTitle("设置")
-        .safeAreaInset(edge: .bottom) {
-            Color.clear
-                .frame(height: 120)
-                .allowsHitTesting(false)
-        }
-        .onAppear(perform: load)
-        .onAppear {
-            // CI 注入开关：配置页出现即自动执行“测试连接并登录”，避免 UI 坐标点击不可靠
-            if UserDefaults.standard.bool(forKey: "autoLoginOnLaunch") && AppConfigStore.shared.token == nil {
-                Task { await testConnection() }
-            }
-        }
-        .onChange(of: quality) { newQ in
-            var cfg = AppConfigStore.shared.config
-            cfg.defaultQuality = newQ
-            AppConfigStore.shared.config = cfg
-            PlayerManager.shared.quality = newQ
-        }
-        .onChange(of: autoSwitch) { newV in
-            var cfg = AppConfigStore.shared.config
-            cfg.autoSwitchSource = newV
-            AppConfigStore.shared.config = cfg
-        }
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("保存") { save() }
-                    .font(.body.weight(.semibold))
-            }
-        }
+        .navigationTitle("播放")
     }
 
     private func load() {

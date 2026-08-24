@@ -34,6 +34,7 @@ func makeRootView() -> some View {
 struct RootView: View {
     @State private var needsConfig = false
     @EnvironmentObject var networkMonitor: NetworkMonitor
+    @EnvironmentObject var theme: ThemeManager
 
     var body: some View {
         Group {
@@ -54,6 +55,11 @@ struct RootView: View {
                 OfflineView()
             }
         }
+        // 主题动态生效：theme 是 @EnvironmentObject，其 @Published(color/mode/isDark)
+        // 任一变化都会让 body 重算，从而带 .tint/.preferredColorScheme 一起重新求值，
+        // 实现切主题色/深浅立即生效（避免 .id 整树重建打断播放）。
+        .tint(theme.accent)
+        .preferredColorScheme(theme.isDark ? .dark : .light)
         .onAppear {
             needsConfig = AppConfigStore.shared.token == nil
             if !needsConfig {

@@ -130,6 +130,55 @@ final class ThemeManager: ObservableObject {
     var chipBackground: Color {
         isDark ? Color(white: 0.18) : Color(uiColor: .systemGray5)
     }
+    // MARK: - Material3 风格动态层次色板（随主题色 & 深浅自动派生）
+    /// 亮色模式底色偏暖的主题色调，暗色模式更深的同色系底（替代纯灰，更精致）
+    var tintedBackground: Color {
+        if isDark {
+            return blend(accent, over: Color(white: 0.055), ratio: 0.06)
+        } else {
+            return blend(accent, over: Color(white: 0.97), ratio: 0.05)
+        }
+    }
+    /// 分区卡片背景（比 tintedBackground 更实一层）
+    var elevatedSurface: Color {
+        if isDark {
+            return blend(accent, over: Color(white: 0.12), ratio: 0.10)
+        } else {
+            return blend(accent, over: Color.white, ratio: 0.07)
+        }
+    }
+    /// 内容区背景（页面主体）
+    var materialPageBackground: Color {
+        isDark ? Color(red: 0.045, green: 0.045, blue: 0.06) : Color(uiColor: .systemGroupedBackground)
+    }
+    /// 承载强调色的柔和底（选中的 chip/图标底）
+    var accentSurface: Color {
+        if isDark {
+            return blend(accent, over: Color(white: 0.13), ratio: 0.28)
+        } else {
+            return blend(accent, over: Color.white, ratio: 0.16)
+        }
+    }
+    /// 便于 UI 鉴定的指纹：随主题色/深浅变化，用作根视图 id 强制重建
+    var fingerprint: String { "\(color.rawValue)-\(isDark ? "d" : "l")" }
+    /// 把 t 色按 ratio 混在 base 之上
+    private func blend(_ t: Color, over base: Color, ratio: CGFloat) -> Color {
+        let tc = toRGB(t)
+        let bc = toRGB(base)
+        let r = CGFloat(min(max(ratio, 0), 1))
+        return Color(
+            red: double(tc.r * r + bc.r * (1 - r)),
+            green: double(tc.g * r + bc.g * (1 - r)),
+            blue: double(tc.b * r + bc.b * (1 - r))
+        )
+    }
+    private func double(_ v: CGFloat) -> Double { Double(v) }
+    private func toRGB(_ color: Color) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
+        let c = color.uiColor
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return (r, g, b)
+    }
     /// 分隔/描边
     var separator: Color {
         isDark ? Color(white: 1.0).opacity(0.08) : Color(white: 0.08)
