@@ -174,10 +174,13 @@ final class ThemeManager: ObservableObject {
     }
     private func double(_ v: CGFloat) -> Double { Double(v) }
     private func toRGB(_ color: Color) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
-        let c = color.uiColor
+        // 复用项目已有的 UIColor(Color) 扩展（ThemeManager.swift 内）取组件
+        let ui = UIColor(color)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        c.getRed(&r, green: &g, blue: &b, alpha: &a)
-        return (r, g, b)
+        if ui.getRed(&r, green: &g, blue: &b, alpha: &a) {
+            return (r, g, b)
+        }
+        return (0.5, 0.5, 0.5)
     }
     /// 分隔/描边
     var separator: Color {
