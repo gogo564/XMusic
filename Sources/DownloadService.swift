@@ -159,13 +159,13 @@ final class DownloadService: NSObject, ObservableObject {
         let songKey = song.id + "_" + quality
         let trackID = song.songmid ?? ""
         guard !trackID.isEmpty else {
-            clearActive(songKey)
+            await clearActive(songKey)
             return
         }
         do {
             let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
             guard !stream.mainURL.isEmpty, let url = URL(string: stream.mainURL) else {
-                clearActive(songKey)
+                await clearActive(songKey)
                 return
             }
             await MainActor.run { self.activeTasks[songKey] = 0.05 }
@@ -217,7 +217,7 @@ final class DownloadService: NSObject, ObservableObject {
                 self.activeSongs[songKey] = nil
             }
         } catch {
-            clearActive(songKey)
+            await clearActive(songKey)
         }
     }
 

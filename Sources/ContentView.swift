@@ -96,7 +96,7 @@ struct HomeView: View {
     @State private var isLoadingBoards = true
     @State private var squareLoading = true
     @State private var sodaPlaylists: [SodaAPIClient.SodaPlaylist] = []
-    @State private var sodaRadios: [SodaAPIClient.SodaRadio] = []
+    @State private var sodaCollections: [SodaAPIClient.SodaCollection] = []
     @State private var sodaMyPlaylists: [SodaAPIClient.SodaPlaylist] = []
 
     let gridColumns = [
@@ -453,36 +453,73 @@ struct HomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "汽水电台", icon: "dot.radiowaves.left.and.right")
+                SectionHeader(title: "汽水云收藏", icon: "heart.fill")
                     .padding(.horizontal)
 
-                if sodaRadios.isEmpty {
-                    Text("暂无电台")
+                if isLoadingBoards {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .padding(.vertical, 20)
+                } else if sodaCollections.isEmpty {
+                    Text("暂无汽水云收藏\n可在汽水 App 收藏歌单或专辑后刷新")
                         .font(.subheadline)
                         .foregroundColor(ThemeManager.shared.secondaryText)
                         .padding(.horizontal)
                 } else {
                     UIKitHorizontalScrollView {
-                        HStack(spacing: 8) {
-                            ForEach(sodaRadios) { radio in
-                                NavigationLink(destination: SodaTrackListView(
-                                    title: radio.title,
-                                    load: { try await SodaAPIClient.shared.radioTracks(radioID: radio.id) }
-                                )) {
-                                    Text(radio.title)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 7)
-                                        .background(ThemeManager.shared.chipBackground)
-                                        .foregroundColor(ThemeManager.shared.primaryText)
-                                        .clipShape(Capsule())
+                        HStack(spacing: 12) {
+                            ForEach(sodaCollections) { item in
+                                NavigationLink(destination: SodaCollectionListView()) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        AsyncImage(url: URL(string: item.coverURL)) { image in
+                                            image.resizable().aspectRatio(contentMode: .fill)
+                                        } placeholder: {
+                                            Image(systemName: item.type == "album" ? "square.stack" : "music.note.list")
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .frame(width: 132, height: 132)
+                                        .cornerRadius(12)
+                                        .clipped()
+                                        Text(item.title)
+                                            .font(.caption.bold())
+                                            .lineLimit(1)
+                                            .foregroundColor(.primary)
+                                        Text(item.subtitle)
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                            .foregroundColor(ThemeManager.shared.secondaryText)
+                                    }
+                                    .frame(width: 132)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(PlainButtonStyle())
                             }
+                            // 末尾固定入口：查看全部云收藏
+                            NavigationLink(destination: SodaCollectionListView()) {
+                                VStack(spacing: 8) {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(.systemGray5))
+                                        .frame(width: 132, height: 132)
+                                        .overlay(
+                                            Image(systemName: "chevron.right")
+                                                .font(.system(size: 20, weight: .semibold))
+                                        )
+                                    Text("查看全部")
+                                        .font(.caption.bold())
+                                        .foregroundColor(.primary)
+                                    Text("\(sodaCollections.count) 个")
+                                        .font(.caption2)
+                                        .foregroundColor(ThemeManager.shared.secondaryText)
+                                }
+                                .frame(width: 132)
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
                         .padding(.horizontal)
                     }
-                    .frame(height: 36)
+                    .frame(height: 190)
                 }
             }
         }
@@ -624,7 +661,7 @@ struct HomeView: View {
         defer { isLoadingBoards = false }
         sodaPlaylists = (try? await SodaAPIClient.shared.recommendPlaylists()) ?? []
         sodaMyPlaylists = (try? await SodaAPIClient.shared.myPlaylists()) ?? []
-        sodaRadios = (try? await SodaAPIClient.shared.radioList()) ?? []
+        sodaCollections = (try? await SodaAPIClient.shared.myCollections()) ?? []
     }
 
     @MainActor
