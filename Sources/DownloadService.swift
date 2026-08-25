@@ -185,19 +185,22 @@ final class DownloadService: NSObject, ObservableObject {
                 return
             }
             let total = Int64(response.expectedContentLength)
-            Log.write("📥 [SodaDL] CDN 连接 status=\((response as? HTTPURLResponse)?.statusCode ?? -1) len=\(total)")
+            Log.write("📥 [SodaDL] CDN 连接 status=\((response as? HTTPURLResponse)?.statusCode ?? -1) len=\(total <= 0 ? "未知(无Content-Length)" : "\(total / 1024)KB")")
             var data = Data()
-            var lastReport = 0
+            var lastReportBytes = 0
             for try await chunk in bytes {
                 data.append(chunk)
-                if total > 0 {
-                    let p = min(Double(data.count) / Double(total), 0.9)
-                    await MainActor.run { self.activeTasks[songKey] = p }
-                    // 每 25% 记一条进度日志
-                    let pct = Int(p * 100)
-                    if pct >= lastReport + 25 {
-                        lastReport = pct
-                        Log.write("📥 [SodaDL] 进度 \(pct)% (\(data.count / 1024)KB)")
+                // 每 512KB 打一条，无 Content-Length 时也能看到确实在下
+                if data.count - lastReportBytes >= 512 * 1024 {
+                    lastReportBytes = data.count
+                    Log.write("📥 [SodaDL] 已收 \(data.count / 1024)KB\(total > 0 ? " / \(total / 1024)KB" : "")")
+                }
+                await MainActor.run {
+                    if total > 0 {
+                        self.activeTasks[songKey] = min(Double(data.count) / Double(total), 0.95)
+                    } else {
+                        // 无 Content-Length：按字节启发式推进（按一首约 2.5MB 估），避免进度永远 0%
+                        self.activeTasks[songKey] = min(0.05 + Double(data.count) / 2_500_000.0 * 0.9, 0.92)
                     }
                 }
                 if data.count > 256 * 1024 * 1024 {
