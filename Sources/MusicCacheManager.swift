@@ -94,12 +94,20 @@ class MusicCacheManager: ObservableObject {
         guard let fileURL = matchedCacheURL(for: id, quality: quality) else { return nil }
         // Validate the cached file is actually valid audio data
         guard isValidAudioFile(at: fileURL) else {
-        Log.write("⚠️ [Cache] Cached file is invalid, removing: \(id)_\(quality)")
+            Log.write("⚠️ [Cache] Cached file is invalid, removing: \(id)_\(quality)")
             try? fileManager.removeItem(at: fileURL)
             removeCachedFile(fileURL.lastPathComponent)
+            invalidateValidationMemo(url)
             return nil
         }
         return fileURL
+    }
+
+    /// 删除/改写文件后失效该校验记忆，避免旧结论被复用
+    private func invalidateValidationMemo(_ url: URL) {
+        validationMemoLock.lock()
+        validationMemo.removeValue(forKey: url.path)
+        validationMemoLock.unlock()
     }
 
     /// Check if a file contains valid audio data by examining file size and magic bytes
@@ -361,12 +369,19 @@ class MusicCacheManager: ObservableObject {
     /// 无密钥（明文直链）原样返回；有密钥但解析/解密失败则抛错（缓存失败），
     /// 绝不把未解密的加密字节落盘——否则会产生「假缓存」：能读到时长但样本仍是
     /// 密文，AVPlayer 解码失败 → item failed / 无进度条 / 点播放无反应。
+    ///
+    /// 关键：decryptRange 的 encryptedData 必须从 mdat 数据区起点开始（不含
+    /// ftyp/moov 头）。此前直接传整个文件导致样本错位、原头部字节混进输出，
+    /// 写出的文件必含 senc/saiz 特征 → 校验判为未解密 → 缓存永不命中。
     private func decryptSodaForCache(_ data: Data, hexKey: String) throws -> Data {
         guard hexKey.count == 32 else { return data }
         let parser = SodaCencParser(data)
         let parsed = try parser.parse(keyHex: hexKey)
         let ctr = SodaCTR(key: parsed.keyBytes)
-        let decrypted = try ctr.decryptRange(samples: parsed.samples, encryptedData: data,
+        let start = parsed.encryptedMdatDataOffset
+        guard data.count > start else { throw SodaCencError.invalidStructure("mdat 数据区缺失") }
+        let payload = data.subdata(in: start..<data.count)
+        let decrypted = try ctr.decryptRange(samples: parsed.samples, encryptedData: payload,
                                              startSample: 0, endSample: parsed.samples.count)
         return try parser.buildDecryptedFile(parsed: parsed, decryptedMdat: decrypted)
     }
@@ -382,6 +397,9 @@ class MusicCacheManager: ObservableObject {
             cachedFilesLock.lock()
             cachedFiles.removeAll()
             cachedFilesLock.unlock()
+            validationMemoLock.lock()
+            validationMemo.removeAll()
+            validationMemoLock.unlock()
             updateCacheSize()
         } catch {
         Log.write("❌ [Cache] Clear cache failed: \(error.localizedDescription)")
