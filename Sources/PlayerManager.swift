@@ -79,10 +79,13 @@ final class PlayerManager: ObservableObject {
     private var nextItem: AVPlayerItem?
     private var nextItemKey = ""
     private var sodaFailTask: Task<Void, Never>?
-    /// 汽水流式地址记录（song.id → sodastream:// URL），供 item 瞬时 failed 后原地重建重试
+    /// 汽水流式地址记录（song.id → sodastream:// URL）
     private var sodaStreamURLs: [String: String] = [:]
-    /// 已自动重建重试过的歌曲（每次手动起播时清除，防无限重试）
-    private var sodaRetriedKeys = Set<String>()
+    /// 每首歌最近一次实际起播的完整 URL（file:// 或 sodastream://）。
+    /// item 瞬时 failed 原地重建时用它，避免有缓存的歌被错误地拉回网络流。
+    private var lastPlaybackURLs: [String: String] = [:]
+    /// 当前起播周期内的自动重建次数（resolveAndPlay 时清零，最多自动救两次）
+    private var sodaRetryCounts: [String: Int] = [:]
     /// 最近一次实际起播的时间戳。用于过滤 AVPlayer 换 item 时滞留投递的
     /// AVPlayerItemDidPlayToEndTime 通知：刚起播（<1s）就收到结束通知，几乎都是
     /// 缓存文件 seek 起始时间异常或旧 item 残留通知，不应触发自动切歌。
@@ -561,6 +564,8 @@ final class PlayerManager: ObservableObject {
 
     private func resolveAndPlay(_ song: LXSong?) {
         guard let song = song else { return }
+        // 每次新的解析起播（含自动切歌）都重置自动重建次数
+        sodaRetryCounts.removeValue(forKey: song.id)
         // 注意：不在解析前切换 currentSong。只有真正起播（startPlayback）成功才切，
         // 这样解析期间封面/歌词仍是上一首，声音与画面一致；解析失败则维持上一首继续播。
         isResolving = true
@@ -664,8 +669,8 @@ final class PlayerManager: ObservableObject {
         sodaFailTask?.cancel()
         sodaFailTask = nil
         resolveFailStreak = 0
-        // 手动起播视为新一轮尝试，允许再次自动重建重试
-        sodaRetriedKeys.remove(song.id)
+        // 记录本次实际起播地址：瞬时 failed 原地重建时优先复用它（file 缓存不回退网络流）
+        lastPlaybackURLs[song.id] = url.absoluteString
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
         lyrics = ""
@@ -751,23 +756,30 @@ final class PlayerManager: ObservableObject {
                     // 已缓存，秒就绪）；② 仍失败则回退本地解密缓存文件；③ 都没有才弹错。
                     if self.isSoda(self.currentSong ?? LXSong([:])), let song = self.currentSong {
                         let key = song.id
-                        if !self.sodaRetriedKeys.contains(key),
-                           let ustr = self.sodaStreamURLs[key], let u = URL(string: ustr) {
-                            self.sodaRetriedKeys.insert(key)
-                            Log.write("🔁 [Player] soda 瞬时失败，自动重建 item 重试 song=\(song.name)")
+                        let tries = self.sodaRetryCounts[key] ?? 0
+                        // 重试策略：① 原地重建（复用上次实际地址，file 缓存不回网络流）
+                        //           ② 若上次是流式且本地已有解密缓存 → 换本地文件
+                        var candidate: URL?
+                        if tries == 0 {
+                            candidate = self.lastPlaybackURLs[key].flatMap(URL.init(string:))
+                        } else if tries == 1 {
+                            if let ustr = self.lastPlaybackURLs[key], let prev = URL(string: ustr), !prev.isFileURL,
+                               MusicCacheManager.shared.isCached(id: song.id, quality: self.quality),
+                               let f = MusicCacheManager.shared.cachedURL(for: song.id, quality: self.quality) {
+                                candidate = f
+                            } else {
+                                candidate = self.lastPlaybackURLs[key].flatMap(URL.init(string:))
+                            }
+                        }
+                        if tries < 2, let u = candidate {
+                            self.sodaRetryCounts[key] = tries + 1
+                            Log.write("🔁 [Player] soda 瞬时失败，自动重建 item 第\(tries + 1)次重试 scheme=\(u.scheme ?? "") song=\(song.name)")
                             let retryItem = self.makeItem(for: u)
                             self.player.replaceCurrentItem(with: retryItem)
                             self.lastItemPlayStartTime = Date()
                             self.observeItemStatus(retryItem)
                             self.player.play()
                             self.isPlaying = true
-                            return
-                        }
-                        if MusicCacheManager.shared.isCached(id: song.id, quality: self.quality),
-                           let f = MusicCacheManager.shared.cachedURL(for: song.id, quality: self.quality) {
-                            Log.write("🔁 [Player] soda 重试仍失败，回退本地解密缓存 song=\(song.name)")
-                            self.startPlayback(url: f, song: song, sourceName: "汽水", qualityName: "最高音质", playbackOrigin: "缓存")
-                            Task { await self.loadLyric(for: song) }
                             return
                         }
                         let err = item.error?.localizedDescription ?? "播放失败"

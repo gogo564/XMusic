@@ -158,46 +158,69 @@ final class DownloadService: NSObject, ObservableObject {
     private func startSodaDownload(song: LXSong, quality: String) async {
         let songKey = song.id + "_" + quality
         let trackID = song.songmid ?? ""
+        Log.write("📥 [SodaDL] start song=\(song.name) q=\(quality) trackID=\(trackID)")
         guard !trackID.isEmpty else {
+            Log.write("❌ [SodaDL] trackID 为空，放弃")
             await clearActive(songKey)
             return
         }
         do {
             let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
             guard !stream.mainURL.isEmpty, let url = URL(string: stream.mainURL) else {
+                Log.write("❌ [SodaDL] stream 信息缺失 mainURL空 hexKeyLen=\(stream.hexKey.count)")
                 await clearActive(songKey)
                 return
             }
+            Log.write("📥 [SodaDL] stream ok hexKeyLen=\(stream.hexKey.count) cdn=\(url.host ?? "")")
             await MainActor.run { self.activeTasks[songKey] = 0.05 }
 
             // 直连 CDN 顺序拉取加密音频（流式累加，按已收字节报进度）
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 60
             let cdnSession = URLSession(configuration: .default)
-            let (bytes, response) = try await cdnSession.bytes(from: url)
+            let (bytes, response) = try await cdnSession.bytes(for: req)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                Log.write("❌ [SodaDL] CDN HTTP \(http.statusCode)")
+                await clearActive(songKey)
+                return
+            }
             let total = Int64(response.expectedContentLength)
+            Log.write("📥 [SodaDL] CDN 连接 status=\((response as? HTTPURLResponse)?.statusCode ?? -1) len=\(total)")
             var data = Data()
+            var lastReport = 0
             for try await chunk in bytes {
                 data.append(chunk)
                 if total > 0 {
                     let p = min(Double(data.count) / Double(total), 0.9)
                     await MainActor.run { self.activeTasks[songKey] = p }
+                    // 每 25% 记一条进度日志
+                    let pct = Int(p * 100)
+                    if pct >= lastReport + 25 {
+                        lastReport = pct
+                        Log.write("📥 [SodaDL] 进度 \(pct)% (\(data.count / 1024)KB)")
+                    }
                 }
                 if data.count > 256 * 1024 * 1024 {
                     throw NSError(domain: "Download", code: -6,
                                   userInfo: [NSLocalizedDescriptionKey: "音频文件过大"])
                 }
             }
+            Log.write("📥 [SodaDL] CDN 下载完成 \(data.count / 1024)KB")
 
             // 客户端解密（复用流式解密组件），后台执行，落成可播 m4a
             let finalData = try await Task.detached(priority: .userInitiated) {
                 try self.decryptForDownload(data, hexKey: stream.hexKey)
             }.value
+            Log.write("📥 [SodaDL] 解密完成 \(finalData.count / 1024)KB (原密文 \(data.count / 1024)KB)")
 
             let docsDir = self.downloadsDir
             let idPart = song.songmid ?? song.id
             let destName = "\(Date().timeIntervalSince1970)_\(idPart).m4a"
             let dest = docsDir.appendingPathComponent(destName)
             try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.createDirectory(at: docsDir, withIntermediateDirectories: true)
             try finalData.write(to: dest)
+            Log.write("✅ [SodaDL] 落盘成功 \(dest.lastPathComponent)")
             let downloaded = DownloadedSong(
                 id: song.id,
                 name: song.name,
