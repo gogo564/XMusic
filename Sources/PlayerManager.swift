@@ -773,13 +773,20 @@ final class PlayerManager: ObservableObject {
                         }
                         if tries < 2, let u = candidate {
                             self.sodaRetryCounts[key] = tries + 1
-                            Log.write("🔁 [Player] soda 瞬时失败，自动重建 item 第\(tries + 1)次重试 scheme=\(u.scheme ?? "") song=\(song.name)")
-                            let retryItem = self.makeItem(for: u)
-                            self.player.replaceCurrentItem(with: retryItem)
-                            self.lastItemPlayStartTime = Date()
-                            self.observeItemStatus(retryItem)
-                            self.player.play()
+                            let attempt = tries + 1
+                            Log.write("🔁 [Player] soda 瞬时失败，自动重建 item 第\(attempt)次重试 scheme=\(u.scheme ?? "") song=\(song.name)")
+                            // 小退避：连续快速切歌时 AVPlayer 资源未释放完会连锁瞬时失败，
+                            // 等 150/400ms 再重建，成功率显著提高
                             self.isPlaying = true
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: attempt == 1 ? 150_000_000 : 400_000_000)
+                                guard let cur = self.currentSong, cur.id == key else { return }
+                                let retryItem = self.makeItem(for: u)
+                                self.player.replaceCurrentItem(with: retryItem)
+                                self.lastItemPlayStartTime = Date()
+                                self.observeItemStatus(retryItem)
+                                self.player.play()
+                            }
                             return
                         }
                         let err = item.error?.localizedDescription ?? "播放失败"
