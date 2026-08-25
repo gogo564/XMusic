@@ -228,7 +228,12 @@ final class DownloadService: NSObject, ObservableObject {
             let parser = SodaCencParser(data)
             let parsed = try parser.parse(keyHex: hexKey)
             let ctr = SodaCTR(key: parsed.keyBytes)
-            let decrypted = try ctr.decryptRange(samples: parsed.samples, encryptedData: data,
+            // 与缓存路径一致：decryptRange 的数据必须从 mdat 数据区起点开始，
+            // 否则样本整体错位、原头部字节混进产物，下载出的文件无法播放。
+            let start = parsed.encryptedMdatDataOffset
+            guard data.count > start else { return data }
+            let payload = data.subdata(in: start..<data.count)
+            let decrypted = try ctr.decryptRange(samples: parsed.samples, encryptedData: payload,
                                                  startSample: 0, endSample: parsed.samples.count)
             return try parser.buildDecryptedFile(parsed: parsed, decryptedMdat: decrypted)
         } catch {

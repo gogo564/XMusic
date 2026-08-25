@@ -41,14 +41,69 @@ class MusicCacheManager: ObservableObject {
     }
     
     /// 重新扫描一次缓存目录，重建内存索引（启动时 / 清空缓存后调用）。
+    /// 同时对汽水 m4a 缓存做一次结构体检：历史上多个版本写入过坏文件
+    /// （解密错位/未清理加密盒），巨魔重装不清沙盒，这些毒缓存会一直干扰
+    /// 命中判断——启动时统一体检并删除结构异常的文件。
     private func refreshCacheIndex() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self, let cacheDirectory = self.cacheDirectory else { return }
-            let names = (try? self.fileManager.contentsOfDirectory(atPath: cacheDirectory.path)) ?? []
+            var names = (try? self.fileManager.contentsOfDirectory(atPath: cacheDirectory.path)) ?? []
+            // 结构体检：仅针对 soda_*.m4a（历史坏文件的唯一来源）
+            var purged = 0
+            for name in names where name.hasPrefix("soda_") && name.hasSuffix(".m4a") {
+                let url = cacheDirectory.appendingPathComponent(name)
+                if self.fileHasEncryptionStructure(at: url) {
+                    try? self.fileManager.removeItem(at: url)
+                    if let idx = names.firstIndex(of: name) { names.remove(at: idx) }
+                    purged += 1
+                }
+            }
+            if purged > 0 {
+                Log.write("🧹 [Cache] 启动体检清除历史坏缓存 \(purged) 个")
+            }
             self.cachedFilesLock.lock()
             self.cachedFiles = Set(names)
             self.cachedFilesLock.unlock()
         }
+    }
+
+    /// 结构级加密检测（不含音频字节扫描，零误报）。供启动体检与起播校验共用。
+    func fileHasEncryptionStructure(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return true }
+        defer { try? handle.close() }
+        let data = handle.readData(ofLength: 2 * 1024 * 1024)
+        guard data.count >= 8 else { return true }
+
+        let encryptedTypes: Set<String> = ["senc", "sinf", "tenc", "saiz", "saio"]
+        let containerTypes: Set<String> = ["moov", "trak", "mdia", "minf", "stbl", "stsd", "enca"]
+
+        func be32(_ off: Int) -> Int {
+            return (Int(data[off]) << 24) | (Int(data[off + 1]) << 16) | (Int(data[off + 2]) << 8) | Int(data[off + 3])
+        }
+        func boxType(_ off: Int) -> String? {
+            guard off + 8 <= data.count else { return nil }
+            let bytes = [UInt8](data[(off + 4)..<(off + 8)])
+            let s = String(bytes: bytes, encoding: .ascii) ?? ""
+            return s.allSatisfy { ($0.isLetter || $0.isNumber || $0 == " " || $0 == "\u{A9}") } ? s : nil
+        }
+        func scan(_ start: Int, _ end: Int, depth: Int) -> Bool {
+            var pos = start
+            while pos + 8 <= end {
+                let size = be32(pos)
+                if size < 8 || pos + size > end { return false }
+                guard let type = boxType(pos) else { return false }
+                if encryptedTypes.contains(type) {
+                    Log.write("⚠️ [Cache] 发现加密box: \(type) @\(pos) in \(url.lastPathComponent)")
+                    return true
+                }
+                if containerTypes.contains(type), depth < 6 {
+                    if scan(pos + 8, pos + size, depth: depth + 1) { return true }
+                }
+                pos += size
+            }
+            return false
+        }
+        return scan(0, data.count, depth: 0)
     }
     
     private func createCacheDirectory() {
@@ -200,51 +255,9 @@ class MusicCacheManager: ObservableObject {
         return false
     }
 
-    /// 检测 m4a 是否仍是未解密的加密文件：结构化遍历文件头部 box 树，
-    /// 若 moov 子树中存在实际类型为 senc/sinf/tenc/saiz/saio 的 box 则判定为未解密。
-    ///
-    /// 旧实现是在前 1MB 里裸搜 "senc"/"saiz" 等 ASCII 子串——解密后的音频字节
-    /// 是高熵数据，完全可能随机出现这些组合，导致刚转存的正常缓存被误杀
-    /// （日志实证：同一文件 转存成功→0.7 秒后被拒）。改为只检查真实 box 类型
-    /// 字段（4 字节对齐、带 size 边界），音频样本永远不会被当作 box 解析，零误报。
+    /// 结构化加密检测：共用 fileHasEncryptionStructure 实现。
     private func containsEncryptionBoxes(at url: URL) -> Bool {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return true }
-        defer { try? handle.close() }
-        // moov 必在 mdat 之前且体积小；读前 2MB 足够覆盖其整体
-        let data = handle.readData(ofLength: 2 * 1024 * 1024)
-        guard data.count >= 8 else { return true }
-
-        let encryptedTypes: Set<String> = ["senc", "sinf", "tenc", "saiz", "saio"]
-        let containerTypes: Set<String> = ["moov", "trak", "mdia", "minf", "stbl", "stsd", "enca"]
-
-        func be32(_ off: Int) -> Int {
-            return (Int(data[off]) << 24) | (Int(data[off + 1]) << 16) | (Int(data[off + 2]) << 8) | Int(data[off + 3])
-        }
-        func boxType(_ off: Int) -> String? {
-            guard off + 8 <= data.count else { return nil }
-            let bytes = [UInt8](data[(off + 4)..<(off + 8)])
-            let s = String(bytes: bytes, encoding: .ascii) ?? ""
-            return s.allSatisfy { ($0.isLetter || $0.isNumber || $0 == " " || $0 == "\u{A9}") } ? s : nil
-        }
-        // 返回 true = 发现加密 box。遇到越出已读窗口的 box（如巨型 mdat）停止该层扫描。
-        func scan(_ start: Int, _ end: Int, depth: Int) -> Bool {
-            var pos = start
-            while pos + 8 <= end {
-                let size = be32(pos)
-                if size < 8 || pos + size > end { return false }
-                guard let type = boxType(pos) else { return false }
-                if encryptedTypes.contains(type) {
-                    Log.write("⚠️ [Cache] 发现加密box: \(type) @\(pos) in \(url.lastPathComponent)")
-                    return true
-                }
-                if containerTypes.contains(type), depth < 6 {
-                    if scan(pos + 8, pos + size, depth: depth + 1) { return true }
-                }
-                pos += size
-            }
-            return false
-        }
-        return scan(0, data.count, depth: 0)
+        return fileHasEncryptionStructure(at: url)
     }
     
     func startCaching(url: String, quality: String, id: String) {
