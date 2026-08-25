@@ -93,7 +93,7 @@ final class ThemeManager: ObservableObject {
     func updateForSystemAppearance() {
         guard mode == .system else { return }
         isDark = UITraitCollection.current.userInterfaceStyle == .dark
-        AppDelegate.refreshGlobalAppearance()
+        AppDelegate.refreshGlobalAppearance(dark: isDark)
     }
 
     private func applyMode() {
@@ -115,7 +115,8 @@ final class ThemeManager: ObservableObject {
             isDark = UITraitCollection.current.userInterfaceStyle == .dark
         }
         // 深/浅切换后刷新全局 appearance，让 List 背景实时跟随纯黑/白色
-        AppDelegate.refreshGlobalAppearance()
+        // （传参而不是取 .shared：init→applyMode 时 shared 的 dispatch_once 尚未完成，取它会递归崩溃）
+        AppDelegate.refreshGlobalAppearance(dark: isDark)
     }
 
     /// 主题色（点缀层）——纯黑极简模式下去彩色：深色=近白点缀，亮色=深灰点缀。
