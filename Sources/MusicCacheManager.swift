@@ -6,7 +6,7 @@ class MusicCacheManager: ObservableObject {
     
     private let fileManager = FileManager.default
     private let cacheDirectoryName = "MusicCache"
-    private let maxCacheBytes: Int64 = 2 * 1024 * 1024 * 1024 // 2GB
+    private let maxCacheBytes: Int64 = 6 * 1024 * 1024 * 1024 // 6GB（2GB 时代汽水缓存修复后会大量落盘，老平台缓存被 LRU 清掉）
     
     // Publish cache size for UI updates
     @Published var cacheSizeString: String = "0.0 MB"
@@ -61,6 +61,17 @@ class MusicCacheManager: ObservableObject {
             if purged > 0 {
                 Log.write("🧹 [Cache] 启动体检清除历史坏缓存 \(purged) 个")
             }
+            // 各音源缓存占用统计：让"老缓存被 LRU 清掉"这类问题一眼可见
+            var sodaCount = 0; var sodaBytes: Int64 = 0
+            var lxCount = 0; var lxBytes: Int64 = 0
+            for name in names {
+                let size = (try? cacheDirectory.appendingPathComponent(name).resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                if name.hasPrefix("soda_") { sodaCount += 1; sodaBytes += Int64(size) }
+                else { lxCount += 1; lxBytes += Int64(size) }
+            }
+            Log.write(String(format: "📊 [Cache] 缓存统计 汽水:%d个/%.0fMB 五大源:%d个/%.0fMB 总计%.2fGB/上限6GB",
+                             sodaCount, Double(sodaBytes) / 1048576, lxCount, Double(lxBytes) / 1048576,
+                             Double(sodaBytes + lxBytes) / 1073741824))
             self.cachedFilesLock.lock()
             self.cachedFiles = Set(names)
             self.cachedFilesLock.unlock()
