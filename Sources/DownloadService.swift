@@ -170,7 +170,7 @@ final class DownloadService: NSObject, ObservableObject {
         }
         do {
             // ① 直连 CDN（带 Range/UA，串行+首字节看门狗）
-            if let direct = await tryDirectCDNDownload(song: song, quality: quality, trackID: trackID, songKey: songKey) {
+            if let direct = try await tryDirectCDNDownload(song: song, quality: quality, trackID: trackID, songKey: songKey) {
                 await finishSodaDownload(song: song, quality: quality, songKey: songKey, data: direct, alreadyDecrypted: false)
                 return
             }
