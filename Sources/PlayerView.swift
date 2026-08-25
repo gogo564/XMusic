@@ -5,7 +5,6 @@ struct PlayerView: View {
     @EnvironmentObject var playlistStore: PlaylistStore
     @EnvironmentObject var downloader: DownloadService
     @Environment(\.dismiss) var dismiss
-    @ObservedObject var recentStore = RecentStore.shared
     @State private var showInPlaceLyrics = false
     @State private var localTime: Double = 0
     @State private var isDraggingSlider = false
@@ -32,13 +31,15 @@ struct PlayerView: View {
                     .environmentObject(playlistStore)
             }
         }
-        .onAppear {
-            playerManager.setPlaylistFromRecent(recentStore.items)
-        }
         .onChange(of: playerManager.currentSong?.id) { _ in
             sodaCollectMessage = nil
             sodaCollecting = false
         }
+        // 注意：不要在 onAppear 里 setPlaylistFromRecent！
+        // 点歌单歌曲时队列刚被设为歌单，而 currentSong 要等解析完成(startPlayback)才切换；
+        // 此时 onAppear 先执行，发现 currentSong(旧歌)不在歌单队列里，
+        // 会把整个队列覆盖成"最近播放"，导致切歌跳出当前歌单。
+        // 最近播放的队列已由 RecentPlaylistView.playFromList 显式传入，无需这里兜底。
     }
 
     private var backgroundBlur: some View {
