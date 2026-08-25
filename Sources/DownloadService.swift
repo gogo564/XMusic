@@ -155,6 +155,10 @@ final class DownloadService: NSObject, ObservableObject {
     /// 汽水歌下载（CDN 直连 + 客户端解密）：
     /// App 调 /song/stream 拿 CDN main_url + 密钥 → 直连汽水 CDN 拉加密字节 → 本地 SodaCTR 解密 →
     /// 落成可播 m4a。音频字节全程不过服务器，服务器只做签名/resolve。
+    /// 下载串行门：同一时间只允许一个汽水下载占用 CDN 连接，
+    /// 避免与播放的多个流式会话（同主机最多6并发）抢连接被饿死。
+    private static let dlGate = AsyncDownloadGate()
+
     private func startSodaDownload(song: LXSong, quality: String) async {
         let songKey = song.id + "_" + quality
         let trackID = song.songmid ?? ""
@@ -165,65 +169,173 @@ final class DownloadService: NSObject, ObservableObject {
             return
         }
         do {
-            let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
-            guard !stream.mainURL.isEmpty, let url = URL(string: stream.mainURL) else {
-                Log.write("❌ [SodaDL] stream 信息缺失 mainURL空 hexKeyLen=\(stream.hexKey.count)")
+            // ① 直连 CDN（带 Range/UA，串行+首字节看门狗）
+            if let direct = await tryDirectCDNDownload(song: song, quality: quality, trackID: trackID, songKey: songKey) {
+                await finishSodaDownload(song: song, quality: quality, songKey: songKey, data: direct, alreadyDecrypted: false)
+                return
+            }
+            // ② CDN 饿死/失败 → 回退服务器中转：qishui-api /song/play 服务端解密回传明文 m4a
+            Log.write("🔁 [SodaDL] 直连CDN不可用，切换服务器中转 /song/play")
+            let mapped = mapSodaQuality(quality)
+            var comps = URLComponents(string: SodaAPIClient.shared.playbackBaseURL.map { $0 + "/song/play" } ?? "")
+            comps?.queryItems = [URLQueryItem(name: "track_id", value: trackID), URLQueryItem(name: "quality", value: mapped)]
+            guard let relayURL = comps?.url else {
+                Log.write("❌ [SodaDL] 中转 URL 构造失败")
                 await clearActive(songKey)
                 return
             }
-            Log.write("📥 [SodaDL] stream ok hexKeyLen=\(stream.hexKey.count) cdn=\(url.host ?? "")")
-            await MainActor.run { self.activeTasks[songKey] = 0.05 }
+            let data = try await downloadRelay(url: relayURL, songKey: songKey)
+            Log.write("📥 [SodaDL] 中转下载完成 \(data.count / 1024)KB")
+            await finishSodaDownload(song: song, quality: quality, songKey: songKey, data: data, alreadyDecrypted: true)
+        } catch {
+            Log.write("❌ [SodaDL] 失败: \(error.localizedDescription)")
+            await clearActive(songKey)
+        }
+    }
 
-            // 直连 CDN 顺序拉取加密音频（流式累加，按已收字节报进度）
-            var req = URLRequest(url: url)
-            req.timeoutInterval = 60
-            let cdnSession = URLSession(configuration: .default)
-            let (bytes, response) = try await cdnSession.bytes(for: req)
-            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                Log.write("❌ [SodaDL] CDN HTTP \(http.statusCode)")
-                await clearActive(songKey)
-                return
-            }
-            let total = Int64(response.expectedContentLength)
-            Log.write("📥 [SodaDL] CDN 连接 status=\((response as? HTTPURLResponse)?.statusCode ?? -1) len=\(total <= 0 ? "未知(无Content-Length)" : "\(total / 1024)KB")")
-            var data = Data()
+    private func mapSodaQuality(_ q: String) -> String {
+        switch q {
+        case "flac": return "lossless"
+        case "320k": return "highest"
+        default: return "medium"
+        }
+    }
+
+    /// 直连 CDN 拉取加密音频。返回 nil 表示应当走服务器中转。
+    private func tryDirectCDNDownload(song: LXSong, quality: String, trackID: String, songKey: String) async throws -> Data? {
+        let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: mapSodaQuality(quality))
+        guard !stream.mainURL.isEmpty, stream.hexKey.count == 32, let url = URL(string: stream.mainURL) else {
+            Log.write("⚠️ [SodaDL] stream 信息缺失，直接转中转")
+            return nil
+        }
+        Log.write("📥 [SodaDL] stream ok hexKeyLen=32 cdn=\(url.host ?? "")")
+
+        // 串行进入（避免与播放流式会话抢同主机连接配额）
+        await Self.dlGate.wait()
+        defer { Self.dlGate.signal() }
+        await MainActor.run { self.activeTasks[songKey] = 0.05 }
+
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 30
+        req.setValue("bytes=0-", forHTTPHeaderField: "Range")
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        let cdnSession = URLSession(configuration: .default)
+        let (bytes, response) = try await cdnSession.bytes(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 200 || status == 206 else {
+            Log.write("⚠️ [SodaDL] CDN HTTP \(status)，转中转")
+            return nil
+        }
+        let total = Int64(response.expectedContentLength)
+        Log.write("📥 [SodaDL] CDN 连接 status=\(status) len=\(total <= 0 ? "未知" : "\(total / 1024)KB")")
+
+        // 接收循环放在可取消的 Task 里；看门狗 12s 内未见 ≥64KB 就取消整个循环，
+        // 避免被 CDN 冷处理时无限等待。
+        final class RecvBox {
+            private let l = NSLock()
+            private var f = false
+            private var c = 0
+            func markFirst() { l.lock(); f = true; l.unlock() }
+            func update(_ n: Int) { l.lock(); c = n; l.unlock() }
+            func snap() -> (Bool, Int) { l.lock(); defer { l.unlock() }; return (f, c) }
+        }
+        let box = RecvBox()
+        let loop = Task { () throws -> Data in
+            var acc = Data()
             var lastReportBytes = 0
             for try await chunk in bytes {
-                data.append(chunk)
-                // 每 512KB 打一条，无 Content-Length 时也能看到确实在下
-                if data.count - lastReportBytes >= 512 * 1024 {
-                    lastReportBytes = data.count
-                    Log.write("📥 [SodaDL] 已收 \(data.count / 1024)KB\(total > 0 ? " / \(total / 1024)KB" : "")")
+                if !box.snap().0 {
+                    box.markFirst()
+                    Log.write("📥 [SodaDL] 收到首包，开始接收")
                 }
-                await MainActor.run {
-                    if total > 0 {
-                        self.activeTasks[songKey] = min(Double(data.count) / Double(total), 0.95)
-                    } else {
-                        // 无 Content-Length：按字节启发式推进（按一首约 2.5MB 估），避免进度永远 0%
-                        self.activeTasks[songKey] = min(0.05 + Double(data.count) / 2_500_000.0 * 0.9, 0.92)
+                acc.append(chunk)
+                box.update(acc.count)
+                if acc.count - lastReportBytes >= 512 * 1024 {
+                    lastReportBytes = acc.count
+                    Log.write("📥 [SodaDL] 已收 \(acc.count / 1024)KB\(total > 0 ? " / \(total / 1024)KB" : "")")
+                    await MainActor.run {
+                        self.activeTasks[songKey] = total > 0
+                            ? min(Double(acc.count) / Double(total), 0.95)
+                            : min(0.05 + Double(acc.count) / 2_500_000.0 * 0.9, 0.92)
                     }
                 }
-                if data.count > 256 * 1024 * 1024 {
+                if acc.count > 256 * 1024 * 1024 {
                     throw NSError(domain: "Download", code: -6,
                                   userInfo: [NSLocalizedDescriptionKey: "音频文件过大"])
                 }
             }
-            Log.write("📥 [SodaDL] CDN 下载完成 \(data.count / 1024)KB")
+            return acc
+        }
+        let watchdog = Task {
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            let (f, c) = box.snap()
+            if !f || c < 64 * 1024 {
+                Log.write("⏱️ [SodaDL] CDN 12s 内无有效数据(\(c / 1024)KB)，取消直连")
+                loop.cancel()
+            }
+        }
+        var received: Data?
+        do {
+            received = try await loop.value
+        } catch {
+            Log.write("⚠️ [SodaDL] CDN 接收中断(\(box.snap().1 / 1024)KB): \(error.localizedDescription)，转中转")
+        }
+        watchdog.cancel()
+        guard let data = received, data.count > 128 * 1024 else {
+            return nil
+        }
+        Log.write("📥 [SodaDL] CDN 下载完成 \(data.count / 1024)KB")
+        // 客户端解密
+        let finalData = try await Task.detached(priority: .userInitiated) { [self] in
+            try decryptForDownload(data, hexKey: stream.hexKey)
+        }.value
+        Log.write("📥 [SodaDL] 解密完成 \(finalData.count / 1024)KB")
+        return finalData
+    }
 
-            // 客户端解密（复用流式解密组件），后台执行，落成可播 m4a
-            let finalData = try await Task.detached(priority: .userInitiated) {
-                try self.decryptForDownload(data, hexKey: stream.hexKey)
-            }.value
-            Log.write("📥 [SodaDL] 解密完成 \(finalData.count / 1024)KB (原密文 \(data.count / 1024)KB)")
+    /// 服务器中转下载（服务端已解密的明文 m4a）
+    private func downloadRelay(url: URL, songKey: String) async throws -> Data {
+        await Self.dlGate.wait()
+        defer { Self.dlGate.signal() }
+        await MainActor.run { self.activeTasks[songKey] = max(self.activeTasks[songKey] ?? 0, 0.08) }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 30
+        let session = URLSession(configuration: .default)
+        let (bytes, response) = try await session.bytes(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 200 else {
+            throw NSError(domain: "Download", code: -7,
+                          userInfo: [NSLocalizedDescriptionKey: "中转通道 HTTP \(status)"])
+        }
+        Log.write("📥 [SodaDL] 中转连接 status=\(status)")
+        var data = Data()
+        var lastReportBytes = 0
+        for try await chunk in bytes {
+            data.append(chunk)
+            if data.count - lastReportBytes >= 512 * 1024 {
+                lastReportBytes = data.count
+                Log.write("📥 [SodaDL] 中转已收 \(data.count / 1024)KB")
+                await MainActor.run { self.activeTasks[songKey] = min(0.1 + Double(data.count) / 3_500_000.0 * 0.85, 0.95) }
+            }
+            if data.count > 256 * 1024 * 1024 {
+                throw NSError(domain: "Download", code: -6,
+                              userInfo: [NSLocalizedDescriptionKey: "音频文件过大"])
+            }
+        }
+        return data
+    }
 
-            let docsDir = self.downloadsDir
-            let idPart = song.songmid ?? song.id
-            let destName = "\(Date().timeIntervalSince1970)_\(idPart).m4a"
-            let dest = docsDir.appendingPathComponent(destName)
+    /// 解密产物/明文落盘并登记下载记录
+    private func finishSodaDownload(song: LXSong, quality: String, songKey: String, data: Data, alreadyDecrypted: Bool) async {
+        let docsDir = downloadsDir
+        let idPart = song.songmid ?? song.id
+        let destName = "\(Date().timeIntervalSince1970)_\(idPart).m4a"
+        let dest = docsDir.appendingPathComponent(destName)
+        do {
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.createDirectory(at: docsDir, withIntermediateDirectories: true)
-            try finalData.write(to: dest)
-            Log.write("✅ [SodaDL] 落盘成功 \(dest.lastPathComponent)")
+            try data.write(to: dest)
+            Log.write("✅ [SodaDL] 落盘成功 \(dest.lastPathComponent) (\(data.count / 1024)KB)")
             let downloaded = DownloadedSong(
                 id: song.id,
                 name: song.name,
@@ -236,13 +348,14 @@ final class DownloadService: NSObject, ObservableObject {
                 localFile: destName,
                 rawJSON: song.jsonData.flatMap { String(data: $0, encoding: .utf8) }
             )
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.downloadedSongs.append(downloaded)
                 self.saveIndex()
                 self.activeTasks[songKey] = nil
                 self.activeSongs[songKey] = nil
             }
         } catch {
+            Log.write("❌ [SodaDL] 落盘失败: \(error.localizedDescription)")
             await clearActive(songKey)
         }
     }
@@ -418,5 +531,39 @@ extension URL {
         var dict = [String: String]()
         for item in items { dict[item.name] = item.value }
         return dict
+    }
+}
+
+/// 简易异步串行门：保证同一时间只有一个汽水下载占用 CDN 连接，
+/// 防止与播放的多个流式会话抢同主机连接配额（iOS 每主机默认 6 并发）。
+final class AsyncDownloadGate {
+    private let lock = NSLock()
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var occupied = false
+
+    func wait() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if !occupied {
+                occupied = true
+                lock.unlock()
+                c.resume()
+            } else {
+                waiters.append(c)
+                lock.unlock()
+            }
+        }
+    }
+
+    func signal() {
+        lock.lock()
+        if let next = waiters.first {
+            waiters.removeFirst()
+            lock.unlock()
+            next.resume()
+        } else {
+            occupied = false
+            lock.unlock()
+        }
     }
 }
