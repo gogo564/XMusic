@@ -651,7 +651,7 @@ final class PlayerManager: ObservableObject {
         sodaFailTask = nil
         resolveFailStreak = 0
         // 手动起播视为新一轮尝试，允许再次自动重建重试
-        sodaRetriedKeys.removeValue(forKey: song.id)
+        sodaRetriedKeys.remove(song.id)
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
         lyrics = ""
