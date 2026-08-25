@@ -79,6 +79,10 @@ final class PlayerManager: ObservableObject {
     private var nextItem: AVPlayerItem?
     private var nextItemKey = ""
     private var sodaFailTask: Task<Void, Never>?
+    /// 汽水流式地址记录（song.id → sodastream:// URL），供 item 瞬时 failed 后原地重建重试
+    private var sodaStreamURLs: [String: String] = [:]
+    /// 已自动重建重试过的歌曲（每次手动起播时清除，防无限重试）
+    private var sodaRetriedKeys = Set<String>()
     /// 最近一次实际起播的时间戳。用于过滤 AVPlayer 换 item 时滞留投递的
     /// AVPlayerItemDidPlayToEndTime 通知：刚起播（<1s）就收到结束通知，几乎都是
     /// 缓存文件 seek 起始时间异常或旧 item 残留通知，不应触发自动切歌。
@@ -524,6 +528,7 @@ final class PlayerManager: ObservableObject {
                     // 加密流：走 sodastream:// 流式解密；同时后台整首解密落盘（播放即缓存）
                     MusicCacheManager.shared.cacheSodaTrack(trackID: trackID, id: song.id, quality: quality)
                     let customURL = SodaStreamLoader.customURL(trackID: trackID, quality: mapped)
+                    sodaStreamURLs[song.id] = customURL.absoluteString
                     return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
                 }
                 guard let url = URL(string: stream.mainURL) else {
@@ -645,6 +650,8 @@ final class PlayerManager: ObservableObject {
         sodaFailTask?.cancel()
         sodaFailTask = nil
         resolveFailStreak = 0
+        // 手动起播视为新一轮尝试，允许再次自动重建重试
+        sodaRetriedKeys.removeValue(forKey: song.id)
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
         lyrics = ""
@@ -724,10 +731,31 @@ final class PlayerManager: ObservableObject {
                 switch item.status {
                 case .failed:
                     Log.write("❌ [Player] item failed: \(item.error?.localizedDescription ?? "")")
-                    // 汽水歌走自定义 loader，AVPlayer 会先瞬时 failed 再重试成功。
-                    // 延迟确认：1.5s 内若未 ready（说明确实起播失败）才弹「播放错误」，
-                    // 避免瞬态 failed 弹窗一闪而过。
-                    if self.isSoda(self.currentSong ?? LXSong([:])) {
+                    // 汽水歌走自定义 loader，iOS 15 上 AVPlayer 偶发在数据已完整供给后
+                    // 仍瞬时 failed（"这项操作无法完成"），随后新 item 其实能 ready。
+                    // 处理：① 用同一 sodastream URL 原地重建 item 重试一次（会话内数据
+                    // 已缓存，秒就绪）；② 仍失败则回退本地解密缓存文件；③ 都没有才弹错。
+                    if self.isSoda(self.currentSong ?? LXSong([:])), let song = self.currentSong {
+                        let key = song.id
+                        if !self.sodaRetriedKeys.contains(key),
+                           let ustr = self.sodaStreamURLs[key], let u = URL(string: ustr) {
+                            self.sodaRetriedKeys.insert(key)
+                            Log.write("🔁 [Player] soda 瞬时失败，自动重建 item 重试 song=\(song.name)")
+                            let retryItem = self.makeItem(for: u)
+                            self.player.replaceCurrentItem(with: retryItem)
+                            self.lastItemPlayStartTime = Date()
+                            self.observeItemStatus(retryItem)
+                            self.player.play()
+                            self.isPlaying = true
+                            return
+                        }
+                        if MusicCacheManager.shared.isCached(id: song.id, quality: self.quality),
+                           let f = MusicCacheManager.shared.cachedURL(for: song.id, quality: self.quality) {
+                            Log.write("🔁 [Player] soda 重试仍失败，回退本地解密缓存 song=\(song.name)")
+                            self.startPlayback(url: f, song: song, sourceName: "汽水", qualityName: "最高音质", playbackOrigin: "缓存")
+                            Task { await self.loadLyric(for: song) }
+                            return
+                        }
                         let err = item.error?.localizedDescription ?? "播放失败"
                         self.isPlaying = false
                         self.sodaFailTask?.cancel()
