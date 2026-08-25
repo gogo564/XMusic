@@ -115,27 +115,72 @@ final class ThemeManager: ObservableObject {
         }
     }
 
-    /// 主题色（点缀层）——深色模式下把过暗的主题色自动提亮，确保 tint/accent 元素在深底上可读
-    var accent: Color {
+    var accent: Color { color.color }
+    var accentSecondary: Color {
         let c = color.uiColor
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-        if isDark && b < 0.48 {
-            return Color(hue: h, saturation: max(s, 0.25), brightness: 0.62, opacity: 1)
-        }
-        return color.color
+        return Color(hue: h, saturation: s, brightness: min(b + 0.12, 1.0), opacity: 1)
     }
-    /// 主题色的柔和底（选中 chip / 图标小面积底）——纯黑白自适应，主题色只做内容不占大面积
-    var accentSurface: Color {
-        isDark ? Color(white: 0.22) : Color(uiColor: .systemGray5)
-    }
-    /// 卡片/分组底色（按深浅自适应，纯黑白高对比）
+    /// 卡片/分组底色（按深浅自适应）
     var cardBackground: Color {
         isDark ? Color(white: 0.13) : Color(uiColor: .systemGray6)
     }
     /// 次级底色（按钮胶囊未选中）
     var chipBackground: Color {
         isDark ? Color(white: 0.18) : Color(uiColor: .systemGray5)
+    }
+    // MARK: - Material3 风格动态层次色板（随主题色 & 深浅自动派生）
+    /// 亮色模式底色偏暖的主题色调，暗色模式更深的同色系底（替代纯灰，更精致）
+    var tintedBackground: Color {
+        if isDark {
+            return blend(accent, over: Color(white: 0.055), ratio: 0.06)
+        } else {
+            return blend(accent, over: Color(white: 0.97), ratio: 0.05)
+        }
+    }
+    /// 分区卡片背景（比 tintedBackground 更实一层）
+    var elevatedSurface: Color {
+        if isDark {
+            return blend(accent, over: Color(white: 0.12), ratio: 0.10)
+        } else {
+            return blend(accent, over: Color.white, ratio: 0.07)
+        }
+    }
+    /// 内容区背景（页面主体）
+    var materialPageBackground: Color {
+        isDark ? Color(red: 0.045, green: 0.045, blue: 0.06) : Color(uiColor: .systemGroupedBackground)
+    }
+    /// 承载强调色的柔和底（选中的 chip/图标底）
+    var accentSurface: Color {
+        if isDark {
+            return blend(accent, over: Color(white: 0.13), ratio: 0.28)
+        } else {
+            return blend(accent, over: Color.white, ratio: 0.16)
+        }
+    }
+    /// 便于 UI 鉴定的指纹：随主题色/深浅变化，用作根视图 id 强制重建
+    var fingerprint: String { "\(color.rawValue)-\(isDark ? "d" : "l")" }
+    /// 把 t 色按 ratio 混在 base 之上
+    private func blend(_ t: Color, over base: Color, ratio: CGFloat) -> Color {
+        let tc = toRGB(t)
+        let bc = toRGB(base)
+        let r = CGFloat(min(max(ratio, 0), 1))
+        return Color(
+            red: double(tc.r * r + bc.r * (1 - r)),
+            green: double(tc.g * r + bc.g * (1 - r)),
+            blue: double(tc.b * r + bc.b * (1 - r))
+        )
+    }
+    private func double(_ v: CGFloat) -> Double { Double(v) }
+    private func toRGB(_ color: Color) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
+        // 复用项目已有的 UIColor(Color) 扩展（ThemeManager.swift 内）取组件
+        let ui = UIColor(color)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        if ui.getRed(&r, green: &g, blue: &b, alpha: &a) {
+            return (r, g, b)
+        }
+        return (0.5, 0.5, 0.5)
     }
     /// 分隔/描边
     var separator: Color {
