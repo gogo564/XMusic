@@ -22,6 +22,12 @@ class MusicCacheManager: ObservableObject {
     /// 汽水整首缓存的任务指纹集合（防重复入队）。读写受 sodaCacheLock 保护。
     private var sodaCacheTasks = Set<String>()
     private let sodaCacheLock = NSLock()
+
+    /// 音频校验记忆化：path → (mtime, size, 是否有效)。
+    /// 校验要读 32KB 头，m4a 还要扫 1MB 找加密 box；同一次点播 isCached/cachedURL
+    /// 会连续调用两遍，列表渲染也会频繁查询——按文件大小+修改时间缓存结果避免重扫。
+    private var validationMemo: [String: (mtime: Date, size: Int64, ok: Bool)] = [:]
+    private let validationMemoLock = NSLock()
     
     private var cacheDirectory: URL? {
         guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
@@ -50,9 +56,9 @@ class MusicCacheManager: ObservableObject {
         if !fileManager.fileExists(atPath: cacheDirectory.path) {
             do {
                 try fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true, attributes: nil)
-                print("📁 [Cache] Created cache directory: \(cacheDirectory.path)")
+        Log.write("📁 [Cache] Created cache directory: \(cacheDirectory.path)")
             } catch {
-                print("❌ [Cache] Failed to create cache directory: \(error.localizedDescription)")
+        Log.write("❌ [Cache] Failed to create cache directory: \(error.localizedDescription)")
             }
         }
     }
@@ -88,7 +94,7 @@ class MusicCacheManager: ObservableObject {
         guard let fileURL = matchedCacheURL(for: id, quality: quality) else { return nil }
         // Validate the cached file is actually valid audio data
         guard isValidAudioFile(at: fileURL) else {
-            print("⚠️ [Cache] Cached file is invalid, removing: \(id)_\(quality)")
+        Log.write("⚠️ [Cache] Cached file is invalid, removing: \(id)_\(quality)")
             try? fileManager.removeItem(at: fileURL)
             removeCachedFile(fileURL.lastPathComponent)
             return nil
@@ -102,11 +108,25 @@ class MusicCacheManager: ObservableObject {
               let fileSize = attributes[.size] as? NSNumber else {
             return false
         }
+        let mtime = (attributes[.modificationDate] as? Date) ?? .distantPast
+        validationMemoLock.lock()
+        let memo = validationMemo[url.path]
+        validationMemoLock.unlock()
+        if let memo = memo, memo.size == fileSize.int64Value, memo.mtime == mtime {
+            return memo.ok
+        }
+        let ok = validateAudioFile(at: url, fileSize: fileSize)
+        validationMemoLock.lock()
+        validationMemo[url.path] = (mtime, fileSize.int64Value, ok)
+        validationMemoLock.unlock()
+        return ok
+    }
 
+    private func validateAudioFile(at url: URL, fileSize: NSNumber) -> Bool {
         // Files smaller than 10KB are likely not valid audio
         let sizeKB = fileSize.int64Value / 1024
         guard sizeKB >= 10 else {
-            print("⚠️ [Cache] File too small (\(sizeKB)KB) to be valid audio: \(url.lastPathComponent)")
+        Log.write("⚠️ [Cache] File too small (\(sizeKB)KB) to be valid audio: \(url.lastPathComponent)")
             return false
         }
 
@@ -146,7 +166,7 @@ class MusicCacheManager: ObservableObject {
                 // 判定无效：这种文件能读到时长但样本为密文，AVPlayer 解码必失败。
                 // （历史 bug 可能把未解密的加密字节落盘成 .m4a，需逐出以免误当可播缓存。）
                 if containsEncryptionBoxes(at: url) {
-                    print("⚠️ [Cache] Encrypted (undecrypted) cache, rejecting: \(url.lastPathComponent)")
+        Log.write("⚠️ [Cache] Encrypted (undecrypted) cache, rejecting: \(url.lastPathComponent)")
                     return false
                 }
                 return true
@@ -168,7 +188,7 @@ class MusicCacheManager: ObservableObject {
             return true
         }
 
-        print("⚠️ [Cache] Unknown audio header: \(url.lastPathComponent), bytes: \(String(format: "%02X %02X %02X %02X", headerBytes[0], headerBytes[1], headerBytes[2], headerBytes[3]))")
+        Log.write("⚠️ [Cache] Unknown audio header: \(url.lastPathComponent), bytes: \(String(format: "%02X %02X %02X %02X", headerBytes[0], headerBytes[1], headerBytes[2], headerBytes[3]))")
         return false
     }
 
@@ -202,7 +222,7 @@ class MusicCacheManager: ObservableObject {
         let taskKey = id + "_" + quality
         if downloadTasks[taskKey] != nil { return }
 
-        print("📥 [Cache] Start downloading: \(id)_\(quality)")
+        Log.write("📥 [Cache] Start downloading: \(id)_\(quality)")
 
         // Use a URLSession with the same headers that AVPlayer uses for this URL
         var request = URLRequest(url: remoteURL)
@@ -213,13 +233,13 @@ class MusicCacheManager: ObservableObject {
             self.downloadTasks.removeValue(forKey: taskKey)
 
             if let error = error {
-                print("❌ [Cache] Download failed: \(error.localizedDescription)")
+        Log.write("❌ [Cache] Download failed: \(error.localizedDescription)")
                 return
             }
 
             // Validate response
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                print("❌ [Cache] Bad HTTP status: \(httpResponse.statusCode) for \(id)_\(quality)")
+        Log.write("❌ [Cache] Bad HTTP status: \(httpResponse.statusCode) for \(id)_\(quality)")
                 return
             }
 
@@ -235,11 +255,11 @@ class MusicCacheManager: ObservableObject {
                     self.removeCachedFile(oldURL.lastPathComponent)
                 }
                 try self.fileManager.moveItem(at: tempURL, to: destinationURL)
-                print("✅ [Cache] Cached successfully: \(id)_\(quality)")
+        Log.write("✅ [Cache] Cached successfully: \(id)_\(quality)")
                 self.addCachedFile(destinationURL.lastPathComponent)
                 self.enforceCacheLimit()
             } catch {
-                print("❌ [Cache] Save file failed: \(error.localizedDescription)")
+        Log.write("❌ [Cache] Save file failed: \(error.localizedDescription)")
             }
         }
 
@@ -262,7 +282,7 @@ class MusicCacheManager: ObservableObject {
         }
         sodaCacheTasks.insert(taskKey)
         sodaCacheLock.unlock()
-        print("📥 [Cache] Soda whole-song caching start: \(id)_\(quality)")
+        Log.write("📥 [Cache] Soda whole-song caching start: \(id)_\(quality)")
         let cacheTask = Task(priority: .utility) {
             do {
                 let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
@@ -298,10 +318,10 @@ class MusicCacheManager: ObservableObject {
                 self.addCachedFile(dest.lastPathComponent)
                 self.finishSodaCache(taskKey)
                 self.enforceCacheLimit()
-                print("✅ [Cache] Soda whole-song cached: \(id)_\(quality)")
+        Log.write("✅ [Cache] Soda whole-song cached: \(id)_\(quality)")
             } catch {
                 self.finishSodaCache(taskKey)
-                print("❌ [Cache] Soda whole-song cache failed: \(error.localizedDescription)")
+        Log.write("❌ [Cache] Soda whole-song cache failed: \(error.localizedDescription)")
             }
         }
     }
@@ -310,6 +330,31 @@ class MusicCacheManager: ObservableObject {
         sodaCacheLock.lock()
         sodaCacheTasks.remove(taskKey)
         sodaCacheLock.unlock()
+    }
+
+    /// 流式会话转存缓存：SodaStreamSession 播放时已经把整首加密数据拉到内存，
+    /// 下载完成后直接解密落盘，省掉后台缓存任务对 CDN 的第二份全量下载。
+    /// fileKey 为缓存文件名（不含扩展名），由播放侧传入，保证与起播查询的
+    /// 音质档完全一致（如 "{songID}_320k"）。
+    func writeSodaCacheFromStream(fileKey: String, encrypted: Data, hexKey: String) {
+        guard !fileKey.isEmpty, !encrypted.isEmpty else { return }
+        let dest = cacheDirectory?.appendingPathComponent(fileKey + ".m4a")
+        guard let dest else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            do {
+                let decrypted = try self.decryptSodaForCache(encrypted, hexKey: hexKey)
+                if self.fileManager.fileExists(atPath: dest.path) {
+                    try self.fileManager.removeItem(at: dest)
+                }
+                try decrypted.write(to: dest)
+                self.addCachedFile(dest.lastPathComponent)
+                self.enforceCacheLimit()
+                Log.write("✅ [Cache] Soda 流式转存完成: \(fileKey).m4a (\(decrypted.count/1024)KB)")
+            } catch {
+                Log.write("❌ [Cache] Soda 流式转存失败 \(fileKey): \(error.localizedDescription)")
+            }
+        }
     }
 
     /// 客户端解密汽水 CDN 音频字节（cenc-aes-ctr）→ 可播 m4a。
@@ -333,13 +378,13 @@ class MusicCacheManager: ObservableObject {
             for fileURL in fileURLs {
                 try fileManager.removeItem(at: fileURL)
             }
-            print("🧹 [Cache] Cleared all cache")
+        Log.write("🧹 [Cache] Cleared all cache")
             cachedFilesLock.lock()
             cachedFiles.removeAll()
             cachedFilesLock.unlock()
             updateCacheSize()
         } catch {
-            print("❌ [Cache] Clear cache failed: \(error.localizedDescription)")
+        Log.write("❌ [Cache] Clear cache failed: \(error.localizedDescription)")
         }
     }
 
@@ -372,7 +417,7 @@ class MusicCacheManager: ObservableObject {
                 if (try? self.fileManager.removeItem(at: f.url)) != nil {
                     total -= f.size
                     self.removeCachedFile(f.url.lastPathComponent)
-                    print("🗑️ [Cache] Evicted (limit): \(f.url.lastPathComponent)")
+        Log.write("🗑️ [Cache] Evicted (limit): \(f.url.lastPathComponent)")
                 }
             }
 
@@ -396,7 +441,7 @@ class MusicCacheManager: ObservableObject {
                     }
                 }
             } catch {
-                print("⚠️ [Cache] Calculate size failed: \(error.localizedDescription)")
+        Log.write("⚠️ [Cache] Calculate size failed: \(error.localizedDescription)")
             }
             
             let mbSize = Double(size) / 1024 / 1024
@@ -438,6 +483,23 @@ class MusicCacheManager: ObservableObject {
             return mp3URL
         }
         return nil
+    }
+
+    /// 跨音质命中：返回该歌曲任意音质版本的缓存文件。
+    /// 场景：列表"缓存"角标按任意音质判断，而起播原本只精确匹配当前音质档，
+    /// 音质设置变过之后永远 miss → 明明有缓存却每次都走网络重新解析。
+    /// 本地任意音质秒开都远好于慢网整首拉取，故汽水等场景允许降级/升级命中。
+    func anyQualityCachedURL(for id: String) -> URL? {
+        var name: String?
+        cachedFilesLock.lock()
+        // 优先 m4a，其次 mp3
+        name = cachedFiles.first { $0.hasPrefix(id + "_") && $0.hasSuffix(".m4a") }
+            ?? cachedFiles.first { $0.hasPrefix(id + "_") && $0.hasSuffix(".mp3") }
+            ?? cachedFiles.first { $0.hasPrefix(id + ".") }
+        cachedFilesLock.unlock()
+        guard let fileName = name, let dir = cacheDirectory else { return nil }
+        let url = dir.appendingPathComponent(fileName)
+        return isValidAudioFile(at: url) ? url : nil
     }
 
     /// 判断文件内容是否为 m4a/mp4（起始含 ftyp box），用于识别误命名为 .mp3 的汽水缓存。

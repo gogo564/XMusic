@@ -525,9 +525,14 @@ final class PlayerManager: ObservableObject {
             do {
                 let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: mapped)
                 if stream.hexKey.count == 32 {
-                    // 加密流：走 sodastream:// 流式解密；同时后台整首解密落盘（播放即缓存）
-                    MusicCacheManager.shared.cacheSodaTrack(trackID: trackID, id: song.id, quality: quality)
-                    let customURL = SodaStreamLoader.customURL(trackID: trackID, quality: mapped)
+                    // 加密流：走 sodastream:// 流式解密。cacheKey 随 URL 带给流式会话，
+                    // 下载完成直接转存缓存（播一次即缓存）；不再另起后台下载任务，
+                    // 避免同一首歌对 CDN 拉两份全量数据抢带宽。
+                    let customURL = SodaStreamLoader.customURL(
+                        trackID: trackID,
+                        quality: mapped,
+                        cacheKey: "\(song.id)_\(quality)"
+                    )
                     sodaStreamURLs[song.id] = customURL.absoluteString
                     return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
                 }
@@ -575,6 +580,15 @@ final class PlayerManager: ObservableObject {
         // 1. Cache-first（缓存按 音质 区分，命中即所选音质）
         if MusicCacheManager.shared.isCached(id: song.id, quality: quality), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id, quality: quality) {
             startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: isSoda(song) ? "最高音质" : quality, playbackOrigin: "缓存")
+            Task { await loadLyric(for: song) }
+            return
+        }
+        // 1.1 汽水跨音质兜底：本地任意音质的缓存都秒开，远好于慢网整首拉取。
+        // （列表"缓存"角标按任意音质判断；若只精确匹配当前档，音质设置变过
+        // 之后会永远 miss，明明有缓存却每次都要解析+下载。）
+        if isSoda(song), let anyURL = MusicCacheManager.shared.anyQualityCachedURL(for: song.id) {
+            Log.write("⚡️ [Player] 汽水跨音质缓存命中 song=\(song.name) file=\(anyURL.lastPathComponent)")
+            startPlayback(url: anyURL, song: song, sourceName: song.source, qualityName: "缓存", playbackOrigin: "缓存")
             Task { await loadLyric(for: song) }
             return
         }

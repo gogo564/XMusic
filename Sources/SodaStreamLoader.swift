@@ -15,12 +15,18 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
 
     private override init() {}
 
-    static func customURL(trackID: String, quality: String) -> URL {
+    static func customURL(trackID: String, quality: String, cacheKey: String? = nil) -> URL {
         var comps = URLComponents()
         comps.scheme = scheme
         comps.host = "track"
         comps.path = "/" + trackID
-        comps.queryItems = [URLQueryItem(name: "quality", value: quality)]
+        var items = [URLQueryItem(name: "quality", value: quality)]
+        // cacheKey：播放器希望落盘的缓存文件名（不含扩展名）。会话下载完成后
+        // 直接把已拉取的加密数据解密落盘，避免后台缓存任务再发一次全量下载。
+        if let cacheKey, !cacheKey.isEmpty {
+            items.append(URLQueryItem(name: "ck", value: cacheKey))
+        }
+        comps.queryItems = items
         return comps.url!
     }
 
@@ -40,9 +46,12 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
             session = existing
         } else {
             let trackID = url.path.replacingOccurrences(of: "/", with: "")
-            let quality = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "quality" })?.value ?? "highest"
-            session = SodaStreamSession(trackID: trackID, quality: quality)
+            let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let quality = comps?.queryItems?.first(where: { $0.name == "quality" })?.value ?? "highest"
+            // ck：播放侧指定的缓存文件名。会话拉完整首后直接解密落盘，
+            // 免去后台缓存任务的第二份全量 CDN 下载。
+            let cacheKey = comps?.queryItems?.first(where: { $0.name == "ck" })?.value
+            session = SodaStreamSession(trackID: trackID, quality: quality, cacheFileKey: cacheKey)
             active[key] = session
             activeOrder.append(key)
             if activeOrder.count > maxActiveSessions {
@@ -117,10 +126,14 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
     private var started = false
     private var downloadFinished = false
     private var keyHex: String = ""
+    /// 播放侧指定的缓存文件名（不含扩展名）；非 nil 时下载完成后转存缓存
+    private let cacheFileKey: String?
+    private var cacheStored = false
 
-    init(trackID: String, quality: String) {
+    init(trackID: String, quality: String, cacheFileKey: String? = nil) {
         self.trackID = trackID
         self.quality = quality
+        self.cacheFileKey = cacheFileKey
         super.init()
     }
 
@@ -215,6 +228,7 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
             serveLocked()
             if nextSample >= (parsed?.samples.count ?? Int.max) {
                 Log.write("🎧 [SodaStream] done track=\(trackID) samples=\(parsed?.samples.count ?? -1) decrypted=\(decrypted.count) finished")
+                storeCacheIfRequestedLocked()
                 // 下载完成不终结 session：AVPlayer 可能还会发后续字节范围请求，
                 // session 需存活并复用已解密数据，直到 AVPlayer 取消（didCancel）。
                 downloadTask = nil
@@ -228,6 +242,18 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
     }
 
     // MARK: - 解析 + 解密
+
+    /// 需在 queue 内调用。下载完成且播放侧给了缓存名时，把已拉取的加密数据
+    /// 交给缓存管理器解密落盘（后台线程），实现"播一次即缓存"，不再双份下载。
+    private func storeCacheIfRequestedLocked() {
+        guard !cacheStored, let ck = cacheFileKey, !ck.isEmpty else { return }
+        cacheStored = true
+        let data = encrypted
+        let hex = keyHex
+        Task.detached(priority: .utility) {
+            MusicCacheManager.shared.writeSodaCacheFromStream(fileKey: ck, encrypted: data, hexKey: hex)
+        }
+    }
 
     /// 需在 queue 内调用
     private func processLocked() {
