@@ -97,7 +97,7 @@ class MusicCacheManager: ObservableObject {
             Log.write("⚠️ [Cache] Cached file is invalid, removing: \(id)_\(quality)")
             try? fileManager.removeItem(at: fileURL)
             removeCachedFile(fileURL.lastPathComponent)
-            invalidateValidationMemo(url)
+            invalidateValidationMemo(fileURL)
             return nil
         }
         return fileURL
