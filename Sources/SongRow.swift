@@ -287,10 +287,12 @@ struct QualityPickerView: View {
 
     private var options: [(type: String, size: String)] {
         if song.source == "soda" {
+            // 汽水独立档位：服务器无该档时自动回落到可用最佳，播放器按实际下发显示
             return [
-                ("128k", "汽水 128K"),
-                ("320k", "汽水 320K"),
-                ("flac", "汽水 无损"),
+                ("128k", "标准"),
+                ("320k", "高品质"),
+                ("flac", "无损"),
+                ("hi_res", "Hi-Res(曲库有则用)"),
             ]
         }
         return song.qualities

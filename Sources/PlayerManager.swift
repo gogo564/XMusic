@@ -86,6 +86,8 @@ final class PlayerManager: ObservableObject {
     private var lastPlaybackURLs: [String: String] = [:]
     /// 当前起播周期内的自动重建次数（resolveAndPlay 时清零，最多自动救两次）
     private var sodaRetryCounts: [String: Int] = [:]
+    /// 当前已加载歌词归属的歌曲 id：支持"歌词与解析并行拉取"+ 防止跨歌覆盖
+    private var loadedLyricSongID: String?
     /// 最近一次实际起播的时间戳。用于过滤 AVPlayer 换 item 时滞留投递的
     /// AVPlayerItemDidPlayToEndTime 通知：刚起播（<1s）就收到结束通知，几乎都是
     /// 缓存文件 seek 起始时间异常或旧 item 残留通知，不应触发自动切歌。
@@ -562,6 +564,7 @@ final class PlayerManager: ObservableObject {
         case "128k": return "medium"
         case "320k": return "highest"
         case "flac": return "lossless"
+        case "hi_res": return "hi_res"
         default: return "highest"
         }
     }
@@ -570,6 +573,8 @@ final class PlayerManager: ObservableObject {
         guard let song = song else { return }
         // 每次新的解析起播（含自动切歌）都重置自动重建次数
         sodaRetryCounts.removeValue(forKey: song.id)
+        // 歌词与地址解析并行拉取：不用等起播成功才出现歌词
+        Task { await self.loadLyric(for: song) }
         // 注意：不在解析前切换 currentSong。只有真正起播（startPlayback）成功才切，
         // 这样解析期间封面/歌词仍是上一首，声音与画面一致；解析失败则维持上一首继续播。
         isResolving = true
@@ -582,14 +587,12 @@ final class PlayerManager: ObservableObject {
         if let localURL = DownloadService.shared.localURL(for: song) {
             let dlQuality = DownloadService.shared.downloadedQuality(for: song) ?? quality
             startPlayback(url: localURL, song: song, sourceName: song.source, qualityName: dlQuality, playbackOrigin: "下载")
-            Task { await loadLyric(for: song) }
             return
         }
 
         // 1. Cache-first（缓存按 音质 区分，命中即所选音质）
         if MusicCacheManager.shared.isCached(id: song.id, quality: quality), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id, quality: quality) {
             startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: "缓存", playbackOrigin: "缓存")
-            Task { await loadLyric(for: song) }
             return
         }
         // 1.1 汽水跨音质兜底：本地任意音质的缓存都秒开，远好于慢网整首拉取。
@@ -598,14 +601,12 @@ final class PlayerManager: ObservableObject {
         if isSoda(song), let anyURL = MusicCacheManager.shared.anyQualityCachedURL(for: song.id) {
             Log.write("⚡️ [Player] 汽水跨音质缓存命中 song=\(song.name) file=\(anyURL.lastPathComponent)")
             startPlayback(url: anyURL, song: song, sourceName: song.source, qualityName: "缓存", playbackOrigin: "缓存")
-            Task { await loadLyric(for: song) }
             return
         }
 
         // 1.5 Prefetched URL：上一首播放时已预取好的下一首地址，直接起播省一次服务器往返
         if let preURL = prefetchedURLs.removeValue(forKey: song.id + "_" + quality), let url = URL(string: preURL) {
             startPlayback(url: url, song: song, sourceName: song.source, qualityName: quality, playbackOrigin: "")
-            Task { await loadLyric(for: song) }
             return
         }
 
@@ -620,7 +621,6 @@ final class PlayerManager: ObservableObject {
                     MusicCacheManager.shared.startCaching(url: result.url, quality: quality, id: song.id)
                     self.startPlayback(url: url, song: song, sourceName: result.sourceName, qualityName: result.type, playbackOrigin: "")
                 }
-                await self.loadLyric(for: song)
             } catch {
                 await MainActor.run {
                     self.handleResolveFailure(error.localizedDescription)
@@ -677,8 +677,13 @@ final class PlayerManager: ObservableObject {
         lastPlaybackURLs[song.id] = url.absoluteString
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
-        lyrics = ""
-        parsedLyrics = []
+        // 歌词已在并行预取时到位则保留；否则清掉上一首的残留
+        if loadedLyricSongID != song.id {
+            lyrics = ""
+            lrc = LRC.parse(nil)
+            parsedLyrics = []
+        }
+        loadedLyricSongID = song.id
         currentLyricIndex = -1
         player.automaticallyWaitsToMinimizeStalling = false
         // 优先复用预建好的下一首 item（省去 AVURLAsset + loader 构建）；不匹配则现建
@@ -831,43 +836,19 @@ final class PlayerManager: ObservableObject {
     }
 
     private func loadLyric(for song: LXSong) async {
-        do {
-            var raw: String
-            var parsed: LRC
-            if isSoda(song) {
-                raw = try await SodaAPIClient.shared.lyric(trackID: song.songmid ?? "")
-                parsed = LRC.parse(raw)
-            } else {
-                let result = try await LXAPIClient.shared.getLyric(for: song)
-                raw = result.lyric ?? ""
-                parsed = LRC.parse(raw, translation: result.translated)
-
-                if parsed.lines.isEmpty, LRC.hasTimestamps(result.lxlyric) {
-                    let lxLines = LRC.parseLxlyric(result.lxlyric)
-                    if !lxLines.isEmpty {
-                        raw = lxLines.map { formatLRC($0.time) + $0.text }.joined(separator: "\n")
-                        parsed = LRC.parse(raw)
-                    }
-                }
-
-                if parsed.lines.isEmpty, LRC.hasTimestamps(raw) == false {
-                    if let fallback = await LXAPIClient.shared.getLyricFallback(for: song) {
-                        raw = fallback
-                        parsed = LRC.parse(fallback)
-                    }
-                }
-            }
-
-            await MainActor.run {
-                self.lyrics = raw
-                self.lrc = parsed
-                self.parsedLyrics = parsed.lines.map { LyricLine(time: $0.time, text: $0.text) }
+        let fetched: (raw: String, parsed: LRC)? = try? await fetchLyricData(for: song)
+        await MainActor.run {
+            // 归属守卫：快速切歌时，迟到的歌词不得覆盖新歌的歌词
+            guard self.currentSong?.id == song.id || self.currentSong == nil else { return }
+            if let f = fetched {
+                self.lyrics = f.raw
+                self.lrc = f.parsed
+                self.parsedLyrics = f.parsed.lines.map { LyricLine(time: $0.time, text: $0.text) }
                 self.currentLyricIndex = -1
-                self.saveRecent(song: song, lrc: raw)
+                self.loadedLyricSongID = song.id
+                self.saveRecent(song: song, lrc: f.raw)
                 self.updateNowPlaying()
-            }
-        } catch {
-            await MainActor.run {
+            } else if self.loadedLyricSongID != song.id {
                 self.lyrics = ""
                 self.lrc = LRC.parse(nil)
                 self.parsedLyrics = []
@@ -875,6 +856,35 @@ final class PlayerManager: ObservableObject {
                 self.updateNowPlaying()
             }
         }
+    }
+
+    private func fetchLyricData(for song: LXSong) async throws -> (raw: String, parsed: LRC) {
+        var raw: String
+        var parsed: LRC
+        if isSoda(song) {
+            raw = try await SodaAPIClient.shared.lyric(trackID: song.songmid ?? "")
+            parsed = LRC.parse(raw)
+        } else {
+            let result = try await LXAPIClient.shared.getLyric(for: song)
+            raw = result.lyric ?? ""
+            parsed = LRC.parse(raw, translation: result.translated)
+
+            if parsed.lines.isEmpty, LRC.hasTimestamps(result.lxlyric) {
+                let lxLines = LRC.parseLxlyric(result.lxlyric)
+                if !lxLines.isEmpty {
+                    raw = lxLines.map { formatLRC($0.time) + $0.text }.joined(separator: "\n")
+                    parsed = LRC.parse(raw)
+                }
+            }
+
+            if parsed.lines.isEmpty, LRC.hasTimestamps(raw) == false {
+                if let fallback = await LXAPIClient.shared.getLyricFallback(for: song) {
+                    raw = fallback
+                    parsed = LRC.parse(fallback)
+                }
+            }
+        }
+        return (raw, parsed)
     }
 
     // MARK: - Persistence

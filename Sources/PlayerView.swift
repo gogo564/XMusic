@@ -13,7 +13,11 @@ struct PlayerView: View {
     @State private var sodaCollectMessage: String?
     @State private var sodaCollecting = false
 
-    private let qualityOptions = ["128k", "320k", "flac"]
+    private var qualityOptions: [String] {
+        playerManager.currentSong?.source == "soda"
+            ? ["128k", "320k", "flac", "hi_res"]
+            : ["128k", "320k", "flac"]
+    }
 
     var body: some View {
         ZStack {
@@ -154,7 +158,7 @@ struct PlayerView: View {
 
             Picker("音质", selection: qualityBinding) {
                 ForEach(qualityOptions, id: \.self) { q in
-                    Text(q).tag(q)
+                    Text(playerManager.currentSong?.source == "soda" ? SodaAPIClient.qualityDisplayName(q) : q).tag(q)
                 }
             }
 
@@ -264,15 +268,9 @@ struct PlayerView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                 Spacer(minLength: 0)
-            } else if playerManager.currentLyricIndex < 0 {
-                Spacer(minLength: 0)
-                Text(playerManager.parsedLyrics.first?.text ?? "歌词即将开始")
-                    .font(.title3)
-                    .foregroundColor(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Spacer(minLength: 0)
             } else {
+                // 有解析结果即显示多行滚动视图；前奏阶段(idx=-1)锚定第 0 行，
+                // 待唱行淡显——不再只露一行等开唱
                 Spacer(minLength: 0)
                 VStack(spacing: 18) {
                     ForEach(visibleLyrics) { item in
@@ -298,8 +296,9 @@ struct PlayerView: View {
 
     private var visibleLyrics: [VisibleLyric] {
         let lines = playerManager.parsedLyrics
-        let idx = playerManager.currentLyricIndex
-        guard !lines.isEmpty, idx >= 0, idx < lines.count else { return [] }
+        // 前奏阶段(idx=-1)锚定第0行,完整显示多行待唱歌词,而不是只露一行
+        let idx = max(0, playerManager.currentLyricIndex)
+        guard !lines.isEmpty, idx < lines.count else { return [] }
         var out: [VisibleLyric] = []
         for offset in -4...4 {
             let li = idx + offset
