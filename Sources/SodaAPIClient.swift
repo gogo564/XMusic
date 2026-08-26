@@ -525,6 +525,8 @@ struct SodaAPIClient {
     func lyric(trackID: String) async throws -> String {
         let data = try await getJSON(makeURL("/lyric", query: ["track_id": trackID]))
         if let dict = data as? [String: Any] {
+            // qishui-api /lyric 返回的字段是 lrc（标准 LRC 带时间戳）
+            if let l = dict["lrc"] as? String { return l }
             if let l = dict["lyric"] as? String { return l }
             if let l = dict["lyrics"] as? String { return l }
             if let l = dict["content"] as? String { return l }
