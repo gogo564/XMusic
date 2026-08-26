@@ -88,6 +88,9 @@ final class PlayerManager: ObservableObject {
     private var sodaRetryCounts: [String: Int] = [:]
     /// 当前已加载歌词归属的歌曲 id：支持"歌词与解析并行拉取"+ 防止跨歌覆盖
     private var loadedLyricSongID: String?
+    /// 汽水单歌档位降级记录：高阶档位(lossless/hi_res)起播反复失败时，
+    /// 自动降级到 highest 再试一次（部分曲目高阶流结构与解析器不兼容）
+    private var sodaTierFallbacks = Set<String>()
     /// 最近一次实际起播的时间戳。用于过滤 AVPlayer 换 item 时滞留投递的
     /// AVPlayerItemDidPlayToEndTime 通知：刚起播（<1s）就收到结束通知，几乎都是
     /// 缓存文件 seek 起始时间异常或旧 item 残留通知，不应触发自动切歌。
@@ -780,9 +783,13 @@ final class PlayerManager: ObservableObject {
                                 candidate = self.lastPlaybackURLs[key].flatMap(URL.init(string:))
                             }
                         }
-                        if tries < 2, let u = candidate {
+                        if tries < 2, var u = candidate {
                             self.sodaRetryCounts[key] = tries + 1
                             let attempt = tries + 1
+                            // sodastream 重建加 nonce 强制全新会话，绕开可能中毒的旧会话状态
+                            if u.scheme == SodaStreamLoader.scheme {
+                                u = URL(string: u.absoluteString + "&n=\(Int(Date().timeIntervalSince1970 * 1000))-\(attempt)") ?? u
+                            }
                             Log.write("🔁 [Player] soda 瞬时失败，自动重建 item 第\(attempt)次重试 scheme=\(u.scheme ?? "") song=\(song.name)")
                             // 小退避：连续快速切歌时 AVPlayer 资源未释放完会连锁瞬时失败，
                             // 等 150/400ms 再重建，成功率显著提高
@@ -796,6 +803,15 @@ final class PlayerManager: ObservableObject {
                                 self.observeItemStatus(retryItem)
                                 self.player.play()
                             }
+                            return
+                        }
+                        // ③ 高阶档位(lossless/hi_res)两连败 → 自动降级 highest 重解一次
+                        if tries >= 2,
+                           (self.quality == "flac" || self.quality == "hi_res"),
+                           !self.sodaTierFallbacks.contains(key) {
+                            self.sodaTierFallbacks.insert(key)
+                            Log.write("⬇️ [Player] 高阶档位起播失败，自动降级320K重解 song=\(song.name)")
+                            self.resolveAndPlay(song)
                             return
                         }
                         let err = item.error?.localizedDescription ?? "播放失败"

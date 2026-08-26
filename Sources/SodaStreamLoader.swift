@@ -15,7 +15,7 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
 
     private override init() {}
 
-    static func customURL(trackID: String, quality: String, cacheKey: String? = nil) -> URL {
+    static func customURL(trackID: String, quality: String, cacheKey: String? = nil, nonce: String? = nil) -> URL {
         var comps = URLComponents()
         comps.scheme = scheme
         comps.host = "track"
@@ -25,6 +25,11 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
         // 直接把已拉取的加密数据解密落盘，避免后台缓存任务再发一次全量下载。
         if let cacheKey, !cacheKey.isEmpty {
             items.append(URLQueryItem(name: "ck", value: cacheKey))
+        }
+        // nonce：强制新会话。加载器按完整 URL 区分会话，带不同 nonce 的重建
+        // 不会复用可能已中毒/已终结的旧 session，从根上断绝"出生即失败"循环。
+        if let nonce, !nonce.isEmpty {
+            items.append(URLQueryItem(name: "n", value: nonce))
         }
         comps.queryItems = items
         return comps.url!
