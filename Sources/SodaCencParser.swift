@@ -78,6 +78,8 @@ struct SodaCencParser {
         /// 解密后 mdat 数据总长
         let decryptedPayloadSize: Int
         let keyBytes: [UInt8]
+        /// 音频轨 box 范围：stco 重写时区分音频轨(重映射)与非音频轨(整体平移)
+        let audioTrakRange: Range<Int>?
     }
 
     func parse(keyHex: String) throws -> Parsed {
@@ -121,6 +123,8 @@ struct SodaCencParser {
 
         let samples = zip(sampleSizes, ivs).map { Sample(size: $0, iv: $1) }
         let ftyp = findBox("ftyp")
+        // 记录音频轨范围：部分曲目带第二条 gmhd 元数据轨，其 stco 不能用音频偏移重写
+        let audioTrakRange: Range<Int>? = trak.map { $0.offset..<$0.endOffset }
         return Parsed(
             ftyp: ftyp,
             mdat: mdat,
@@ -128,7 +132,8 @@ struct SodaCencParser {
             chunkOffsets: chunkOffsets,
             encryptedMdatDataOffset: mdat.offset + 8,
             decryptedPayloadSize: sampleSizes.reduce(0, +),
-            keyBytes: keyBytes
+            keyBytes: keyBytes,
+            audioTrakRange: audioTrakRange
         )
     }
 
@@ -272,9 +277,29 @@ struct SodaCencParser {
                 let subdata = fileData.subdata(in: (pos + 8)..<(pos + size))
                 let chunkCount = Int(readUInt32(subdata, 4))
                 var body = Data(subdata.prefix(8))
-                for offset in parsed.chunkOffsets.prefix(chunkCount) {
-                    var v = UInt32(newMdatOffset + offset).bigEndian
-                    body.append(contentsOf: Swift.withUnsafeBytes(of: &v) { Array($0) })
+                // 音频轨：用解析出的新偏移逐项重映射；
+                // 非音频轨（gmhd 元数据/章节轨）：moov 尺寸变化使 mdat 整体平移，
+                // 原偏移 + (新mdat起点 - 旧mdat数据起点) 即可，绝不能用音频轨偏移覆盖
+                // ——否则双轨曲目（部分无损）的元数据轨偏移全错，整文件报废。
+                let inAudioTrak: Bool
+                if let range = parsed.audioTrakRange {
+                    inAudioTrak = pos >= range.lowerBound && pos < range.upperBound
+                } else {
+                    inAudioTrak = true
+                }
+                if inAudioTrak {
+                    for offset in parsed.chunkOffsets.prefix(chunkCount) {
+                        var v = UInt32(newMdatOffset + offset).bigEndian
+                        body.append(contentsOf: Swift.withUnsafeBytes(of: &v) { Array($0) })
+                    }
+                } else {
+                    let delta = newMdatOffset - parsed.encryptedMdatDataOffset
+                    for i in 0..<chunkCount {
+                        let orig = Int(readUInt32(subdata, 8 + i * 4))
+                        let shifted = orig + delta
+                        var v = UInt32(max(0, min(shifted, Int(UInt32.max)))).bigEndian
+                        body.append(contentsOf: Swift.withUnsafeBytes(of: &v) { Array($0) })
+                    }
                 }
                 parts.append(boxHeader("stco", innerSize: body.count))
                 parts.append(body)
