@@ -124,7 +124,7 @@ struct SodaCencParser {
         let samples = zip(sampleSizes, ivs).map { Sample(size: $0, iv: $1) }
         let ftyp = findBox("ftyp")
         // 记录音频轨范围：部分曲目带第二条 gmhd 元数据轨，其 stco 不能用音频偏移重写
-        let audioTrakRange: Range<Int>? = trak.map { $0.offset..<$0.endOffset }
+        let audioTrakRange: Range<Int>? = trak.offset..<trak.endOffset
         return Parsed(
             ftyp: ftyp,
             mdat: mdat,
