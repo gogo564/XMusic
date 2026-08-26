@@ -460,13 +460,16 @@ struct SodaAPIClient {
         }
     }
 
-    /// 汽水歌音质显示名
+    /// 汽水歌音质显示名（传入实际下发档位，含 hi_res/spatial 等扩展）
     static func qualityDisplayName(_ q: String) -> String {
         switch q.lowercased() {
         case "flac", "flac24bit", "lossless": return "无损"
-        case "320k", "highest", "higher": return "320K"
-        case "128k", "medium", "hi_res": return "128K"
-        default: return q
+        case "hi_res": return "Hi-Res"
+        case "spatial": return "全景声"
+        case "320k", "highest": return "320K"
+        case "higher": return "高品"
+        case "128k", "medium": return "128K"
+        default: return q.uppercased()
         }
     }
 

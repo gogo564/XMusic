@@ -537,13 +537,17 @@ final class PlayerManager: ObservableObject {
                         cacheKey: "\(song.id)_\(quality)"
                     )
                     sodaStreamURLs[song.id] = customURL.absoluteString
-                    return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
+                    // 显示服务端实际下发的档位：汽水曲库未必有请求的档位（如无损），
+                    // 服务器会回落到可用最佳；按请求档显示会误导（选无损实际320K）
+                    let delivered = stream.quality.isEmpty ? mapped : stream.quality
+                    return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(delivered), "汽水")
                 }
                 guard let url = URL(string: stream.mainURL) else {
                     throw SodaError.upstream
                 }
                 // 明文直链（qishui-api h5 兜底）：直接播放 CDN URL，无需解密
-                return (url.absoluteString, SodaAPIClient.qualityDisplayName(quality), "汽水")
+                let delivered = stream.quality.isEmpty ? mapped : stream.quality
+                return (url.absoluteString, SodaAPIClient.qualityDisplayName(delivered), "汽水")
             } catch {
                 throw error
             }
@@ -584,7 +588,7 @@ final class PlayerManager: ObservableObject {
 
         // 1. Cache-first（缓存按 音质 区分，命中即所选音质）
         if MusicCacheManager.shared.isCached(id: song.id, quality: quality), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id, quality: quality) {
-            startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: isSoda(song) ? "最高音质" : quality, playbackOrigin: "缓存")
+            startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: "缓存", playbackOrigin: "缓存")
             Task { await loadLyric(for: song) }
             return
         }
