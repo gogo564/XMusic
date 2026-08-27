@@ -807,7 +807,7 @@ final class PlayerManager: ObservableObject {
                                 // 仅刚起播(<0.2s)的瞬时失败则从 0 开始，避免无谓的 seek 动作
                                 if failedPlaybackTime > 0.2 {
                                     Log.write("📌 [Player] 重建后 seek 回 \(String(format: "%.2f", failedPlaybackTime))s song=\(song.name)")
-                                    self.player.seek(to: CMTime(seconds: failedPlaybackTime, preferredTimescale: 600))
+                                    await self.player.seek(to: CMTime(seconds: failedPlaybackTime, preferredTimescale: 600))
                                 }
                                 self.player.play()
                             }
