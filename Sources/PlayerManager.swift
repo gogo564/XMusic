@@ -768,18 +768,6 @@ final class PlayerManager: ObservableObject {
                     // 已缓存，秒就绪）；② 仍失败则回退本地解密缓存文件；③ 都没有才弹错。
                     if self.isSoda(self.currentSong ?? LXSong([:])), let song = self.currentSong {
                         let key = song.id
-                        // file:// 缓存文件失败 = 文件损坏（历史版本写入的坏缓存）。
-                        // 重试同一个坏文件只会反复 replaceCurrentItem 导致前 N 秒重复播放。
-                        // 直接删掉坏缓存 + 回退网络播放，不走重试流程。
-                        if let ustr = self.lastPlaybackURLs[key], let u = URL(string: ustr), u.isFileURL {
-                            Log.write("🗑️ [Player] 缓存文件播放失败，删除坏缓存并回退网络 song=\(song.name) file=\(u.lastPathComponent)")
-                            try? FileManager.default.removeItem(at: u)
-                            MusicCacheManager.shared.clearCacheMemo(for: u)
-                            self.lastPlaybackURLs.removeValue(forKey: key)
-                            self.isPlaying = false
-                            self.resolveAndPlay(song)
-                            return
-                        }
                         let tries = self.sodaRetryCounts[key] ?? 0
                         // 重试策略：① 原地重建（复用上次实际地址，file 缓存不回网络流）
                         //           ② 若上次是流式且本地已有解密缓存 → 换本地文件
@@ -798,11 +786,13 @@ final class PlayerManager: ObservableObject {
                         if tries < 2, var u = candidate {
                             self.sodaRetryCounts[key] = tries + 1
                             let attempt = tries + 1
+                            // 记录失败瞬间的播放进度，重建 item 后 seek 回原处，避免“唱1秒→拉回→重唱”
+                            let failedPlaybackTime = item.currentTime().seconds
                             // sodastream 重建加 nonce 强制全新会话，绕开可能中毒的旧会话状态
                             if u.scheme == SodaStreamLoader.scheme {
                                 u = URL(string: u.absoluteString + "&n=\(Int(Date().timeIntervalSince1970 * 1000))-\(attempt)") ?? u
                             }
-                            Log.write("🔁 [Player] soda 瞬时失败，自动重建 item 第\(attempt)次重试 scheme=\(u.scheme ?? "") song=\(song.name)")
+                            Log.write("🔁 [Player] soda 瞬时失败(秒=\(String(format: "%.2f", failedPlaybackTime)))，自动重建 item 第\(attempt)次重试 scheme=\(u.scheme ?? "") song=\(song.name)")
                             // 小退避：连续快速切歌时 AVPlayer 资源未释放完会连锁瞬时失败，
                             // 等 150/400ms 再重建，成功率显著提高
                             self.isPlaying = true
@@ -813,6 +803,12 @@ final class PlayerManager: ObservableObject {
                                 self.player.replaceCurrentItem(with: retryItem)
                                 self.lastItemPlayStartTime = Date()
                                 self.observeItemStatus(retryItem)
+                                // 重建后恢复到失败前的播放位置：只有确实播过一段(>0.2s)才 seek，
+                                // 仅刚起播(<0.2s)的瞬时失败则从 0 开始，避免无谓的 seek 动作
+                                if failedPlaybackTime > 0.2 {
+                                    Log.write("📌 [Player] 重建后 seek 回 \(String(format: "%.2f", failedPlaybackTime))s song=\(song.name)")
+                                    self.player.seek(to: CMTime(seconds: failedPlaybackTime, preferredTimescale: 600))
+                                }
                                 self.player.play()
                             }
                             return
