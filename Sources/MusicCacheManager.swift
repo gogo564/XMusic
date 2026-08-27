@@ -52,10 +52,17 @@ class MusicCacheManager: ObservableObject {
             var purged = 0
             for name in names where name.hasPrefix("soda_") && name.hasSuffix(".m4a") {
                 let url = cacheDirectory.appendingPathComponent(name)
-                if self.fileHasEncryptionStructure(at: url) {
+                let hasEnc = self.fileHasEncryptionStructure(at: url)
+                let hasCorrupt = self.fileHasCorruptedMdat(at: url)
+                if hasEnc || hasCorrupt {
                     try? self.fileManager.removeItem(at: url)
                     if let idx = names.firstIndex(of: name) { names.remove(at: idx) }
                     purged += 1
+                    if hasEnc {
+                        Log.write("🧹 [Cache] 启动体检清除加密坏缓存: \(name)")
+                    } else {
+                        Log.write("🧹 [Cache] 启动体检清除 mdat 异常缓存: \(name)")
+                    }
                 }
             }
             if purged > 0 {
@@ -116,6 +123,55 @@ class MusicCacheManager: ObservableObject {
         }
         return scan(0, data.count, depth: 0)
     }
+
+    /// 检查 m4a 文件的 mdat box 大小是否与实际文件大小一致。
+    /// 旧版解密 bug 会把多余的字节（ftyp/moov 头）混入 mdat payload，
+    /// 导致 mdat 声称的大小 ≠ 文件实际大小，AVPlayer 能读到时长但解码失败。
+    func fileHasCorruptedMdat(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let fileSize = (try? handle.seekToEndOfFile()) ?? 0
+        guard fileSize > 8 else { return false }
+        handle.seek(toFileOffset: 0)
+        let data = handle.readData(ofLength: min(Int(fileSize), 64 * 1024))
+
+        func be32(_ off: Int) -> Int {
+            return (Int(data[off]) << 24) | (Int(data[off + 1]) << 16) | (Int(data[off + 2]) << 8) | Int(data[off + 3])
+        }
+        func boxType(_ off: Int) -> String? {
+            guard off + 8 <= data.count else { return nil }
+            let bytes = [UInt8](data[(off + 4)..<(off + 8)])
+            return String(bytes: bytes, encoding: .ascii)
+        }
+
+        // 扫描顶层 box，找 ftyp + moov + mdat
+        var pos = 0
+        var hasFtyp = false, hasMoov = false
+        var mdatBoxSize: Int = 0
+        while pos + 8 <= data.count {
+            let size = be32(pos)
+            guard size >= 8, pos + size <= data.count else { break }
+            if let type = boxType(pos) {
+                if type == "ftyp" { hasFtyp = true }
+                else if type == "moov" { hasMoov = true }
+                else if type == "mdat" { mdatBoxSize = size }
+            }
+            pos += size
+        }
+
+        // mdat 声称的大小 + 前面的 box 大小应约等于文件大小。
+        // 偏差 > 4096 说明 mdat payload 有额外字节（旧 bug 产物）。
+        if hasFtyp && hasMoov && mdatBoxSize > 8 {
+            let headerSize = UInt64(pos) // ftyp + moov + mdat header
+            let expectedSize = headerSize + UInt64(mdatBoxSize - 8) // mdat 内部 payload
+            let diff = Int64(fileSize) - Int64(expectedSize)
+            if diff > 4096 || diff < -4096 {
+                Log.write("⚠️ [Cache] mdat 大小异常 file=\(url.lastPathComponent) actual=\(fileSize) expected=\(expectedSize) diff=\(diff)")
+                return true
+            }
+        }
+        return false
+    }
     
     private func createCacheDirectory() {
         guard let cacheDirectory = cacheDirectory else { return }
@@ -174,6 +230,12 @@ class MusicCacheManager: ObservableObject {
         validationMemoLock.lock()
         validationMemo.removeValue(forKey: url.path)
         validationMemoLock.unlock()
+    }
+
+    /// 对外暴露：删除指定文件的校验记忆 + 内存索引（删除坏缓存后调用）
+    func clearCacheMemo(for url: URL) {
+        invalidateValidationMemo(url)
+        removeCachedFile(url.lastPathComponent)
     }
 
     /// Check if a file contains valid audio data by examining file size and magic bytes
@@ -241,6 +303,12 @@ class MusicCacheManager: ObservableObject {
                 // （历史 bug 可能把未解密的加密字节落盘成 .m4a，需逐出以免误当可播缓存。）
                 if containsEncryptionBoxes(at: url) {
         Log.write("⚠️ [Cache] Encrypted (undecrypted) cache, rejecting: \(url.lastPathComponent)")
+                    return false
+                }
+                // mdat 大小异常（旧版解密 bug 把多余字节混入 mdat payload）：
+                // 声称大小 ≠ 实际大小，AVPlayer 能读时长但解码前 N 秒必失败。
+                if fileHasCorruptedMdat(at: url) {
+        Log.write("⚠️ [Cache] Corrupted mdat cache, rejecting: \(url.lastPathComponent)")
                     return false
                 }
                 return true

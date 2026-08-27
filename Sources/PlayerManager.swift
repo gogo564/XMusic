@@ -768,6 +768,18 @@ final class PlayerManager: ObservableObject {
                     // 已缓存，秒就绪）；② 仍失败则回退本地解密缓存文件；③ 都没有才弹错。
                     if self.isSoda(self.currentSong ?? LXSong([:])), let song = self.currentSong {
                         let key = song.id
+                        // file:// 缓存文件失败 = 文件损坏（历史版本写入的坏缓存）。
+                        // 重试同一个坏文件只会反复 replaceCurrentItem 导致前 N 秒重复播放。
+                        // 直接删掉坏缓存 + 回退网络播放，不走重试流程。
+                        if let ustr = self.lastPlaybackURLs[key], let u = URL(string: ustr), u.isFileURL {
+                            Log.write("🗑️ [Player] 缓存文件播放失败，删除坏缓存并回退网络 song=\(song.name) file=\(u.lastPathComponent)")
+                            try? FileManager.default.removeItem(at: u)
+                            MusicCacheManager.shared.clearCacheMemo(for: u)
+                            self.lastPlaybackURLs.removeValue(forKey: key)
+                            self.isPlaying = false
+                            self.resolveAndPlay(song)
+                            return
+                        }
                         let tries = self.sodaRetryCounts[key] ?? 0
                         // 重试策略：① 原地重建（复用上次实际地址，file 缓存不回网络流）
                         //           ② 若上次是流式且本地已有解密缓存 → 换本地文件
