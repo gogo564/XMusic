@@ -118,6 +118,11 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
     private var encrypted = Data()
     private var payloadCursor = 0          // 已解密到的样本所对应的加密数据绝对偏移
     private var nextSample = 0             // 下一个待解密样本索引
+    /// 已向 AVPlayer 累计交付的字节数（跨请求累加）。
+    /// AVPlayer 先发探测请求（off=0,len=2），再发完整数据请求（off=0,len=全部）。
+    /// 若不追踪累计值，完整请求会从 off=0 重新 serve 已经交付过的探测字节，
+    /// 导致音频前 N 秒重复播放。
+    private var totalBytesServed: Int64 = 0
 
     // 解密产物
     private var parser: SodaCencParser?
@@ -338,9 +343,14 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
                     Log.write("🎧 [SodaStream] request track=\(trackID) off=\(wantOffset) len=\(dataReq.requestedLength) wantEnd=\(wantEnd) total=\(totalLength) avail=\(available) pending=\(pending.count)")
                     pending[i].loggedRequest = true
                 }
-                // 首次响应的起点 = 请求的 offset；之后从上次响应的终点继续
+                // 新请求的起始位置：从本 session 累计已交付字节数继续，
+                // 而非请求自身的 offset。AVPlayer 探测请求（off=0,len=2）完成后
+                // 被移出 pending，完整数据请求（off=0）若按 wantOffset=0 开始
+                // 会重新交付已发过的字节，导致音频前 N 秒重复。
                 if pending[i].served == 0 {
-                    pending[i].served = wantOffset
+                    // 取 max(requestedOffset, totalBytesServed)：若请求起点已被
+                    // 先前请求覆盖，直接从已交付位置续传，避免重复投递。
+                    pending[i].served = max(wantOffset, totalBytesServed)
                 }
                 let canEnd = min(wantEnd, available)
                 if canEnd > pending[i].served {
@@ -349,6 +359,8 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
                     if sliceEnd > sliceStart {
                         dataReq.respond(with: slice(of: sliceStart..<sliceEnd, headerLen: headerLen))
                         pending[i].served = sliceEnd
+                        // 累加全局已交付字节数，供后续新请求衔接
+                        if sliceEnd > totalBytesServed { totalBytesServed = sliceEnd }
                     }
                 }
                 if pending[i].served >= wantEnd || (downloadFinished && pending[i].served >= available) {
