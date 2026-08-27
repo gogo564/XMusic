@@ -159,11 +159,11 @@ class MusicCacheManager: ObservableObject {
             pos += size
         }
 
-        // mdat 声称的大小 + 前面的 box 大小应约等于文件大小。
-        // 偏差 > 4096 说明 mdat payload 有额外字节（旧 bug 产物）。
+        // 扫描完 ftyp + moov + mdat 后 pos = 三个 box 的总大小 = 文件应有大小。
+        // 若实际文件大小与之偏差 > 4KB，说明 mdat payload 有额外字节（旧 bug 产物）
+        // 或文件截断。
         if hasFtyp && hasMoov && mdatBoxSize > 8 {
-            let headerSize = UInt64(pos) // ftyp + moov + mdat header
-            let expectedSize = headerSize + UInt64(mdatBoxSize - 8) // mdat 内部 payload
+            let expectedSize = UInt64(pos) // ftyp + moov + mdat（含头+payload）
             let diff = Int64(fileSize) - Int64(expectedSize)
             if diff > 4096 || diff < -4096 {
                 Log.write("⚠️ [Cache] mdat 大小异常 file=\(url.lastPathComponent) actual=\(fileSize) expected=\(expectedSize) diff=\(diff)")
