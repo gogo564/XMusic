@@ -95,6 +95,7 @@ final class PlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     var queueRefreshHandler: (() async -> [LXSong])?
 
     private override init() {
+        super.init()
         self.quality = AppConfigStore.shared.config.defaultQuality
         setupAudioSession()
         setupInterruptionHandling()
