@@ -9,7 +9,7 @@ enum PlayMode: String, CaseIterable {
     case shuffle      // 随机播放
 }
 
-final class PlayerManager: ObservableObject {
+final class PlayerManager: ObservableObject, AVAudioPlayerDelegate {
     static let shared = PlayerManager()
 
     @Published var isPlaying = false
@@ -62,6 +62,11 @@ final class PlayerManager: ObservableObject {
     }
 
     private let player = AVPlayer()
+    /// 汽水专用播放引擎：汽水永远先落盘明文 m4a，用 AVAudioPlayer 瞬时起播
+    /// （无 AVPlayerItem 状态机、无 0.00s 瞬态 failed），其余平台仍走上面的 AVPlayer 流播。
+    private var sodaPlayer: AVAudioPlayer?
+    private var sodaTimeTimer: Timer?
+    var activeIsSoda: Bool { sodaPlayer != nil }
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
@@ -78,22 +83,8 @@ final class PlayerManager: ObservableObject {
     // 预建好的下一首 item（含汽水 loader 挂载），切歌时直接替换省构建
     private var nextItem: AVPlayerItem?
     private var nextItemKey = ""
-    private var sodaFailTask: Task<Void, Never>?
-    /// soda item 稳定确认定时器：瞬态 failed 会先重建，期间保持静音；
-    /// 只有 ready 后连续 700ms 未再失败，才真正出声 play，避免开头被重复渲染。
-    private var sodaStableWork: Task<Void, Never>?
-    /// 汽水流式地址记录（song.id → sodastream:// URL）
-    private var sodaStreamURLs: [String: String] = [:]
-    /// 每首歌最近一次实际起播的完整 URL（file:// 或 sodastream://）。
-    /// item 瞬时 failed 原地重建时用它，避免有缓存的歌被错误地拉回网络流。
-    private var lastPlaybackURLs: [String: String] = [:]
-    /// 当前起播周期内的自动重建次数（resolveAndPlay 时清零，最多自动救两次）
-    private var sodaRetryCounts: [String: Int] = [:]
     /// 当前已加载歌词归属的歌曲 id：支持"歌词与解析并行拉取"+ 防止跨歌覆盖
     private var loadedLyricSongID: String?
-    /// 汽水单歌档位降级记录：高阶档位(lossless/hi_res)起播反复失败时，
-    /// 自动降级到 highest 再试一次（部分曲目高阶流结构与解析器不兼容）
-    private var sodaTierFallbacks = Set<String>()
     /// 最近一次实际起播的时间戳。用于过滤 AVPlayer 换 item 时滞留投递的
     /// AVPlayerItemDidPlayToEndTime 通知：刚起播（<1s）就收到结束通知，几乎都是
     /// 缓存文件 seek 起始时间异常或旧 item 残留通知，不应触发自动切歌。
@@ -145,7 +136,7 @@ final class PlayerManager: ObservableObject {
                 Log.write("📵 [Player] 音频被打断 (来电/闹钟) → 暂停")
                 self.wasPlayingBeforeInterruption = self.isPlaying
                 if self.isPlaying {
-                    self.player.pause()
+                    self.enginePause()
                     self.isPlaying = false
                     self.updateNowPlaying()
                 }
@@ -156,10 +147,14 @@ final class PlayerManager: ObservableObject {
                 let shouldResume = AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
                 // 来电/闹钟结束后默认续播；个别打断类型带 shouldResume 标志时更应恢复。
                 if self.wasPlayingBeforeInterruption || shouldResume {
-                    if self.player.currentItem == nil, self.currentSong != nil {
+                    if self.activeIsSoda {
+                        self.enginePlay()
+                        self.isPlaying = true
+                        self.updateNowPlaying()
+                    } else if self.player.currentItem == nil, self.currentSong != nil {
                         self.resolveAndPlay(self.currentQueueSong)
                     } else {
-                        self.player.play()
+                        self.enginePlay()
                         self.isPlaying = true
                         self.updateNowPlaying()
                     }
@@ -315,18 +310,18 @@ final class PlayerManager: ObservableObject {
     }
 
     func togglePlayPause() {
-        if player.currentItem == nil, currentSong != nil {
+        if player.currentItem == nil, !activeIsSoda, currentSong != nil {
             Log.write("🔘 [Player] togglePlayPause → currentItem nil, resolveAndPlay")
             resolveAndPlay(currentQueueSong)
             return
         }
         if isPlaying {
             Log.write("🔘 [Player] togglePlayPause → pause (was playing)")
-            player.pause()
+            enginePause()
             isPlaying = false
         } else {
             Log.write("🔘 [Player] togglePlayPause → play (was paused)")
-            player.play()
+            enginePlay()
             isPlaying = true
         }
         updateNowPlaying()
@@ -337,8 +332,8 @@ final class PlayerManager: ObservableObject {
         switch playMode {
         case .loopOne:
             if auto {
-                seek(to: 0)
-                player.play()
+                engineSeek(0)
+                enginePlay()
                 isPlaying = true
                 updateNowPlaying()
                 return
@@ -357,7 +352,7 @@ final class PlayerManager: ObservableObject {
         case .sequential:
             let nextIndex = (currentIndex + 1) % queue.count
             if auto && nextIndex == 0 {
-                player.pause()
+                enginePause()
                 isPlaying = false
                 updateNowPlaying()
                 return
@@ -430,8 +425,7 @@ final class PlayerManager: ObservableObject {
     }
 
     func seek(to time: Double) {
-        player.seek(to: CMTime(seconds: time, preferredTimescale: 600))
-        currentTime = time
+        engineSeek(time)
         updateNowPlaying()
     }
 
@@ -462,7 +456,7 @@ final class PlayerManager: ObservableObject {
                     if self.sleepTimerRemaining <= 0 {
                         self.sleepTimerRemaining = 0
                         self.sleepTask?.cancel()
-                        self.player.pause()
+                        self.enginePause()
                         self.isPlaying = false
                         self.updateNowPlaying()
                     }
@@ -484,6 +478,7 @@ final class PlayerManager: ObservableObject {
         qualityName = ""
         playbackOrigin = "本地"
         currentPlaybackURL = url
+        stopSodaAudioPlayer()
         queue = []
         currentIndex = -1
         currentTime = 0
@@ -575,8 +570,6 @@ final class PlayerManager: ObservableObject {
 
     private func resolveAndPlay(_ song: LXSong?) {
         guard let song = song else { return }
-        // 每次新的解析起播（含自动切歌）都重置自动重建次数
-        sodaRetryCounts.removeValue(forKey: song.id)
         // 歌词与地址解析并行拉取：不用等起播成功才出现歌词
         Task { await self.loadLyric(for: song) }
         // 注意：不在解析前切换 currentSong。只有真正起播（startPlayback）成功才切，
@@ -661,15 +654,92 @@ final class PlayerManager: ObservableObject {
         resolveAndPlay(currentQueueSong)
     }
 
-    private func makeItem(for url: URL) -> AVPlayerItem {
-        let item: AVPlayerItem
-        if url.scheme == SodaStreamLoader.scheme {
-            let asset = AVURLAsset(url: url)
-            asset.resourceLoader.setDelegate(SodaStreamLoader.shared, queue: DispatchQueue(label: "soda.resourceLoader"))
-            item = AVPlayerItem(asset: asset)
-        } else {
-            item = AVPlayerItem(url: url)
+    // MARK: - AVAudioPlayer 引擎（汽水专用）
+
+    private func stopSodaAudioPlayer() {
+        sodaPlayer?.stop()
+        sodaPlayer = nil
+        sodaTimeTimer?.invalidate()
+        sodaTimeTimer = nil
+    }
+
+    private func enginePlay() {
+        if let ap = sodaPlayer { ap.play() } else { player.play() }
+    }
+
+    private func enginePause() {
+        if let ap = sodaPlayer { ap.pause() } else { player.pause() }
+    }
+
+    private func engineSeek(_ time: Double) {
+        if let ap = sodaPlayer { ap.currentTime = time }
+        else { player.seek(to: CMTime(seconds: time, preferredTimescale: 600)) }
+        currentTime = time
+    }
+
+    private func startSodaTimer() {
+        sodaTimeTimer?.invalidate()
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self = self, let ap = self.sodaPlayer else { return }
+                self.currentTime = ap.currentTime
+                self.duration = ap.duration
+                self.bufferedTime = ap.duration
+                self.updateLyricIndex()
+                self.updateNowPlayingElapsed()
+            }
         }
+        RunLoop.main.add(t, forMode: .common)
+        sodaTimeTimer = t
+    }
+
+    /// 汽水永远先落盘明文 m4a，用 AVAudioPlayer 瞬时起播，绕过 AVPlayer 0.00s 瞬态失败。
+    private func playSodaWithAudioPlayer(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String) {
+        stopSodaAudioPlayer()
+        // 释放上一个 AVPlayer 项，避免双引擎同时出声
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        do {
+            let ap = try AVAudioPlayer(contentsOf: url)
+            ap.delegate = self
+            ap.prepareToPlay()
+            sodaPlayer = ap
+            currentPlaybackURL = url.absoluteString
+            currentTime = 0
+            duration = ap.duration
+            bufferedTime = ap.duration
+            isResolving = false
+            isPlaying = true
+            ap.play()
+            lastItemPlayStartTime = Date()
+            startSodaTimer()
+            Log.write("🎧 [Player] soda AVAudioPlayer start url=\(url.absoluteString.prefix(60)) dur=\(Int(duration))s")
+        } catch {
+            stopSodaAudioPlayer()
+            Log.write("❌ [Player] soda AVAudioPlayer create ERROR: \(error.localizedDescription)")
+            handleResolveFailure("汽水本地打开失败，已自动跳过")
+            return
+        }
+        saveLastPlayed(song)
+        saveRecent(song)
+        updateNowPlaying()
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        guard flag else { return }
+        guard Date().timeIntervalSince(lastItemPlayStartTime) >= 1 else { return }
+        Log.write("⏭️ [Player] soda AVAudioPlayer DidPlayToEnd → auto next")
+        isPlaying = false
+        playNext(auto: true)
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Log.write("⚠️ [Player] soda AVAudioPlayer decode error: \(error?.localizedDescription ?? "unknown")")
+        handleResolveFailure("汽水解码失败，已自动跳过")
+    }
+
+    private func makeItem(for url: URL) -> AVPlayerItem {
+        let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 8
         item.preferredPeakBitRate = 0
         return item
@@ -677,13 +747,7 @@ final class PlayerManager: ObservableObject {
 
     private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String = "") {
         Log.write("▶️ [Player] startPlayback song=\(song.name) scheme=\(url.scheme ?? "") origin=\(playbackOrigin) url=\(url.absoluteString.prefix(70))")
-        sodaFailTask?.cancel()
-        sodaFailTask = nil
-        sodaStableWork?.cancel()
-        sodaStableWork = nil
         resolveFailStreak = 0
-        // 记录本次实际起播地址：瞬时 failed 原地重建时优先复用它（file 缓存不回退网络流）
-        lastPlaybackURLs[song.id] = url.absoluteString
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
         // 歌词已在并行预取时到位则保留；否则清掉上一首的残留
@@ -694,6 +758,14 @@ final class PlayerManager: ObservableObject {
         }
         loadedLyricSongID = song.id
         currentLyricIndex = -1
+        // —— 汽水本地明文 m4a：走专用 AVAudioPlayer 引擎瞬时起播，
+        //    彻底绕开 AVPlayer 对本地汽水文件的 0.00s 瞬态 failed / 静音稳定 / asset 预热这套兜底。
+        if sourceName == "汽水", url.isFileURL {
+            playSodaWithAudioPlayer(url: url, song: song, sourceName: sourceName, qualityName: qualityName, playbackOrigin: playbackOrigin)
+            return
+        }
+        // 非汽水：切回/保持 AVPlayer，并释放汽水引擎，避免双引擎同时出声
+        stopSodaAudioPlayer()
         player.automaticallyWaitsToMinimizeStalling = false
         // 优先复用预建好的下一首 item（省去 AVURLAsset + loader 构建）；不匹配则现建
         let item: AVPlayerItem
@@ -707,15 +779,7 @@ final class PlayerManager: ObservableObject {
             nextItemKey = ""
             item = makeItem(for: url)
         }
-        // 汽水本地 m4a：替换前先同步预热 asset，强制完整读取 moov/音轨/可播放性，
-        // 把 AVPlayer 对解密文件的首解码探活提前到替换之前，消除替换瞬间的 0.00s 瞬态 failed 链。
-        if sourceName == "汽水", url.isFileURL {
-            let warmAsset = item.asset
-            let _dur = warmAsset.duration
-            let _tracks = warmAsset.tracks
-            let _playable = warmAsset.isPlayable
-            Log.write("🫀 [Player] 汽水 asset 预热 dur=\(_dur.seconds) tracks=\(_tracks.count) playable=\(_playable)")
-        }
+        // 非汽水 item 直接替换，不再走汽水的预热/重建兜底
         player.replaceCurrentItem(with: item)
         // 记录本次起播时间，供 DidPlayToEnd 守卫过滤旧 item 的滞留结束通知
         lastItemPlayStartTime = Date()
@@ -728,15 +792,9 @@ final class PlayerManager: ObservableObject {
         currentTime = 0
         duration = 0
         bufferedTime = 0
-        if sourceName == "汽水" {
-            // soda：item 就绪瞬间可能瞬态 failed 触发重建，若立即 play 会反复渲染开头。
-            // 首个 item 也静音、不 play，由 ready 的稳定定时器确认不再失败后才出声。
-            self.player.volume = 0
-        } else {
-            if self.player.volume != 1 { self.player.volume = 1 }
-            player.play()
-            isPlaying = true
-        }
+        player.volume = 1
+        player.play()
+        isPlaying = true
         isResolving = false
         updateNowPlaying()
         saveLastPlayed()
@@ -787,113 +845,17 @@ final class PlayerManager: ObservableObject {
                 switch item.status {
                 case .failed:
                     Log.write("❌ [Player] item failed: \(item.error?.localizedDescription ?? "")")
-                    // 汽水歌走自定义 loader，iOS 15 上 AVPlayer 偶发在数据已完整供给后
-                    // 仍瞬时 failed（"这项操作无法完成"），随后新 item 其实能 ready。
-                    // 处理：① 用同一 sodastream URL 原地重建 item 重试一次（会话内数据
-                    // 已缓存，秒就绪）；② 仍失败则回退本地解密缓存文件；③ 都没有才弹错。
-                    if self.isSoda(self.currentSong ?? LXSong([:])), let song = self.currentSong {
-                        // 瞬态失败重建循环会从 0 反复渲染开头。暂停+静音直到真正稳定出声，
-                        // 否则每次 replaceCurrentItem 都重播开头，听成“头1秒重复”。
-                        self.sodaStableWork?.cancel()
-                        self.isPlaying = false
-                        self.player.pause()
-                        self.player.volume = 0
-                        let key = song.id
-                        let tries = self.sodaRetryCounts[key] ?? 0
-                        // 重试策略：① 原地重建（复用上次实际地址，file 缓存不回网络流）
-                        //           ② 若上次是流式且本地已有解密缓存 → 换本地文件
-                        var candidate: URL?
-                        if tries == 0 {
-                            candidate = self.lastPlaybackURLs[key].flatMap(URL.init(string:))
-                        } else if tries == 1 {
-                            if let ustr = self.lastPlaybackURLs[key], let prev = URL(string: ustr), !prev.isFileURL,
-                               MusicCacheManager.shared.isCached(id: song.id, quality: self.quality),
-                               let f = MusicCacheManager.shared.cachedURL(for: song.id, quality: self.quality) {
-                                candidate = f
-                            } else {
-                                candidate = self.lastPlaybackURLs[key].flatMap(URL.init(string:))
-                            }
-                        }
-                        if tries < 2, var u = candidate {
-                            self.sodaRetryCounts[key] = tries + 1
-                            let attempt = tries + 1
-                            // 记录失败瞬间的播放进度，重建 item 后 seek 回原处，避免“唱1秒→拉回→重唱”
-                            let failedPlaybackTime = item.currentTime().seconds
-                            // sodastream 重建加 nonce 强制全新会话，绕开可能中毒的旧会话状态
-                            if u.scheme == SodaStreamLoader.scheme {
-                                u = URL(string: u.absoluteString + "&n=\(Int(Date().timeIntervalSince1970 * 1000))-\(attempt)") ?? u
-                            }
-                            Log.write("🔁 [Player] soda 瞬时失败(秒=\(String(format: "%.2f", failedPlaybackTime)))，自动重建 item 第\(attempt)次重试 scheme=\(u.scheme ?? "") song=\(song.name)")
-                            // 小退避：连续快速切歌时 AVPlayer 资源未释放完会连锁瞬时失败，
-                            // 等 150/400ms 再重建，成功率显著提高
-                            Task { @MainActor in
-                                try? await Task.sleep(nanoseconds: attempt == 1 ? 150_000_000 : 400_000_000)
-                                guard let cur = self.currentSong, cur.id == key else { return }
-                                let retryItem = self.makeItem(for: u)
-                                self.player.replaceCurrentItem(with: retryItem)
-                                self.lastItemPlayStartTime = Date()
-                                self.observeItemStatus(retryItem)
-                                // 重建后恢复到失败前的播放位置：只有确实播过一段(>0.2s)才 seek，
-                                // 仅刚起播(<0.2s)的瞬时失败则从 0 开始，避免无谓的 seek 动作
-                                if failedPlaybackTime > 0.2 {
-                                    Log.write("📌 [Player] 重建后 seek 回 \(String(format: "%.2f", failedPlaybackTime))s song=\(song.name)")
-                                    await self.player.seek(to: CMTime(seconds: failedPlaybackTime, preferredTimescale: 600))
-                                }
-                                // 不在此 play：由 ready 后的稳定定时器确认无再失败后统一出声
-                            }
-                            return
-                        }
-                        // ③ 高阶档位(lossless/hi_res)两连败 → 自动降级 highest 重解一次
-                        if tries >= 2,
-                           (self.quality == "flac" || self.quality == "hi_res"),
-                           !self.sodaTierFallbacks.contains(key) {
-                            self.sodaTierFallbacks.insert(key)
-                            Log.write("⬇️ [Player] 高阶档位起播失败，自动降级320K重解 song=\(song.name)")
-                            self.resolveAndPlay(song)
-                            return
-                        }
-                        let err = item.error?.localizedDescription ?? "播放失败"
-                        if self.player.volume != 1 { self.player.volume = 1 }
-                        self.isPlaying = false
-                        self.sodaFailTask?.cancel()
-                        self.sodaFailTask = Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            if !Task.isCancelled {
-                                self.playbackError = err
-                            }
-                        }
-                    } else {
-                        self.playbackError = item.error?.localizedDescription ?? "播放失败"
-                        self.isPlaying = false
-                    }
+                    // AVPlayer 路径（非汽水：流播）失败直接上报；汽水已改走 AVAudioPlayer，
+                    // 不再挂 AVPlayerItem，故此处不再有汽水的瞬时失败重建/静音稳定逻辑。
+                    self.playbackError = item.error?.localizedDescription ?? "播放失败"
+                    self.isPlaying = false
                 case .readyToPlay:
                     let d = item.duration.seconds
                     Log.write("🎧 [Player] item ready dur=\(d) song=\(self.currentSong?.name ?? "") isPlayingBefore=\(self.isPlaying)")
                     if d.isFinite, d > 0 {
                         self.duration = d
                     }
-                    // 汽水歌走自定义 loader，AVPlayer 会先瞬时 failed 再重试成功；
-                    // 已能播放则清掉瞬态错误，避免误弹「播放错误」。
                     self.playbackError = nil
-                    self.sodaFailTask?.cancel()
-                    self.sodaFailTask = nil
-                    // 汽水歌：item 已 ready，但仍可能随即再次瞬态 failed（重建循环）。
-                    // 保持静音，等 700ms 稳定确认（期间若再 failed 会走重建并重置计时），
-                    // 稳定后才正式出声，确保用户只听到一次完整开头。
-                    if self.isSoda(self.currentSong ?? LXSong([:])) {
-                        self.sodaStableWork?.cancel()
-                        // 预热已把首解码探活提前到替换之前，首附载基本不会再瞬态 failed，
-                        // 稳定等待 700ms→400ms 以减起播前摇；若仍偶发失败，重建会重置本定时器。
-                        self.sodaStableWork = Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 400_000_000)
-                            guard !Task.isCancelled,
-                                  let cur = self.currentSong, self.isSoda(cur) else { return }
-                            self.player.volume = 1
-                            self.player.play()
-                            self.isPlaying = true
-                            Log.write("🎧 [Player] soda 稳定就绪，正式出声 song=\(cur.name)")
-                        }
-                    }
                     self.updateNowPlaying()
                 default:
                     break
@@ -1074,12 +1036,12 @@ final class PlayerManager: ObservableObject {
         let cmd = MPRemoteCommandCenter.shared()
         cmd.playCommand.addTarget { [weak self] _ in
             self?.isPlaying = true
-            self?.player.play()
+            self?.enginePlay()
             return .success
         }
         cmd.pauseCommand.addTarget { [weak self] _ in
             self?.isPlaying = false
-            self?.player.pause()
+            self?.enginePause()
             return .success
         }
         cmd.togglePlayPauseCommand.addTarget { [weak self] _ in
