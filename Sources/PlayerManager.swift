@@ -707,6 +707,15 @@ final class PlayerManager: ObservableObject {
             nextItemKey = ""
             item = makeItem(for: url)
         }
+        // 汽水本地 m4a：替换前先同步预热 asset，强制完整读取 moov/音轨/可播放性，
+        // 把 AVPlayer 对解密文件的首解码探活提前到替换之前，消除替换瞬间的 0.00s 瞬态 failed 链。
+        if sourceName == "汽水", url.isFileURL {
+            let warmAsset = item.asset
+            let _dur = warmAsset.duration
+            let _tracks = warmAsset.tracks
+            let _playable = warmAsset.isPlayable
+            Log.write("🫀 [Player] 汽水 asset 预热 dur=\(_dur.seconds) tracks=\(_tracks.count) playable=\(_playable)")
+        }
         player.replaceCurrentItem(with: item)
         // 记录本次起播时间，供 DidPlayToEnd 守卫过滤旧 item 的滞留结束通知
         lastItemPlayStartTime = Date()
@@ -873,8 +882,10 @@ final class PlayerManager: ObservableObject {
                     // 稳定后才正式出声，确保用户只听到一次完整开头。
                     if self.isSoda(self.currentSong ?? LXSong([:])) {
                         self.sodaStableWork?.cancel()
+                        // 预热已把首解码探活提前到替换之前，首附载基本不会再瞬态 failed，
+                        // 稳定等待 700ms→400ms 以减起播前摇；若仍偶发失败，重建会重置本定时器。
                         self.sodaStableWork = Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 700_000_000)
+                            try? await Task.sleep(nanoseconds: 400_000_000)
                             guard !Task.isCancelled,
                                   let cur = self.currentSong, self.isSoda(cur) else { return }
                             self.player.volume = 1
