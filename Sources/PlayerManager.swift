@@ -531,28 +531,29 @@ final class PlayerManager: ObservableObject {
             let trackID = song.songmid ?? ""
             let mapped = mapSodaQuality(quality)
             do {
-                let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: mapped)
+                let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
+                let delivered = stream.quality.isEmpty ? mapped : stream.quality
+                let display = SodaAPIClient.qualityDisplayName(delivered)
                 if stream.hexKey.count == 32 {
-                    // 加密流：走 sodastream:// 流式解密。cacheKey 随 URL 带给流式会话，
-                    // 下载完成直接转存缓存（播一次即缓存）；不再另起后台下载任务，
-                    // 避免同一首歌对 CDN 拉两份全量数据抢带宽。
+                    // 加密流：方案 A——先下载+解密落盘成本地 m4a，AVPlayer 从本地文件播放。
+                    // 这样绕开 sodastream:// custom loader 首播必 failed 的缺陷，根治首秒重复。
+                    if let fileURL = try? await MusicCacheManager.shared.ensureSodaFile(trackID: trackID, id: song.id, quality: quality) {
+                        return (fileURL.absoluteString, display, "汽水")
+                    }
+                    // 保底：本地解密失败时回退 sodastream:// 流式（缓存文件由会话转存）
                     let customURL = SodaStreamLoader.customURL(
                         trackID: trackID,
                         quality: mapped,
                         cacheKey: "\(song.id)_\(quality)"
                     )
                     sodaStreamURLs[song.id] = customURL.absoluteString
-                    // 显示服务端实际下发的档位：汽水曲库未必有请求的档位（如无损），
-                    // 服务器会回落到可用最佳；按请求档显示会误导（选无损实际320K）
-                    let delivered = stream.quality.isEmpty ? mapped : stream.quality
-                    return (customURL.absoluteString, SodaAPIClient.qualityDisplayName(delivered), "汽水")
+                    return (customURL.absoluteString, display, "汽水")
                 }
                 guard let url = URL(string: stream.mainURL) else {
                     throw SodaError.upstream
                 }
                 // 明文直链（qishui-api h5 兜底）：直接播放 CDN URL，无需解密
-                let delivered = stream.quality.isEmpty ? mapped : stream.quality
-                return (url.absoluteString, SodaAPIClient.qualityDisplayName(delivered), "汽水")
+                return (url.absoluteString, display, "汽水")
             } catch {
                 throw error
             }
@@ -621,7 +622,10 @@ final class PlayerManager: ObservableObject {
                         self.handleResolveFailure("播放地址无效")
                         return
                     }
-                    MusicCacheManager.shared.startCaching(url: result.url, quality: quality, id: song.id)
+                    // file:// 已由 ensureSodaFile 落盘，无需再对本地文件发起网络缓存
+                    if !url.isFileURL {
+                        MusicCacheManager.shared.startCaching(url: result.url, quality: quality, id: song.id)
+                    }
                     self.startPlayback(url: url, song: song, sourceName: result.sourceName, qualityName: result.type, playbackOrigin: "")
                 }
             } catch {
@@ -740,7 +744,10 @@ final class PlayerManager: ObservableObject {
                 guard !Task.isCancelled else { return }
                 guard let u = URL(string: result.url) else { return }
                 self.prefetchedURLs[next.id + "_" + prefetchQuality] = result.url
-                MusicCacheManager.shared.startCaching(url: result.url, quality: prefetchQuality, id: next.id)
+                // file:// 已由 ensureSodaFile 落盘，无需再对本地文件发起网络缓存
+                if !u.isFileURL {
+                    MusicCacheManager.shared.startCaching(url: result.url, quality: prefetchQuality, id: next.id)
+                }
                 // 预建 item（后台线程构建 asset 无碍，loader 挂载在 AVURLAsset 上）
                 let prebuilt = await MainActor.run { self.makeItem(for: u) }
                 guard !Task.isCancelled else { return }

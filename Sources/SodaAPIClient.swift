@@ -451,11 +451,15 @@ struct SodaAPIClient {
         let quality: String
     }
 
-    /// 玩家音质（128k/320k/flac）→ qishui-api 档位
+    /// 玩家音质（128k/320k/flac）→ qishui-api 档位（幂等）：
+    /// 同时识别用户档（320k/128k/flac/hi_res）和 mapSodaQuality 已转换的服务端档
+    /// （highest/medium/lossless/hi_res），避免 "highest" 等被 default 错降成 medium（128K）。
     private func mapQuality(_ q: String) -> String {
         switch q.lowercased() {
         case "flac", "flac24bit", "lossless": return "lossless"
-        case "320k", "higher", "high": return "highest"
+        case "hi_res", "hires": return "hi_res"
+        case "320k", "higher", "high", "highest": return "highest"
+        case "128k", "medium": return "medium"
         default: return "medium"
         }
     }

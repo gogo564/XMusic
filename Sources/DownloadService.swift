@@ -195,8 +195,10 @@ final class DownloadService: NSObject, ObservableObject {
 
     private func mapSodaQuality(_ q: String) -> String {
         switch q {
-        case "flac": return "lossless"
-        case "320k": return "highest"
+        case "flac", "lossless": return "lossless"
+        case "hi_res", "hires": return "hi_res"
+        case "320k", "highest": return "highest"
+        case "128k", "medium": return "medium"
         default: return "medium"
         }
     }

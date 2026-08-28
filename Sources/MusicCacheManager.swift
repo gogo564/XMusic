@@ -52,17 +52,10 @@ class MusicCacheManager: ObservableObject {
             var purged = 0
             for name in names where name.hasPrefix("soda_") && name.hasSuffix(".m4a") {
                 let url = cacheDirectory.appendingPathComponent(name)
-                let hasEnc = self.fileHasEncryptionStructure(at: url)
-                let hasCorrupt = self.fileHasCorruptedMdat(at: url)
-                if hasEnc || hasCorrupt {
+                if self.fileHasEncryptionStructure(at: url) {
                     try? self.fileManager.removeItem(at: url)
                     if let idx = names.firstIndex(of: name) { names.remove(at: idx) }
                     purged += 1
-                    if hasEnc {
-                        Log.write("🧹 [Cache] 启动体检清除加密坏缓存: \(name)")
-                    } else {
-                        Log.write("🧹 [Cache] 启动体检清除 mdat 异常缓存: \(name)")
-                    }
                 }
             }
             if purged > 0 {
@@ -123,55 +116,6 @@ class MusicCacheManager: ObservableObject {
         }
         return scan(0, data.count, depth: 0)
     }
-
-    /// 检查 m4a 文件的 mdat box 大小是否与实际文件大小一致。
-    /// 旧版解密 bug 会把多余的字节（ftyp/moov 头）混入 mdat payload，
-    /// 导致 mdat 声称的大小 ≠ 文件实际大小，AVPlayer 能读到时长但解码失败。
-    func fileHasCorruptedMdat(at url: URL) -> Bool {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
-        defer { try? handle.close() }
-        let fileSize = (try? handle.seekToEndOfFile()) ?? 0
-        guard fileSize > 8 else { return false }
-        handle.seek(toFileOffset: 0)
-        let data = handle.readData(ofLength: min(Int(fileSize), 64 * 1024))
-
-        func be32(_ off: Int) -> Int {
-            return (Int(data[off]) << 24) | (Int(data[off + 1]) << 16) | (Int(data[off + 2]) << 8) | Int(data[off + 3])
-        }
-        func boxType(_ off: Int) -> String? {
-            guard off + 8 <= data.count else { return nil }
-            let bytes = [UInt8](data[(off + 4)..<(off + 8)])
-            return String(bytes: bytes, encoding: .ascii)
-        }
-
-        // 扫描顶层 box，找 ftyp + moov + mdat
-        var pos = 0
-        var hasFtyp = false, hasMoov = false
-        var mdatBoxSize: Int = 0
-        while pos + 8 <= data.count {
-            let size = be32(pos)
-            guard size >= 8, pos + size <= data.count else { break }
-            if let type = boxType(pos) {
-                if type == "ftyp" { hasFtyp = true }
-                else if type == "moov" { hasMoov = true }
-                else if type == "mdat" { mdatBoxSize = size }
-            }
-            pos += size
-        }
-
-        // 扫描完 ftyp + moov + mdat 后 pos = 三个 box 的总大小 = 文件应有大小。
-        // 若实际文件大小与之偏差 > 4KB，说明 mdat payload 有额外字节（旧 bug 产物）
-        // 或文件截断。
-        if hasFtyp && hasMoov && mdatBoxSize > 8 {
-            let expectedSize = UInt64(pos) // ftyp + moov + mdat（含头+payload）
-            let diff = Int64(fileSize) - Int64(expectedSize)
-            if diff > 4096 || diff < -4096 {
-                Log.write("⚠️ [Cache] mdat 大小异常 file=\(url.lastPathComponent) actual=\(fileSize) expected=\(expectedSize) diff=\(diff)")
-                return true
-            }
-        }
-        return false
-    }
     
     private func createCacheDirectory() {
         guard let cacheDirectory = cacheDirectory else { return }
@@ -230,12 +174,6 @@ class MusicCacheManager: ObservableObject {
         validationMemoLock.lock()
         validationMemo.removeValue(forKey: url.path)
         validationMemoLock.unlock()
-    }
-
-    /// 对外暴露：删除指定文件的校验记忆 + 内存索引（删除坏缓存后调用）
-    func clearCacheMemo(for url: URL) {
-        invalidateValidationMemo(url)
-        removeCachedFile(url.lastPathComponent)
     }
 
     /// Check if a file contains valid audio data by examining file size and magic bytes
@@ -303,12 +241,6 @@ class MusicCacheManager: ObservableObject {
                 // （历史 bug 可能把未解密的加密字节落盘成 .m4a，需逐出以免误当可播缓存。）
                 if containsEncryptionBoxes(at: url) {
         Log.write("⚠️ [Cache] Encrypted (undecrypted) cache, rejecting: \(url.lastPathComponent)")
-                    return false
-                }
-                // mdat 大小异常（旧版解密 bug 把多余字节混入 mdat payload）：
-                // 声称大小 ≠ 实际大小，AVPlayer 能读时长但解码前 N 秒必失败。
-                if fileHasCorruptedMdat(at: url) {
-        Log.write("⚠️ [Cache] Corrupted mdat cache, rejecting: \(url.lastPathComponent)")
                     return false
                 }
                 return true
@@ -456,6 +388,48 @@ class MusicCacheManager: ObservableObject {
         sodaCacheLock.lock()
         sodaCacheTasks.remove(taskKey)
         sodaCacheLock.unlock()
+    }
+
+    /// 方案 A 专用：确保汽水歌的本地解密 m4a 就绪，返回可播的 file URL。
+    /// AVPlayer 对 sodastream:// custom loader 首播存在「已喂完数据仍 item failed」的
+    /// 缺陷，而播本地解密后的 m4a 文件永不复现。故播放前先保证 m4a 落盘：
+    /// 缓存未命中 → 直连 CDN 下载加密 → 客户端解密 → 写 getSodaFileURL → 返回 file URL。
+    /// 返回 nil 表示无法得到本地文件（明文直链/下载失败），由调用方回退 sodastream loader。
+    func ensureSodaFile(trackID: String, id: String, quality: String) async throws -> URL? {
+        // 已有任意音质本地解密文件优先（避免音质设置变更后重新下载）
+        if let u = anyQualityCachedURL(for: id) {
+            return u
+        }
+        guard !trackID.isEmpty else { return nil }
+        let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
+        guard !stream.mainURL.isEmpty, let url = URL(string: stream.mainURL) else { return nil }
+        // 直连 CDN 拉全量加密字节
+        let (bytes, _) = try await URLSession.shared.bytes(from: url)
+        var data = Data()
+        for try await chunk in bytes {
+            data.append(chunk)
+            if data.count > 256 * 1024 * 1024 {
+                throw NSError(domain: "Cache", code: -6,
+                              userInfo: [NSLocalizedDescriptionKey: "音频文件过大"])
+            }
+        }
+        guard !data.isEmpty else { return nil }
+        // 客户端解密后落盘；明文直链（无密钥）原样保存
+        var decrypted = data
+        if stream.hexKey.count == 32 {
+            decrypted = try await Task.detached(priority: .utility) {
+                try self.decryptSodaForCache(data, hexKey: stream.hexKey)
+            }.value
+        }
+        guard let dest = getSodaFileURL(for: id, quality: quality) else { return nil }
+        if fileManager.fileExists(atPath: dest.path) {
+            try? fileManager.removeItem(at: dest)
+        }
+        try decrypted.write(to: dest)
+        addCachedFile(dest.lastPathComponent)
+        enforceCacheLimit()
+        Log.write("✅ [Cache] Soda ensure-file ready: \(id)_\(quality).m4a (\(decrypted.count/1024)KB)")
+        return dest
     }
 
     /// 流式会话转存缓存：SodaStreamSession 播放时已经把整首加密数据拉到内存，
