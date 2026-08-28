@@ -528,7 +528,7 @@ final class PlayerManager: ObservableObject {
         song.source == "soda"
     }
 
-    /// 统一获取播放地址：汽水源走 SodaAPIClient（sodastream:// 流式解密），其余走 lx-sync-server
+    /// 统一获取播放地址：汽水源走 SodaAPIClient（下载+解密落地 file:// 本地播放），其余走 lx-sync-server
     private func playbackInfo(for song: LXSong) async throws -> (url: String, type: String, sourceName: String) {
         if isSoda(song) {
             let trackID = song.songmid ?? ""
@@ -538,19 +538,16 @@ final class PlayerManager: ObservableObject {
                 let delivered = stream.quality.isEmpty ? mapped : stream.quality
                 let display = SodaAPIClient.qualityDisplayName(delivered)
                 if stream.hexKey.count == 32 {
-                    // 加密流：方案 A——先下载+解密落盘成本地 m4a，AVPlayer 从本地文件播放。
-                    // 这样绕开 sodastream:// custom loader 首播必 failed 的缺陷，根治首秒重复。
-                    if let fileURL = try? await MusicCacheManager.shared.ensureSodaFile(trackID: trackID, id: song.id, quality: quality) {
-                        return (fileURL.absoluteString, display, "汽水")
+                    // 加密流：只会下载+解密落盘成本地 m4a，AVPlayer 从本地文件播放。
+                    // 绝不回退 sodastream:// custom loader——实测该 loader 在 iOS AVPlayer
+                    // 上 item failed 概率 100%（历史日志 390/390），正是"头1秒重复"的根源。
+                    for attempt in 0..<2 {
+                        if let fileURL = try? await MusicCacheManager.shared.ensureSodaFile(trackID: trackID, id: song.id, quality: quality) {
+                            return (fileURL.absoluteString, display, "汽水")
+                        }
+                        if attempt == 0 { try? await Task.sleep(nanoseconds: 700_000_000) }
                     }
-                    // 保底：本地解密失败时回退 sodastream:// 流式（缓存文件由会话转存）
-                    let customURL = SodaStreamLoader.customURL(
-                        trackID: trackID,
-                        quality: mapped,
-                        cacheKey: "\(song.id)_\(quality)"
-                    )
-                    sodaStreamURLs[song.id] = customURL.absoluteString
-                    return (customURL.absoluteString, display, "汽水")
+                    throw SodaError.cacheFailed
                 }
                 guard let url = URL(string: stream.mainURL) else {
                     throw SodaError.upstream

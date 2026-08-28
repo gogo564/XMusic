@@ -546,12 +546,14 @@ enum SodaError: LocalizedError {
     case invalidURL
     case http(Int)
     case upstream
+    case cacheFailed
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "汽水服务地址无效"
         case .http(let code): return "汽水服务错误 (\(code))"
         case .upstream: return "汽水服务返回异常"
+        case .cacheFailed: return "汽水本地解密失败，请稍后重试"
         }
     }
 }
