@@ -94,7 +94,7 @@ final class PlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     /// 由 SodaTrackListView 等视图注册；不注册则保持原有循环行为。
     var queueRefreshHandler: (() async -> [LXSong])?
 
-    private init() {
+    private override init() {
         self.quality = AppConfigStore.shared.config.defaultQuality
         setupAudioSession()
         setupInterruptionHandling()
