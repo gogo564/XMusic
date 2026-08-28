@@ -79,6 +79,9 @@ final class PlayerManager: ObservableObject {
     private var nextItem: AVPlayerItem?
     private var nextItemKey = ""
     private var sodaFailTask: Task<Void, Never>?
+    /// soda item 稳定确认定时器：瞬态 failed 会先重建，期间保持静音；
+    /// 只有 ready 后连续 700ms 未再失败，才真正出声 play，避免开头被重复渲染。
+    private var sodaStableWork: Task<Void, Never>?
     /// 汽水流式地址记录（song.id → sodastream:// URL）
     private var sodaStreamURLs: [String: String] = [:]
     /// 每首歌最近一次实际起播的完整 URL（file:// 或 sodastream://）。
@@ -679,6 +682,8 @@ final class PlayerManager: ObservableObject {
         Log.write("▶️ [Player] startPlayback song=\(song.name) scheme=\(url.scheme ?? "") origin=\(playbackOrigin) url=\(url.absoluteString.prefix(70))")
         sodaFailTask?.cancel()
         sodaFailTask = nil
+        sodaStableWork?.cancel()
+        sodaStableWork = nil
         resolveFailStreak = 0
         // 记录本次实际起播地址：瞬时 failed 原地重建时优先复用它（file 缓存不回退网络流）
         lastPlaybackURLs[song.id] = url.absoluteString
@@ -717,8 +722,15 @@ final class PlayerManager: ObservableObject {
         currentTime = 0
         duration = 0
         bufferedTime = 0
-        player.play()
-        isPlaying = true
+        if sourceName == "汽水" {
+            // soda：item 就绪瞬间可能瞬态 failed 触发重建，若立即 play 会反复渲染开头。
+            // 首个 item 也静音、不 play，由 ready 的稳定定时器确认不再失败后才出声。
+            self.player.volume = 0
+        } else {
+            if self.player.volume != 1 { self.player.volume = 1 }
+            player.play()
+            isPlaying = true
+        }
         isResolving = false
         updateNowPlaying()
         saveLastPlayed()
@@ -774,6 +786,12 @@ final class PlayerManager: ObservableObject {
                     // 处理：① 用同一 sodastream URL 原地重建 item 重试一次（会话内数据
                     // 已缓存，秒就绪）；② 仍失败则回退本地解密缓存文件；③ 都没有才弹错。
                     if self.isSoda(self.currentSong ?? LXSong([:])), let song = self.currentSong {
+                        // 瞬态失败重建循环会从 0 反复渲染开头。暂停+静音直到真正稳定出声，
+                        // 否则每次 replaceCurrentItem 都重播开头，听成“头1秒重复”。
+                        self.sodaStableWork?.cancel()
+                        self.isPlaying = false
+                        self.player.pause()
+                        self.player.volume = 0
                         let key = song.id
                         let tries = self.sodaRetryCounts[key] ?? 0
                         // 重试策略：① 原地重建（复用上次实际地址，file 缓存不回网络流）
@@ -802,7 +820,6 @@ final class PlayerManager: ObservableObject {
                             Log.write("🔁 [Player] soda 瞬时失败(秒=\(String(format: "%.2f", failedPlaybackTime)))，自动重建 item 第\(attempt)次重试 scheme=\(u.scheme ?? "") song=\(song.name)")
                             // 小退避：连续快速切歌时 AVPlayer 资源未释放完会连锁瞬时失败，
                             // 等 150/400ms 再重建，成功率显著提高
-                            self.isPlaying = true
                             Task { @MainActor in
                                 try? await Task.sleep(nanoseconds: attempt == 1 ? 150_000_000 : 400_000_000)
                                 guard let cur = self.currentSong, cur.id == key else { return }
@@ -816,7 +833,7 @@ final class PlayerManager: ObservableObject {
                                     Log.write("📌 [Player] 重建后 seek 回 \(String(format: "%.2f", failedPlaybackTime))s song=\(song.name)")
                                     await self.player.seek(to: CMTime(seconds: failedPlaybackTime, preferredTimescale: 600))
                                 }
-                                self.player.play()
+                                // 不在此 play：由 ready 后的稳定定时器确认无再失败后统一出声
                             }
                             return
                         }
@@ -830,6 +847,7 @@ final class PlayerManager: ObservableObject {
                             return
                         }
                         let err = item.error?.localizedDescription ?? "播放失败"
+                        if self.player.volume != 1 { self.player.volume = 1 }
                         self.isPlaying = false
                         self.sodaFailTask?.cancel()
                         self.sodaFailTask = Task { @MainActor in
@@ -853,10 +871,20 @@ final class PlayerManager: ObservableObject {
                     self.playbackError = nil
                     self.sodaFailTask?.cancel()
                     self.sodaFailTask = nil
-                    // 汽水歌走流式加载，瞬态 failed 会把 isPlaying 置 false；
-                    // ready 后若仍打算播放（未暂停）则恢复按钮状态。
-                    if self.isSoda(self.currentSong ?? LXSong([:])), self.player.rate > 0 {
-                        self.isPlaying = true
+                    // 汽水歌：item 已 ready，但仍可能随即再次瞬态 failed（重建循环）。
+                    // 保持静音，等 700ms 稳定确认（期间若再 failed 会走重建并重置计时），
+                    // 稳定后才正式出声，确保用户只听到一次完整开头。
+                    if self.isSoda(self.currentSong ?? LXSong([:])) {
+                        self.sodaStableWork?.cancel()
+                        self.sodaStableWork = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 700_000_000)
+                            guard !Task.isCancelled,
+                                  let cur = self.currentSong, self.isSoda(cur) else { return }
+                            self.player.volume = 1
+                            self.player.play()
+                            self.isPlaying = true
+                            Log.write("🎧 [Player] soda 稳定就绪，正式出声 song=\(cur.name)")
+                        }
                     }
                     self.updateNowPlaying()
                 default:
