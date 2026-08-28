@@ -9,7 +9,21 @@ enum PlayMode: String, CaseIterable {
     case shuffle      // 随机播放
 }
 
-final class PlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
+/// 汽水 AVAudioPlayer 的 delegate 辅助对象。PlayerManager 只注册闭包，自身保持纯 ObservableObject
+/// （不继承 NSObject），从而既不违背 AVAudioPlayerDelegate 的 NSObjectProtocol 要求，也不引入
+/// NSObject 指定初始化器对"super.init 前须初始化全部存储属性"的编译约束。
+private final class SodaPlaybackDelegate: NSObject, AVAudioPlayerDelegate {
+    var finish: (() -> Void)?
+    var decodeError: ((String) -> Void)?
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if flag { finish?() }
+    }
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        decodeError?(error?.localizedDescription ?? "unknown")
+    }
+}
+
+final class PlayerManager: ObservableObject {
     static let shared = PlayerManager()
 
     @Published var isPlaying = false
@@ -67,6 +81,9 @@ final class PlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var sodaPlayer: AVAudioPlayer?
     private var sodaTimeTimer: Timer?
     var activeIsSoda: Bool { sodaPlayer != nil }
+    /// 汽水 AVAudioPlayer 的 delegate：PlayerManager 保持纯 ObservableObject（不继承 NSObject），
+    /// 由该内部 NSObject 辅助对象转发"播放结束/解码错误"回调。
+    private let sodaDelegate = SodaPlaybackDelegate()
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
@@ -94,8 +111,7 @@ final class PlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     /// 由 SodaTrackListView 等视图注册；不注册则保持原有循环行为。
     var queueRefreshHandler: (() async -> [LXSong])?
 
-    private override init() {
-        super.init()
+    private init() {
         self.quality = AppConfigStore.shared.config.defaultQuality
         setupAudioSession()
         setupInterruptionHandling()
@@ -702,7 +718,12 @@ final class PlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         player.replaceCurrentItem(with: nil)
         do {
             let ap = try AVAudioPlayer(contentsOf: url)
-            ap.delegate = self
+            sodaDelegate.finish = { [weak self] in self?.sodaFinished() }
+            sodaDelegate.decodeError = { [weak self] message in
+                Log.write("⚠️ [Player] soda AVAudioPlayer decode error: \(message)")
+                self?.handleResolveFailure("汽水解码失败，已自动跳过")
+            }
+            ap.delegate = sodaDelegate
             ap.prepareToPlay()
             sodaPlayer = ap
             currentPlaybackURL = url
@@ -726,17 +747,11 @@ final class PlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         updateNowPlaying()
     }
 
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        guard flag else { return }
+    private func sodaFinished() {
         guard Date().timeIntervalSince(lastItemPlayStartTime) >= 1 else { return }
         Log.write("⏭️ [Player] soda AVAudioPlayer DidPlayToEnd → auto next")
         isPlaying = false
         playNext(auto: true)
-    }
-
-    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        Log.write("⚠️ [Player] soda AVAudioPlayer decode error: \(error?.localizedDescription ?? "unknown")")
-        handleResolveFailure("汽水解码失败，已自动跳过")
     }
 
     private func makeItem(for url: URL) -> AVPlayerItem {
