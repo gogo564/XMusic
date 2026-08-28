@@ -9,7 +9,7 @@ enum PlayMode: String, CaseIterable {
     case shuffle      // 随机播放
 }
 
-final class PlayerManager: ObservableObject, AVAudioPlayerDelegate {
+final class PlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     static let shared = PlayerManager()
 
     @Published var isPlaying = false
@@ -704,7 +704,7 @@ final class PlayerManager: ObservableObject, AVAudioPlayerDelegate {
             ap.delegate = self
             ap.prepareToPlay()
             sodaPlayer = ap
-            currentPlaybackURL = url.absoluteString
+            currentPlaybackURL = url
             currentTime = 0
             duration = ap.duration
             bufferedTime = ap.duration
@@ -720,8 +720,8 @@ final class PlayerManager: ObservableObject, AVAudioPlayerDelegate {
             handleResolveFailure("汽水本地打开失败，已自动跳过")
             return
         }
-        saveLastPlayed(song)
-        saveRecent(song)
+        saveLastPlayed()
+        saveRecent(song: song)
         updateNowPlaying()
     }
 
