@@ -303,14 +303,14 @@ struct SettingsView: View {
                                     .font(.system(size: 13))
                                     .foregroundColor(.secondary)
                             }
-                        } else if txVipType == "normal" {
+                        } else {
                             HStack {
-                                Label("会员状态", systemImage: "crown")
+                                Label("登录状态", systemImage: "checkmark.seal.fill")
                                     .font(.system(size: 13))
                                 Spacer()
-                                Text("非会员")
+                                Text("有效")
                                     .font(.system(size: 13))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.green)
                             }
                         }
                         if let days = txCookieDaysLeft, !txCookieExpireStr.isEmpty {
