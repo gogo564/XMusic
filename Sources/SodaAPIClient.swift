@@ -274,6 +274,19 @@ struct SodaAPIClient {
         let coverURL: String
         let duration: Int
         let albumName: String
+        /// 抖音收藏等非正式曲目 media_type = "ugc_clip"，取流需显式传 qishui
+        let mediaType: String
+
+        init(id: String, name: String, artist: String, coverURL: String, duration: Int,
+             albumName: String, mediaType: String = "track") {
+            self.id = id
+            self.name = name
+            self.artist = artist
+            self.coverURL = coverURL
+            self.duration = duration
+            self.albumName = albumName
+            self.mediaType = mediaType
+        }
 
         /// 转为 LXSong（source = "soda"），供播放/队列/最近播放复用
         func toLXSong() -> LXSong {
@@ -284,6 +297,7 @@ struct SodaAPIClient {
                 "singer": artist,
                 "img": coverURL,
                 "albumName": albumName,
+                "mediaType": mediaType,
                 "interval": String(duration / 1000),
             ])
         }
@@ -314,7 +328,8 @@ struct SodaAPIClient {
                 artist: artistName,
                 coverURL: coverURLString(from: album),
                 duration: track["duration"] as? Int ?? 0,
-                albumName: album["name"] as? String ?? ""
+                albumName: album["name"] as? String ?? "",
+                mediaType: track["media_type"] as? String ?? "track"
             )
         }
     }
@@ -503,8 +518,13 @@ struct SodaAPIClient {
         let durationMs: Int
     }
 
-    func songStream(trackID: String, quality: String) async throws -> SodaStreamInfo {
-        let data = try await getJSON(makeURL("/song/stream", query: ["track_id": trackID, "quality": mapQuality(quality)]))
+    func songStream(trackID: String, quality: String, mediaType: String = "track") async throws -> SodaStreamInfo {
+        var query = ["track_id": trackID, "quality": mapQuality(quality)]
+        // ugc_clip（抖音收藏）等非正式曲目必须显式传 media_type 才能取到明文流
+        if !mediaType.isEmpty && mediaType != "track" {
+            query["media_type"] = mediaType
+        }
+        let data = try await getJSON(makeURL("/song/stream", query: query))
         guard let dict = data as? [String: Any],
               let mainURL = dict["main_url"] as? String, !mainURL.isEmpty else {
             throw SodaError.upstream

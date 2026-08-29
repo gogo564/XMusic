@@ -71,7 +71,10 @@ struct PlayerView: View {
     }
 
     private var coverURL: URL? {
-        guard let song = playerManager.currentSong, !song.imageURL.isEmpty else { return nil }
+        guard let song = playerManager.currentSong else { return nil }
+        // 本地优先：下载/缓存已打包封面时用本地文件，离线也能显示封面
+        if let local = SongBundleWriter.localCover(for: song) { return local }
+        guard !song.imageURL.isEmpty else { return nil }
         return URL(string: song.imageURL)
     }
 

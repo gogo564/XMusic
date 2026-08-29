@@ -338,6 +338,14 @@ final class DownloadService: NSObject, ObservableObject {
             try FileManager.default.createDirectory(at: docsDir, withIntermediateDirectories: true)
             try data.write(to: dest)
             Log.write("✅ [SodaDL] 落盘成功 \(dest.lastPathComponent) (\(data.count / 1024)KB)")
+            // 汽水下载落的是裸 m4a，后台静默把封面+歌词打包进同目录 meta/，离线可显示封面/歌词
+            let packSong = song
+            let packDest = dest
+            Task {
+                await SongBundleWriter.bundle(song: packSong, audioURL: packDest) { s in
+                    (try? await SodaAPIClient.shared.lyric(trackID: s.songmid ?? "")) ?? ""
+                }
+            }
             let downloaded = DownloadedSong(
                 id: song.id,
                 name: song.name,

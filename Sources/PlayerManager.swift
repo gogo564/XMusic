@@ -546,7 +546,8 @@ final class PlayerManager: ObservableObject {
             let trackID = song.songmid ?? ""
             let mapped = mapSodaQuality(quality)
             do {
-                let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
+                let mediaType = song["mediaType"] as? String ?? "track"
+                let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality, mediaType: mediaType)
                 let delivered = stream.quality.isEmpty ? mapped : stream.quality
                 let display = SodaAPIClient.qualityDisplayName(delivered)
                 if stream.hexKey.count == 32 {
@@ -555,6 +556,8 @@ final class PlayerManager: ObservableObject {
                     // 上 item failed 概率 100%（历史日志 390/390），正是"头1秒重复"的根源。
                     for attempt in 0..<2 {
                         if let fileURL = try? await MusicCacheManager.shared.ensureSodaFile(trackID: trackID, id: song.id, quality: quality) {
+                            // 落盘后后台把封面+歌词一起打包进 meta/，不阻塞起播
+                            bundleSodaResources(song, fileURL: fileURL)
                             return (fileURL.absoluteString, display, "汽水")
                         }
                         if attempt == 0 { try? await Task.sleep(nanoseconds: 700_000_000) }
@@ -585,6 +588,17 @@ final class PlayerManager: ObservableObject {
         }
     }
 
+    /// 汽水歌曲本地资源打包：播放/缓存落到本地 m4a 后，后台静默把封面+歌词一并存进
+    /// 同目录 meta/，供离线回放与切歌时优先读本地。不阻塞起播。
+    private func bundleSodaResources(_ song: LXSong, fileURL: URL) {
+        let packSong = song
+        Task {
+            await SongBundleWriter.bundle(song: packSong, audioURL: fileURL) { s in
+                (try? await SodaAPIClient.shared.lyric(trackID: s.songmid ?? "")) ?? ""
+            }
+        }
+    }
+
     private func resolveAndPlay(_ song: LXSong?) {
         guard let song = song else { return }
         // 歌词与地址解析并行拉取：不用等起播成功才出现歌词
@@ -606,6 +620,7 @@ final class PlayerManager: ObservableObject {
 
         // 1. Cache-first（缓存按 音质 区分，命中即所选音质）
         if MusicCacheManager.shared.isCached(id: song.id, quality: quality), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id, quality: quality) {
+            if isSoda(song) { bundleSodaResources(song, fileURL: cachedURL) }
             startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: "缓存", playbackOrigin: "缓存")
             return
         }
@@ -614,6 +629,7 @@ final class PlayerManager: ObservableObject {
         // 之后会永远 miss，明明有缓存却每次都要解析+下载。）
         if isSoda(song), let anyURL = MusicCacheManager.shared.anyQualityCachedURL(for: song.id) {
             Log.write("⚡️ [Player] 汽水跨音质缓存命中 song=\(song.name) file=\(anyURL.lastPathComponent)")
+            bundleSodaResources(song, fileURL: anyURL)
             startPlayback(url: anyURL, song: song, sourceName: song.source, qualityName: "缓存", playbackOrigin: "缓存")
             return
         }
@@ -929,6 +945,10 @@ final class PlayerManager: ObservableObject {
     }
 
     private func fetchLyricData(for song: LXSong) async throws -> (raw: String, parsed: LRC) {
+        // 本地优先：下载/缓存已打包歌词时直接读 meta/<id>.lrc，离线也能出词
+        if let local = SongBundleWriter.localLyric(for: song) {
+            return (local, LRC.parse(local))
+        }
         var raw: String
         var parsed: LRC
         if isSoda(song) {
