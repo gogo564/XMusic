@@ -9,20 +9,6 @@ enum PlayMode: String, CaseIterable {
     case shuffle      // 随机播放
 }
 
-/// 汽水 AVAudioPlayer 的 delegate 辅助对象。PlayerManager 只注册闭包，自身保持纯 ObservableObject
-/// （不继承 NSObject），从而既不违背 AVAudioPlayerDelegate 的 NSObjectProtocol 要求，也不引入
-/// NSObject 指定初始化器对"super.init 前须初始化全部存储属性"的编译约束。
-private final class SodaPlaybackDelegate: NSObject, AVAudioPlayerDelegate {
-    var finish: (() -> Void)?
-    var decodeError: ((String) -> Void)?
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if flag { finish?() }
-    }
-    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        decodeError?(error?.localizedDescription ?? "unknown")
-    }
-}
-
 final class PlayerManager: ObservableObject {
     static let shared = PlayerManager()
 
@@ -76,14 +62,6 @@ final class PlayerManager: ObservableObject {
     }
 
     private let player = AVPlayer()
-    /// 汽水专用播放引擎：汽水永远先落盘明文 m4a，用 AVAudioPlayer 瞬时起播
-    /// （无 AVPlayerItem 状态机、无 0.00s 瞬态 failed），其余平台仍走上面的 AVPlayer 流播。
-    private var sodaPlayer: AVAudioPlayer?
-    private var sodaTimeTimer: Timer?
-    var activeIsSoda: Bool { sodaPlayer != nil }
-    /// 汽水 AVAudioPlayer 的 delegate：PlayerManager 保持纯 ObservableObject（不继承 NSObject），
-    /// 由该内部 NSObject 辅助对象转发"播放结束/解码错误"回调。
-    private let sodaDelegate = SodaPlaybackDelegate()
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
@@ -164,11 +142,7 @@ final class PlayerManager: ObservableObject {
                 let shouldResume = AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
                 // 来电/闹钟结束后默认续播；个别打断类型带 shouldResume 标志时更应恢复。
                 if self.wasPlayingBeforeInterruption || shouldResume {
-                    if self.activeIsSoda {
-                        self.enginePlay()
-                        self.isPlaying = true
-                        self.updateNowPlaying()
-                    } else if self.player.currentItem == nil, self.currentSong != nil {
+                    if self.player.currentItem == nil, self.currentSong != nil {
                         self.resolveAndPlay(self.currentQueueSong)
                     } else {
                         self.enginePlay()
@@ -327,7 +301,7 @@ final class PlayerManager: ObservableObject {
     }
 
     func togglePlayPause() {
-        if player.currentItem == nil, !activeIsSoda, currentSong != nil {
+        if player.currentItem == nil, currentSong != nil {
             Log.write("🔘 [Player] togglePlayPause → currentItem nil, resolveAndPlay")
             resolveAndPlay(currentQueueSong)
             return
@@ -495,7 +469,6 @@ final class PlayerManager: ObservableObject {
         qualityName = ""
         playbackOrigin = "本地"
         currentPlaybackURL = url
-        stopSodaAudioPlayer()
         queue = []
         currentIndex = -1
         currentTime = 0
@@ -687,87 +660,19 @@ final class PlayerManager: ObservableObject {
         resolveAndPlay(currentQueueSong)
     }
 
-    // MARK: - AVAudioPlayer 引擎（汽水专用）
-
-    private func stopSodaAudioPlayer() {
-        sodaPlayer?.stop()
-        sodaPlayer = nil
-        sodaTimeTimer?.invalidate()
-        sodaTimeTimer = nil
-    }
+    // MARK: - 播放引擎助手（统一走 AVPlayer）
 
     private func enginePlay() {
-        if let ap = sodaPlayer { ap.play() } else { player.play() }
+        player.play()
     }
 
     private func enginePause() {
-        if let ap = sodaPlayer { ap.pause() } else { player.pause() }
+        player.pause()
     }
 
     private func engineSeek(_ time: Double) {
-        if let ap = sodaPlayer { ap.currentTime = time }
-        else { player.seek(to: CMTime(seconds: time, preferredTimescale: 600)) }
+        player.seek(to: CMTime(seconds: time, preferredTimescale: 600))
         currentTime = time
-    }
-
-    private func startSodaTimer() {
-        sodaTimeTimer?.invalidate()
-        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-            DispatchQueue.main.async {
-                guard let self = self, let ap = self.sodaPlayer else { return }
-                self.currentTime = ap.currentTime
-                self.duration = ap.duration
-                self.bufferedTime = ap.duration
-                self.updateLyricIndex()
-                self.updateNowPlayingElapsed()
-            }
-        }
-        RunLoop.main.add(t, forMode: .common)
-        sodaTimeTimer = t
-    }
-
-    /// 汽水永远先落盘明文 m4a，用 AVAudioPlayer 瞬时起播，绕过 AVPlayer 0.00s 瞬态失败。
-    private func playSodaWithAudioPlayer(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String) {
-        stopSodaAudioPlayer()
-        // 释放上一个 AVPlayer 项，避免双引擎同时出声
-        player.pause()
-        player.replaceCurrentItem(with: nil)
-        do {
-            let ap = try AVAudioPlayer(contentsOf: url)
-            sodaDelegate.finish = { [weak self] in self?.sodaFinished() }
-            sodaDelegate.decodeError = { [weak self] message in
-                Log.write("⚠️ [Player] soda AVAudioPlayer decode error: \(message)")
-                self?.handleResolveFailure("汽水解码失败，已自动跳过")
-            }
-            ap.delegate = sodaDelegate
-            ap.prepareToPlay()
-            sodaPlayer = ap
-            currentPlaybackURL = url
-            currentTime = 0
-            duration = ap.duration
-            bufferedTime = ap.duration
-            isResolving = false
-            isPlaying = true
-            ap.play()
-            lastItemPlayStartTime = Date()
-            startSodaTimer()
-            Log.write("🎧 [Player] soda AVAudioPlayer start url=\(url.absoluteString.prefix(60)) dur=\(Int(duration))s")
-        } catch {
-            stopSodaAudioPlayer()
-            Log.write("❌ [Player] soda AVAudioPlayer create ERROR: \(error.localizedDescription)")
-            handleResolveFailure("汽水本地打开失败，已自动跳过")
-            return
-        }
-        saveLastPlayed()
-        saveRecent(song: song)
-        updateNowPlaying()
-    }
-
-    private func sodaFinished() {
-        guard Date().timeIntervalSince(lastItemPlayStartTime) >= 1 else { return }
-        Log.write("⏭️ [Player] soda AVAudioPlayer DidPlayToEnd → auto next")
-        isPlaying = false
-        playNext(auto: true)
     }
 
     private func makeItem(for url: URL) -> AVPlayerItem {
@@ -793,7 +698,6 @@ final class PlayerManager: ObservableObject {
         // —— 汽水解密 m4a 统一走 AVPlayer（file://）。实测 AVAudioPlayer 无法打开解密 m4a
         //    （OSStatus 2003334207 UnsupportedFileType → 一律 create ERROR 并跳歌），故废弃专用引擎；
         //    而缓存命中走 AVPlayer+file:// 已被日志证明播放稳定、无失败。新下载同走此路。
-        stopSodaAudioPlayer()
         player.automaticallyWaitsToMinimizeStalling = false
         // 优先复用预建好的下一首 item（省去 AVURLAsset + loader 构建）；不匹配则现建
         let item: AVPlayerItem
