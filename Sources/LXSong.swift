@@ -52,6 +52,11 @@ struct LXSong: Identifiable {
         raw["meta"] as? [String: Any] ?? [:]
     }
 
+    /// 通用下标：允许 song["key"] 直接读 raw（其次 meta），供 mediaType 等动态字段读取
+    subscript(_ key: String) -> Any? {
+        raw[key] ?? meta[key]
+    }
+
     // quality options: [[type, size]...] or _types dict
     var qualities: [(type: String, size: String)] {
         var result: [(String, String)] = []
