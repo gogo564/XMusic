@@ -8,6 +8,12 @@ struct SettingsView: View {
 
     @State private var showQRLogin = false
     @State private var showWyQRLogin = false
+    @State private var txExpiryLoading = false
+    @State private var txExpiryMessage = ""
+    @State private var txVipType = ""
+    @State private var txVipEndAt = ""
+    @State private var txCookieExpireStr = ""
+    @State private var txCookieDaysLeft: Double?
 
     @State private var baseURL = ""
     @State private var username = ""
@@ -272,7 +278,56 @@ struct SettingsView: View {
                 Text("用手机 QQ 扫描二维码登录后立即生效，原账号将被替换。")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    if txExpiryLoading {
+                        Label("正在查询到期时间…", systemImage: "hourglass")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    } else if !txExpiryMessage.isEmpty {
+                        Label(txExpiryMessage, systemImage: "exclamationmark.triangle")
+                            .font(.system(size: 13))
+                            .foregroundColor(txExpiryMessage.contains("无法") ? .orange : .secondary)
+                    } else if txVipType.isEmpty && txCookieDaysLeft == nil {
+                        Text("扫码登录后可查看会员与 Cookie 到期时间")
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                    } else {
+                        if !txVipEndAt.isEmpty {
+                            let vipText = txVipType == "svip" ? "SVIP" : (txVipType == "vip" ? "绿钻 VIP" : "会员")
+                            HStack {
+                                Label("会员状态", systemImage: "crown")
+                                    .font(.system(size: 13))
+                                Spacer()
+                                Text("\(vipText) 于 \(txVipEndAt) 到期")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if txVipType == "normal" {
+                            HStack {
+                                Label("会员状态", systemImage: "crown")
+                                    .font(.system(size: 13))
+                                Spacer()
+                                Text("非会员")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        if let days = txCookieDaysLeft, !txCookieExpireStr.isEmpty {
+                            HStack {
+                                Label("Cookie 到期", systemImage: "clock")
+                                    .font(.system(size: 13))
+                                Spacer()
+                                Text("\(txCookieExpireStr)（剩 \(String(format: "%.1f", days)) 天）")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 4)
             }
+            .task { await fetchTxExpiry() }
             Section(header: Text("网易云音乐账号")) {
                 Button {
                     showWyQRLogin = true
@@ -403,6 +458,28 @@ struct SettingsView: View {
             isError = true
         }
         isTesting = false
+    }
+
+    private func fetchTxExpiry() async {
+        txExpiryLoading = true
+        defer { txExpiryLoading = false }
+        let host = "http://gogo564.x3322.net:8081"
+        guard let url = URL(string: host + "/login/tx/expiry") else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  (obj["code"] as? Int) == 200 else {
+                txExpiryMessage = "查询失败"
+                return
+            }
+            txVipType = obj["vipType"] as? String ?? "normal"
+            txVipEndAt = obj["vipEndAt"] as? String ?? ""
+            txCookieExpireStr = obj["cookieExpireStr"] as? String ?? ""
+            txCookieDaysLeft = obj["cookieDaysLeft"] as? Double
+            txExpiryMessage = ""
+        } catch {
+            txExpiryMessage = "无法连接到期服务"
+        }
     }
 
     private func checkSodaAuth() {
