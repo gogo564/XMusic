@@ -873,9 +873,8 @@ final class PlayerManager: ObservableObject {
                     // 切换后 failed → ~40ms → ready）。若立即上报会误置 isPlaying=false / 弹「播放错误」。
                     // 故延迟 0.6s 确认：期间已自愈则这次瞬态失败直接忽略。
                     guard item === self.player.currentItem else { return }
-                    // 记录完整 AVError（domain+code+underlying），用于真机一锤定音，而不只是 localizedDescription
-                    let errDesc = Self.avErrorDetail(item.error)
-                    Log.write("⚠️ [Player] item failed (transient?) \(errDesc)")
+                    // 顺序切换时的瞬态 failed（-11800/-12155）约 40ms 自愈为 ready，此处不再打日志，
+                    // 由 0.6s 延迟确认吞掉；只有真·失败才在确认后打印。
                     let pendingItem = item
                     let err = item.error
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
@@ -884,7 +883,7 @@ final class PlayerManager: ObservableObject {
                               pendingItem.status == .failed else { return } // 已自愈为 ready → 忽略
                         self.playbackError = err?.localizedDescription ?? "播放失败"
                         self.isPlaying = false
-                        Log.write("❌ [Player] item failed 确认（非瞬态） \(Self.avErrorDetail(err))")
+                        Log.write("❌ [Player] item failed 确认（非瞬态） \(Self.avErrorDetail(err)) | song=\(self.currentSong?.name ?? "")")
                     }
                 case .readyToPlay:
                     guard item === self.player.currentItem else { return }
