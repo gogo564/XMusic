@@ -849,6 +849,18 @@ final class PlayerManager: ObservableObject {
         }
     }
 
+    /// 输出完整 AVError（domain+code+underlying），比 localizedDescription 更利于真机定位
+    static func avErrorDetail(_ error: Error?) -> String {
+        guard let e = error else { return "(err=nil)" }
+        let nse = e as NSError
+        var s = "err=\(nse.domain)/\(nse.code) \(e.localizedDescription)"
+        if let underlying = nse.userInfo[NSUnderlyingErrorKey] as? Error {
+            let un = underlying as NSError
+            s += " | underlying=\(un.domain)/\(un.code)"
+        }
+        return s
+    }
+
     private func observeItemStatus(_ item: AVPlayerItem) {
         statusObserver?.invalidate()
         statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
@@ -861,7 +873,9 @@ final class PlayerManager: ObservableObject {
                     // 切换后 failed → ~40ms → ready）。若立即上报会误置 isPlaying=false / 弹「播放错误」。
                     // 故延迟 0.6s 确认：期间已自愈则这次瞬态失败直接忽略。
                     guard item === self.player.currentItem else { return }
-                    Log.write("⚠️ [Player] item failed (transient?) : \(item.error?.localizedDescription ?? "")")
+                    // 记录完整 AVError（domain+code+underlying），用于真机一锤定音，而不只是 localizedDescription
+                    let errDesc = Self.avErrorDetail(item.error)
+                    Log.write("⚠️ [Player] item failed (transient?) \(errDesc)")
                     let pendingItem = item
                     let err = item.error
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
@@ -870,7 +884,7 @@ final class PlayerManager: ObservableObject {
                               pendingItem.status == .failed else { return } // 已自愈为 ready → 忽略
                         self.playbackError = err?.localizedDescription ?? "播放失败"
                         self.isPlaying = false
-                        Log.write("❌ [Player] item failed 确认（非瞬态）")
+                        Log.write("❌ [Player] item failed 确认（非瞬态） \(Self.avErrorDetail(err))")
                     }
                 case .readyToPlay:
                     guard item === self.player.currentItem else { return }
