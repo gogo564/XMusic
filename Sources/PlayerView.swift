@@ -10,6 +10,7 @@ struct PlayerView: View {
     @State private var isDraggingSlider = false
     @State private var showingRecentList = false
     @State private var showPlaylistPicker = false
+    @State private var showingComments = false
     @State private var sodaCollectMessage: String?
     @State private var sodaCollecting = false
 
@@ -34,6 +35,9 @@ struct PlayerView: View {
                 PlaylistPickerView(song: song)
                     .environmentObject(playlistStore)
             }
+        }
+        .sheet(isPresented: $showingComments) {
+            CommentsView(song: playerManager.currentSong)
         }
         .onChange(of: playerManager.currentSong?.id) { _ in
             sodaCollectMessage = nil
@@ -340,6 +344,7 @@ struct PlayerView: View {
                 if playerManager.currentSong?.source == "soda" {
                     sodaCollectButton
                 }
+                commentButton
                 downloadButton
                 loveButton
             }
@@ -368,6 +373,19 @@ struct PlayerView: View {
             Image(systemName: isLoved ? "heart.fill" : "heart")
                 .font(.title3)
                 .foregroundColor(isLoved ? .red : .white.opacity(0.85))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+    }
+
+    private var commentButton: some View {
+        Button(action: {
+            HapticManager.shared.selection()
+            showingComments = true
+        }) {
+            Image(systemName: "bubble.left")
+                .font(.title3)
+                .foregroundColor(.white.opacity(0.85))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }

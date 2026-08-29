@@ -560,6 +560,56 @@ struct SodaAPIClient {
         }
         return ""
     }
+
+    // MARK: - 评论
+
+    struct SodaCommentPage {
+        let comments: [MusicComment]
+        let total: Int
+        let cursor: String
+        let hasMore: Bool
+    }
+
+    /// 获取歌曲评论（qishui-api /comment，走 LunaPC 线上签名链路 + 登录态，游标分页）
+    func fetchComments(trackID: String, cursor: String = "") async throws -> SodaCommentPage {
+        let data = try await getJSON(makeURL("/comment", query: [
+            "track_id": trackID,
+            "cursor": cursor,
+            "count": "20",
+        ]))
+        guard let dict = data as? [String: Any] else {
+            throw SodaError.upstream
+        }
+        let list = dict["comments"] as? [[String: Any]] ?? []
+        let comments: [MusicComment] = list.compactMap { c in
+            guard let text = c["content"] as? String, !text.isEmpty else { return nil }
+            let ts = (c["timestamp"] as? NSNumber)?.intValue ?? 0
+            return MusicComment(
+                user: c["user_name"] as? String ?? "匿名用户",
+                avatar: c["user_avatar"] as? String,
+                content: text,
+                time: Self.commentTimeString(ts),
+                likedCount: c["like_count"] as? Int ?? 0,
+                from: "汽水音乐"
+            )
+        }
+        return SodaCommentPage(
+            comments: comments,
+            total: dict["total"] as? Int ?? 0,
+            cursor: (dict["cursor"] as? String) ?? "",
+            hasMore: dict["has_more"] as? Bool ?? false
+        )
+    }
+
+    /// 时间戳(秒) → 评论展示用的人性化时间
+    private static func commentTimeString(_ ts: Int) -> String {
+        guard ts > 0 else { return "" }
+        let date = Date(timeIntervalSince1970: TimeInterval(ts))
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: date)
+    }
 }
 
 enum SodaError: LocalizedError {

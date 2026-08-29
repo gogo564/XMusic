@@ -1,6 +1,6 @@
 import SwiftUI
 
-// 歌曲评论（后端聚合各平台：QQ/网易/酷我/酷狗/咪咕）
+// 歌曲评论：soda 走 qishui-api /comment（LunaPC 签名链路），其余平台走 LX 后端聚合。
 struct CommentsView: View {
     let song: LXSong?
     @Environment(\.dismiss) var dismiss
@@ -8,18 +8,24 @@ struct CommentsView: View {
     @State private var total = 0
     @State private var maxPage = 1
     @State private var page = 1
-    @State private var type = "hot" // hot / new
+    @State private var type = "hot" // hot / new（仅非 soda 平台使用）
+    @State private var cursor = ""   // soda 游标分页
+    @State private var hasMore = true
     @State private var isLoading = false
     @State private var loadFailed = false
     @State private var errorMessage = ""
     @State private var loadedOnce = false
 
+    private var isSoda: Bool { song?.source == "soda" }
+
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                typeSwitcher
-                Divider()
-                if loadedOnce && comments.isEmpty {
+                if !isSoda {
+                    typeSwitcher
+                    Divider()
+                }
+                if loadedOnce && comments.isEmpty && !isLoading {
                     Spacer()
                     Text("暂无评论")
                         .font(.subheadline)
@@ -47,7 +53,7 @@ struct CommentsView: View {
                         ForEach(comments.indices, id: \.self) { i in
                             commentRow(comments[i])
                         }
-                        if page < maxPage {
+                        if canLoadMore {
                             HStack {
                                 Spacer()
                                 if isLoading {
@@ -94,6 +100,10 @@ struct CommentsView: View {
                 load()
             }
         }
+    }
+
+    private var canLoadMore: Bool {
+        isSoda ? hasMore : page < maxPage
     }
 
     private var sourceLabel: String {
@@ -188,13 +198,27 @@ struct CommentsView: View {
         loadFailed = false
         Task {
             do {
-                let result = try await LXAPIClient.shared.getComments(for: song, type: type, page: 1, limit: 20)
-                await MainActor.run {
-                    comments = result.comments
-                    total = result.total
-                    maxPage = result.maxPage
-                    page = 1
-                    isLoading = false
+                if isSoda {
+                    let songmid = song.songmid ?? ""
+                    let result = try await SodaAPIClient.shared.fetchComments(trackID: songmid)
+                    await MainActor.run {
+                        comments = result.comments
+                        total = result.total
+                        cursor = result.cursor
+                        hasMore = result.hasMore
+                        page = 1
+                        maxPage = 1
+                        isLoading = false
+                    }
+                } else {
+                    let result = try await LXAPIClient.shared.getComments(for: song, type: type, page: 1, limit: 20)
+                    await MainActor.run {
+                        comments = result.comments
+                        total = result.total
+                        maxPage = result.maxPage
+                        page = 1
+                        isLoading = false
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -207,16 +231,28 @@ struct CommentsView: View {
     }
 
     private func loadMore() {
-        guard let song = song, !isLoading, page < maxPage else { return }
+        guard let song = song, !isLoading, canLoadMore else { return }
         isLoading = true
         Task {
             do {
-                let result = try await LXAPIClient.shared.getComments(for: song, type: type, page: page + 1, limit: 20)
-                await MainActor.run {
-                    comments += result.comments
-                    page += 1
-                    maxPage = result.maxPage
-                    isLoading = false
+                if isSoda {
+                    let songmid = song.songmid ?? ""
+                    let result = try await SodaAPIClient.shared.fetchComments(trackID: songmid, cursor: cursor)
+                    await MainActor.run {
+                        comments += result.comments
+                        cursor = result.cursor
+                        hasMore = result.hasMore
+                        total = result.total
+                        isLoading = false
+                    }
+                } else {
+                    let result = try await LXAPIClient.shared.getComments(for: song, type: type, page: page + 1, limit: 20)
+                    await MainActor.run {
+                        comments += result.comments
+                        page += 1
+                        maxPage = result.maxPage
+                        isLoading = false
+                    }
                 }
             } catch {
                 await MainActor.run {
