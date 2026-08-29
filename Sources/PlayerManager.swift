@@ -856,15 +856,28 @@ final class PlayerManager: ObservableObject {
                 guard let self = self else { return }
                 switch item.status {
                 case .failed:
-                    // 只认「当前 item」的失败；被 replaceCurrentItem 替换掉的旧 item 在生命周期
-                    // 结束时会伪报一次 failed（尤其快速切歌、旧项尚在加载时），若无条件处理会把
-                    // 当前歌误判为失败：置 isPlaying=false 导致播放图标一直显示「未播放」。
+                    // 只认「当前 item」的失败。被 replace 掉的旧 item 与「正在播时切歌」都会让
+                    // 当前新 item 瞬时 failed，随后约几十毫秒系统自愈为 readyToPlay（日志实证：每次
+                    // 切换后 failed → ~40ms → ready）。若立即上报会误置 isPlaying=false / 弹「播放错误」。
+                    // 故延迟 0.6s 确认：期间已自愈则这次瞬态失败直接忽略。
                     guard item === self.player.currentItem else { return }
-                    Log.write("❌ [Player] item failed: \(item.error?.localizedDescription ?? "")")
-                    self.playbackError = item.error?.localizedDescription ?? "播放失败"
-                    self.isPlaying = false
+                    Log.write("⚠️ [Player] item failed (transient?) : \(item.error?.localizedDescription ?? "")")
+                    let pendingItem = item
+                    let err = item.error
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                        guard let self,
+                              self.player.currentItem === pendingItem,
+                              pendingItem.status == .failed else { return } // 已自愈为 ready → 忽略
+                        self.playbackError = err?.localizedDescription ?? "播放失败"
+                        self.isPlaying = false
+                        Log.write("❌ [Player] item failed 确认（非瞬态）")
+                    }
                 case .readyToPlay:
                     guard item === self.player.currentItem else { return }
+                    // 瞬态 failed 自愈后就绪，此时 isPlaying 应维持 startPlayback 置的 true（图标正常）
+                    if item.status == .readyToPlay, !self.isPlaying, Date().timeIntervalSince(self.lastItemPlayStartTime) < 1.5 {
+                        self.isPlaying = true
+                    }
                     let d = item.duration.seconds
                     Log.write("🎧 [Player] item ready dur=\(d) song=\(self.currentSong?.name ?? "") isPlayingBefore=\(self.isPlaying)")
                     if d.isFinite, d > 0 {
