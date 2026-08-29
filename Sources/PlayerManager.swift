@@ -856,12 +856,15 @@ final class PlayerManager: ObservableObject {
                 guard let self = self else { return }
                 switch item.status {
                 case .failed:
+                    // 只认「当前 item」的失败；被 replaceCurrentItem 替换掉的旧 item 在生命周期
+                    // 结束时会伪报一次 failed（尤其快速切歌、旧项尚在加载时），若无条件处理会把
+                    // 当前歌误判为失败：置 isPlaying=false 导致播放图标一直显示「未播放」。
+                    guard item === self.player.currentItem else { return }
                     Log.write("❌ [Player] item failed: \(item.error?.localizedDescription ?? "")")
-                    // AVPlayer 路径（非汽水：流播）失败直接上报；汽水已改走 AVAudioPlayer，
-                    // 不再挂 AVPlayerItem，故此处不再有汽水的瞬时失败重建/静音稳定逻辑。
                     self.playbackError = item.error?.localizedDescription ?? "播放失败"
                     self.isPlaying = false
                 case .readyToPlay:
+                    guard item === self.player.currentItem else { return }
                     let d = item.duration.seconds
                     Log.write("🎧 [Player] item ready dur=\(d) song=\(self.currentSong?.name ?? "") isPlayingBefore=\(self.isPlaying)")
                     if d.isFinite, d > 0 {
