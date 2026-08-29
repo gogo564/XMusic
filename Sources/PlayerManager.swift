@@ -774,13 +774,9 @@ final class PlayerManager: ObservableObject {
         }
         loadedLyricSongID = song.id
         currentLyricIndex = -1
-        // —— 汽水本地明文 m4a：走专用 AVAudioPlayer 引擎瞬时起播，
-        //    彻底绕开 AVPlayer 对本地汽水文件的 0.00s 瞬态 failed / 静音稳定 / asset 预热这套兜底。
-        if sourceName == "汽水", url.isFileURL {
-            playSodaWithAudioPlayer(url: url, song: song, sourceName: sourceName, qualityName: qualityName, playbackOrigin: playbackOrigin)
-            return
-        }
-        // 非汽水：切回/保持 AVPlayer，并释放汽水引擎，避免双引擎同时出声
+        // —— 汽水解密 m4a 统一走 AVPlayer（file://）。实测 AVAudioPlayer 无法打开解密 m4a
+        //    （OSStatus 2003334207 UnsupportedFileType → 一律 create ERROR 并跳歌），故废弃专用引擎；
+        //    而缓存命中走 AVPlayer+file:// 已被日志证明播放稳定、无失败。新下载同走此路。
         stopSodaAudioPlayer()
         player.automaticallyWaitsToMinimizeStalling = false
         // 优先复用预建好的下一首 item（省去 AVURLAsset + loader 构建）；不匹配则现建
