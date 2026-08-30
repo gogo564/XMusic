@@ -40,7 +40,7 @@ struct LXCachedImage: View {
     }
 }
 
-private final class LXImageLoader: @unchecked Sendable {
+final class LXImageLoader: @unchecked Sendable {
     static let shared = LXImageLoader()
 
     private static let memoryCache = NSCache<NSString, UIImage>()
