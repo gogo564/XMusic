@@ -60,7 +60,7 @@ struct CarPlayRootView: View {
     // MARK: - 2×2 大卡片网格(本地歌单)
     private var playlistGrid: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                 CarPlayCardNavLink(
                     title: "我喜欢的音乐",
                     count: playlistStore.songs(kind: .love, playlistID: "").count,
@@ -85,14 +85,14 @@ struct CarPlayRootView: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(12)
         }
     }
 
     // MARK: - 最近播放网格
     private var recentGrid: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                 ForEach(recentStore.items.prefix(6), id: \.id) { item in
                     if let song = item.song {
                         CarPlayCardNavLink(
@@ -105,7 +105,7 @@ struct CarPlayRootView: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(12)
         }
     }
 
@@ -142,9 +142,9 @@ private struct CarPlayTabBar: View {
                 } label: {
                     VStack(spacing: 2) {
                         Image(systemName: icon)
-                            .font(.system(size: 19))
+                            .font(.system(size: 17))
                         Text(tab.rawValue)
-                            .font(.system(size: 13, weight: selected == tab ? .bold : .regular))
+                            .font(.system(size: 12, weight: selected == tab ? .bold : .regular))
                     }
                     .foregroundColor(selected == tab ? Color(.systemOrange) : .gray)
                     .frame(maxWidth: .infinity)
@@ -174,12 +174,12 @@ private struct CarPlayListRow: View {
             artwork
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 18, weight: isNowPlaying ? .bold : .medium))
+                    .font(.system(size: 17, weight: isNowPlaying ? .bold : .medium))
                     .foregroundColor(isNowPlaying ? Color(.systemOrange) : .primary)
                     .lineLimit(1)
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: 14, weight: .regular))
+                        .font(.system(size: 13, weight: .regular))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
@@ -187,7 +187,7 @@ private struct CarPlayListRow: View {
             Spacer(minLength: 8)
             if isNowPlaying {
                 Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: 18))
+                    .font(.system(size: 17))
                     .foregroundColor(Color(.systemOrange))
             }
         }
@@ -198,14 +198,14 @@ private struct CarPlayListRow: View {
         if coverURL.isEmpty {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.gray.opacity(0.25))
-                .frame(width: 44, height: 44)
+                .frame(width: 40, height: 40)
                 .overlay(
                     Image(systemName: "music.note")
-                        .font(.system(size: 16))
+                        .font(.system(size: 15))
                         .foregroundColor(Color.gray.opacity(0.7))
                 )
         } else {
-            LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 44, cornerRadius: 8)
+            LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 40, cornerRadius: 8)
         }
     }
 }
@@ -230,12 +230,12 @@ private struct CarPlayCardNavLink<Destination: View>: View {
             VStack(spacing: 5) {
                 artwork
                 Text(title)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.primary)
                     .lineLimit(1)
                 if count > 0 {
                     Text("\(count) 首")
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
@@ -253,16 +253,21 @@ private struct CarPlayCardNavLink<Destination: View>: View {
     @ViewBuilder private var artwork: some View {
         if coverURL.isEmpty {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.gray.opacity(0.22))
-                .frame(height: 76)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.20, green: 0.20, blue: 0.23), Color(red: 0.13, green: 0.13, blue: 0.15)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(height: 72)
                 .overlay(
                     Image(systemName: "music.note")
-                        .font(.system(size: 26))
-                        .foregroundColor(Color.gray.opacity(0.7))
+                        .font(.system(size: 24))
+                        .foregroundColor(Color.gray.opacity(0.65))
                 )
         } else {
-            LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 76, cornerRadius: 10)
-                .frame(height: 76)
+            LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 72, cornerRadius: 10)
+                .frame(height: 72)
         }
     }
 }
@@ -313,23 +318,23 @@ private struct CarPlayPlayerView: View {
                 HStack(alignment: .center, spacing: 14) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(player.currentSong?.name ?? "未在播放")
-                            .font(.system(size: 20, weight: .bold))
+                            .font(.system(size: 18, weight: .bold))
                             .lineLimit(1)
                         if let s = player.currentSong?.singer, !s.isEmpty {
                             Text(s)
-                                .font(.system(size: 14, weight: .regular))
+                                .font(.system(size: 13, weight: .regular))
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                         }
                         if let a = player.currentSong?.albumName, !a.isEmpty, a != player.currentSong?.singer {
                             Text(a)
-                                .font(.system(size: 12, weight: .regular))
+                                .font(.system(size: 11, weight: .regular))
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                         }
                         if let line = currentLyricLine() {
                             Text(line)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(Color(.systemOrange).opacity(0.9))
                                 .lineLimit(1)
                                 .padding(.top, 2)
@@ -350,16 +355,16 @@ private struct CarPlayPlayerView: View {
 
                 // 中部控制排
                 HStack(spacing: 0) {
-                    HStack(spacing: 40) {
+                    HStack(spacing: 34) {
                         Button { player.playPrevious() } label: {
-                            Image(systemName: "backward.fill").font(.system(size: 24))
+                            Image(systemName: "backward.fill").font(.system(size: 22))
                         }
                         Button { player.togglePlayPause() } label: {
                             Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 40))
+                                .font(.system(size: 36))
                         }
                         Button { player.playNext() } label: {
-                            Image(systemName: "forward.fill").font(.system(size: 24))
+                            Image(systemName: "forward.fill").font(.system(size: 22))
                         }
                     }
                 }
@@ -375,7 +380,7 @@ private struct CarPlayPlayerView: View {
                         Spacer()
                         Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
                     }
-                    .font(.system(size: 11))
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary)
                 }
 
@@ -413,9 +418,9 @@ private struct CarPlayPlayerView: View {
         let on = player.currentSong.map { playlistStore.isLoved($0) } ?? false
         return Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 22))
+                .font(.system(size: 21))
                 .foregroundColor((love && on) ? Color(.systemRed) : .primary)
-                .frame(width: 44, height: 40)
+                .frame(width: 42, height: 38)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill((love && on) ? Color(.systemRed).opacity(0.16) : Color.clear)
