@@ -227,48 +227,66 @@ private struct CarPlayCardNavLink<Destination: View>: View {
         NavigationLink {
             destination
         } label: {
-            VStack(spacing: 5) {
+            VStack(alignment: .leading, spacing: 0) {
                 artwork
-                Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                if count > 0 {
-                    Text("\(count) 首")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.primary)
                         .lineLimit(1)
+                    if count > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text("\(count) 首")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.secondary)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity)
-            .padding(8)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(red: 0.13, green: 0.13, blue: 0.14))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.16, green: 0.16, blue: 0.19), Color(red: 0.12, green: 0.12, blue: 0.14)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
     }
 
     @ViewBuilder private var artwork: some View {
-        if coverURL.isEmpty {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(red: 0.20, green: 0.20, blue: 0.23), Color(red: 0.13, green: 0.13, blue: 0.15)],
-                        startPoint: .top, endPoint: .bottom
-                    )
+        Group {
+            if coverURL.isEmpty {
+                LinearGradient(
+                    colors: [Color(red: 0.26, green: 0.27, blue: 0.33), Color(red: 0.13, green: 0.13, blue: 0.16)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
                 )
-                .frame(height: 72)
                 .overlay(
                     Image(systemName: "music.note")
-                        .font(.system(size: 24))
-                        .foregroundColor(Color.gray.opacity(0.65))
+                        .font(.system(size: 26))
+                        .foregroundColor(Color.white.opacity(0.4))
                 )
-        } else {
-            LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 72, cornerRadius: 10)
-                .frame(height: 72)
+            } else {
+                LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 92, cornerRadius: 12)
+            }
         }
+        .frame(width: 92, height: 92)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(maxWidth: .infinity)
+        .padding(.top, 10)
     }
 }
 
