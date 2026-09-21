@@ -31,6 +31,13 @@ struct CarPlayRootView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
+                // 版本角标:用于确认 CarPlay 跑的是不是本构建(紫色横幅)
+                Text("XMusic-CarPlay v88db971-NEW")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .background(Color.purple)
                 CarPlayTabBar(selected: $selectedTab)
                 Group {
                     switch selectedTab {
