@@ -12,13 +12,12 @@ private enum Tab: String, CaseIterable, Identifiable {
 //
 // 关键点:
 // 1) CarPlay 系统把 contentSizeCategory 设为 accessibility 极大档,SwiftUI 默认
-//    .font(.system(size:)) 会随 Dynamic Type 缩放导致文字超大、超出横屏(426x240)显示不全,
-//    所以整棵树固定 .environment(\.sizeCategory, .large)。
-// 2) 播放页用 ScrollView + GeometryReader,高度不足时滚动而不被裁切。
-// 3) iOS 15 兼容:NavigationView,不用 NavigationStack;nowplaying 行避免 NavigationLink
-//    内嵌 Button(点击冲突导致空白),用 overlay 按钮 + .borderless。
-// 4) 排版参考 Apple CarPlay HIG:深色底、大行距、行首封面图;播放页为左侧大封面 +
-//    右侧歌名/歌词/进度/控制 的车机经典布局。
+//    .font(.system(size:)) 会随 Dynamic Type 缩放导致文字超大,所以整棵树固定
+//    .environment(\.sizeCategory, .large)。
+// 2) 主页(歌单/最近)改用原生 CarPlay 列表行:左侧小封面 + 右侧标题/副标题,
+//    一屏可看多行、比例协调,不再用会溢出的大卡片网格。
+// 3) 播放页重排为左大封面 + 右侧歌名/歌手/进度 + 下方控制排,封面与字号均由
+//    GeometryReader 几何尺寸等比推导,任何车机分辨率都不会超出范围。
 
 struct CarPlayRootView: View {
     @StateObject private var playlistStore = PlaylistStore.shared
@@ -31,20 +30,13 @@ struct CarPlayRootView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // 版本角标:用于确认 CarPlay 跑的是不是本构建(紫色横幅)
-                Text("XMusic-CarPlay v88db971-NEW")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                    .background(Color.purple)
                 CarPlayTabBar(selected: $selectedTab)
                 Group {
                     switch selectedTab {
                     case .playlists:
-                        playlistGrid
+                        playlistList
                     case .recent:
-                        recentGrid
+                        recentList
                     case .nowPlaying:
                         nowPlayingView
                     }
@@ -64,55 +56,59 @@ struct CarPlayRootView: View {
         }
     }
 
-    // MARK: - 2×2 大卡片网格(本地歌单)
-    private var playlistGrid: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                CarPlayCardNavLink(
-                    title: "我喜欢的音乐",
-                    count: playlistStore.songs(kind: .love, playlistID: "").count,
-                    coverURL: playlistStore.songs(kind: .love, playlistID: "").first?.imageURL ?? ""
+    // MARK: - 歌单列表(原生 CarPlay 列表行)
+    private var playlistList: some View {
+        List {
+            CarPlayNavRow(
+                title: "我喜欢的音乐",
+                subtitle: "\(playlistStore.songs(kind: .love, playlistID: "").count) 首",
+                coverURL: playlistStore.songs(kind: .love, playlistID: "").first?.imageURL ?? ""
+            ) {
+                CarPlaySongList(title: "我喜欢的音乐", songs: playlistStore.songs(kind: .love, playlistID: ""))
+            }
+            CarPlayNavRow(
+                title: "默认列表",
+                subtitle: "\(playlistStore.songs(kind: .defaultList, playlistID: "").count) 首",
+                coverURL: playlistStore.songs(kind: .defaultList, playlistID: "").first?.imageURL ?? ""
+            ) {
+                CarPlaySongList(title: "默认列表", songs: playlistStore.songs(kind: .defaultList, playlistID: ""))
+            }
+            ForEach(playlistStore.playlists, id: \.id) { pl in
+                CarPlayNavRow(
+                    title: pl.name,
+                    subtitle: "\(playlistStore.songs(kind: .user, playlistID: pl.id).count) 首",
+                    coverURL: playlistStore.songs(kind: .user, playlistID: pl.id).first?.imageURL ?? ""
                 ) {
-                    CarPlaySongList(title: "我喜欢的音乐", songs: playlistStore.songs(kind: .love, playlistID: ""))
-                }
-                CarPlayCardNavLink(
-                    title: "默认列表",
-                    count: playlistStore.songs(kind: .defaultList, playlistID: "").count,
-                    coverURL: playlistStore.songs(kind: .defaultList, playlistID: "").first?.imageURL ?? ""
-                ) {
-                    CarPlaySongList(title: "默认列表", songs: playlistStore.songs(kind: .defaultList, playlistID: ""))
-                }
-                ForEach(playlistStore.playlists, id: \.id) { pl in
-                    CarPlayCardNavLink(
-                        title: pl.name,
-                        count: playlistStore.songs(kind: .user, playlistID: pl.id).count,
-                        coverURL: playlistStore.songs(kind: .user, playlistID: pl.id).first?.imageURL ?? ""
-                    ) {
-                        CarPlaySongList(title: pl.name, songs: playlistStore.songs(kind: .user, playlistID: pl.id))
-                    }
+                    CarPlaySongList(title: pl.name, songs: playlistStore.songs(kind: .user, playlistID: pl.id))
                 }
             }
-            .padding(12)
         }
+        .listStyle(.plain)
     }
 
-    // MARK: - 最近播放网格
-    private var recentGrid: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                ForEach(recentStore.items.prefix(6), id: \.id) { item in
-                    if let song = item.song {
-                        CarPlayCardNavLink(
-                            title: song.name,
-                            count: 0,
-                            coverURL: song.imageURL
-                        ) {
-                            CarPlaySongList(title: "最近播放", songs: recentStore.items.compactMap { $0.song })
+    // MARK: - 最近播放列表
+    private var recentList: some View {
+        let songs = recentStore.items.compactMap { $0.song }
+        return Group {
+            if songs.isEmpty {
+                VStack {
+                    Spacer()
+                    Text("暂无最近播放")
+                        .font(.system(size: 16))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            } else {
+                List {
+                    ForEach(songs.indices, id: \.self) { idx in
+                        let song = songs[idx]
+                        CarPlayNavRow(title: song.name, subtitle: song.singer, coverURL: song.imageURL) {
+                            CarPlaySongList(title: "最近播放", songs: songs)
                         }
                     }
                 }
+                .listStyle(.plain)
             }
-            .padding(12)
         }
     }
 
@@ -149,7 +145,7 @@ private struct CarPlayTabBar: View {
                 } label: {
                     VStack(spacing: 2) {
                         Image(systemName: icon)
-                            .font(.system(size: 17))
+                            .font(.system(size: 16))
                         Text(tab.rawValue)
                             .font(.system(size: 12, weight: selected == tab ? .bold : .regular))
                     }
@@ -169,7 +165,7 @@ private struct CarPlayTabBar: View {
     }
 }
 
-// 列表行:行首封面(有图用真封面,无图用音符占位)+ 标题/副标题
+// 列表行:行首封面(有图用真封面,无图用音符占位)+ 标题/副标题(用于歌曲列表)
 private struct CarPlayListRow: View {
     let title: String
     let subtitle: String
@@ -217,15 +213,16 @@ private struct CarPlayListRow: View {
     }
 }
 
-private struct CarPlayCardNavLink<Destination: View>: View {
+// 主页导航行:左侧 56 小封面 + 右侧标题/副标题 + 右箭头(用于歌单/最近)
+private struct CarPlayNavRow<Destination: View>: View {
     let title: String
-    let count: Int
+    let subtitle: String
     let coverURL: String
     @ViewBuilder var destination: Destination
 
-    init(title: String, count: Int, coverURL: String = "", @ViewBuilder destination: () -> Destination) {
+    init(title: String, subtitle: String, coverURL: String = "", @ViewBuilder destination: () -> Destination) {
         self.title = title
-        self.count = count
+        self.subtitle = subtitle
         self.coverURL = coverURL
         self.destination = destination()
     }
@@ -234,69 +231,53 @@ private struct CarPlayCardNavLink<Destination: View>: View {
         NavigationLink {
             destination
         } label: {
-            VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 14) {
                 artwork
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 17, weight: .medium))
                         .foregroundColor(.primary)
                         .lineLimit(1)
-                    if count > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 9, weight: .semibold))
-                            Text("\(count) 首")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(.secondary)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.16, green: 0.16, blue: 0.19), Color(red: 0.12, green: 0.12, blue: 0.14)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-            )
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
     @ViewBuilder private var artwork: some View {
-        Group {
-            if coverURL.isEmpty {
-                LinearGradient(
-                    colors: [Color(red: 0.26, green: 0.27, blue: 0.33), Color(red: 0.13, green: 0.13, blue: 0.16)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
+        if coverURL.isEmpty {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.26, green: 0.27, blue: 0.33), Color(red: 0.13, green: 0.13, blue: 0.16)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
                 )
+                .frame(width: 56, height: 56)
                 .overlay(
                     Image(systemName: "music.note")
-                        .font(.system(size: 26))
+                        .font(.system(size: 22))
                         .foregroundColor(Color.white.opacity(0.4))
                 )
-            } else {
-                LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 92, cornerRadius: 12)
-            }
+        } else {
+            LXCachedImage(urlString: coverURL, placeholder: "music.note", size: 56, cornerRadius: 10)
         }
-        .frame(width: 92, height: 92)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .frame(maxWidth: .infinity)
-        .padding(.top, 10)
     }
 }
 
+// 歌单内歌曲列表(点击即播放)
 private struct CarPlaySongList: View {
     let title: String
     let songs: [LXSong]
@@ -317,17 +298,16 @@ private struct CarPlaySongList: View {
                 )
             }
         }
-        .listStyle(.insetGrouped)
-        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listStyle(.plain)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .environment(\.sizeCategory, .large)
     }
 }
 
-// 车机播放页(自绘,仿音流 CarPlay 模板观感):
-// 右侧封面(≤35%宽)+ 左({歌名|歌手|专辑}三行) + 居中控制排 + 全宽进度 + 底部(随机/循环/单曲/收藏/更多)。
-// 关键:整块固定为 geo 尺寸,用 clamp 封面 + Spacer 布局,保证 426×240 下不溢出、不触发 ScrollView 拉伸。
+// 车机播放页(自绘,仿音流/Apple CarPlay 原生观感):
+// 左大封面 + 右(歌名/歌手/进度) + 下方控制排(随机/循环 | 上一首/播放/下一首 | 收藏/更多)。
+// 关键:封面与字号均由 GeometryReader 几何尺寸等比推导,任何分辨率都套在框内不溢出。
 private struct CarPlayPlayerView: View {
     @StateObject private var player = PlayerManager.shared
     @StateObject private var playlistStore = PlaylistStore.shared
@@ -336,99 +316,107 @@ private struct CarPlayPlayerView: View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let cover = min(max(w * 0.30, 84), min(h * 0.52, 118)) // 右侧封面:占宽≤30%、高≤52%,顶边界留白
+            let padH: CGFloat = 16
+            let padV: CGFloat = 12
+            // 封面边长:按窗口比例推导,横向不超过 40%、纵向不超过 52%,下限 84 点
+            let cover = max(84, min(w * 0.40, h * 0.52))
+            let titleSize = max(17, cover * 0.16)
+            let subSize = max(12, cover * 0.11)
+            let ctrlSize = max(18, cover * 0.17)
+            let playSize = max(28, cover * 0.26)
 
-            VStack(spacing: 8) {
-                // 上行:左侧信息 + 右侧封面
-                HStack(alignment: .center, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(player.currentSong?.name ?? "未在播放")
-                            .font(.system(size: 18, weight: .bold))
-                            .lineLimit(1)
-                        if let s = player.currentSong?.singer, !s.isEmpty {
-                            Text(s)
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        if let a = player.currentSong?.albumName, !a.isEmpty, a != player.currentSong?.singer {
-                            Text(a)
-                                .font(.system(size: 11, weight: .regular))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        if let line = currentLyricLine() {
-                            Text(line)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color(.systemOrange).opacity(0.9))
-                                .lineLimit(1)
-                                .padding(.top, 2)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .frame(maxWidth: w * 0.55, minHeight: 0, alignment: .leading)
-
-                    Spacer(minLength: 0)
-
+            VStack(spacing: 10) {
+                HStack(alignment: .center, spacing: 18) {
+                    // 左:大封面
                     LXCachedImage(
                         urlString: player.currentSong?.imageURL ?? "",
                         placeholder: "music.note",
                         size: cover,
                         cornerRadius: 12
                     )
+                    .frame(width: cover, height: cover)
+
+                    // 右:歌名/歌手/专辑/进度
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(player.currentSong?.name ?? "未在播放")
+                            .font(.system(size: titleSize, weight: .bold))
+                            .lineLimit(1)
+                        if let s = player.currentSong?.singer, !s.isEmpty {
+                            Text(s)
+                                .font(.system(size: subSize, weight: .regular))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        if let a = player.currentSong?.albumName, !a.isEmpty, a != player.currentSong?.singer {
+                            Text(a)
+                                .font(.system(size: subSize * 0.9, weight: .regular))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        if let line = currentLyricLine() {
+                            Text(line)
+                                .font(.system(size: subSize * 0.9, weight: .medium))
+                                .foregroundColor(Color(.systemOrange).opacity(0.85))
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        VStack(spacing: 3) {
+                            ProgressView(value: player.currentTime, total: max(player.duration, 1))
+                                .tint(Color(.systemOrange))
+                            HStack {
+                                Text(timeStr(player.currentTime))
+                                Spacer()
+                                Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
+                            }
+                            .font(.system(size: subSize * 0.8))
+                            .foregroundColor(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // 中部控制排
+                Spacer(minLength: 0)
+
+                // 下方控制排
                 HStack(spacing: 0) {
-                    HStack(spacing: 34) {
+                    HStack(spacing: 14) {
+                        actionButton("shuffle", love: false) { }
+                        actionButton("repeat", love: false) { }
+                    }
+                    Spacer(minLength: 0)
+                    HStack(spacing: 24) {
                         Button { player.playPrevious() } label: {
-                            Image(systemName: "backward.fill").font(.system(size: 22))
+                            Image(systemName: "backward.fill")
+                                .font(.system(size: ctrlSize))
                         }
                         Button { player.togglePlayPause() } label: {
                             Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 36))
+                                .font(.system(size: playSize))
                         }
                         Button { player.playNext() } label: {
-                            Image(systemName: "forward.fill").font(.system(size: 22))
+                            Image(systemName: "forward.fill")
+                                .font(.system(size: ctrlSize))
                         }
                     }
+                    Spacer(minLength: 0)
+                    HStack(spacing: 14) {
+                        actionButton(player.currentSong.map { playlistStore.isLoved($0) } ?? false
+                            ? "suit.heart.fill" : "suit.heart", love: true) {
+                            guard let song = player.currentSong else { return }
+                            if playlistStore.isLoved(song) {
+                                Task { try? await playlistStore.removeSongFromLove(song) }
+                            } else {
+                                Task { try? await playlistStore.addSongToLove(song) }
+                                HapticManager.shared.notification(type: .success)
+                            }
+                        }
+                        actionButton("ellipsis.circle", love: false) { }
+                    }
                 }
-                .frame(maxWidth: .infinity)
                 .buttonStyle(.borderless)
-
-                // 进度条 + 时间
-                VStack(spacing: 3) {
-                    ProgressView(value: player.currentTime, total: max(player.duration, 1))
-                        .tint(Color(.systemOrange))
-                    HStack {
-                        Text(timeStr(player.currentTime))
-                        Spacer()
-                        Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
-                    }
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                }
-
-                // 底部功能栏
-                HStack {
-                    actionButton("shuffle", love: false) { }
-                    actionButton("repeat", love: false) { }
-                    Spacer()
-                    actionButton(player.currentSong.map { playlistStore.isLoved($0) } ?? false
-                        ? "suit.heart.fill" : "suit.heart", love: true) {
-                        guard let song = player.currentSong else { return }
-                        if playlistStore.isLoved(song) {
-                            Task { try? await playlistStore.removeSongFromLove(song) }
-                        } else {
-                            Task { try? await playlistStore.addSongToLove(song) }
-                            HapticManager.shared.notification(type: .success)
-                        }
-                    }
-                }
-                .padding(.horizontal, 4)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, padH)
+            .padding(.vertical, padV)
             .frame(width: w, height: h, alignment: .center)
         }
         .navigationTitle("正在播放")
@@ -443,9 +431,9 @@ private struct CarPlayPlayerView: View {
         let on = player.currentSong.map { playlistStore.isLoved($0) } ?? false
         return Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 21))
+                .font(.system(size: 19))
                 .foregroundColor((love && on) ? Color(.systemRed) : .primary)
-                .frame(width: 42, height: 38)
+                .frame(width: 38, height: 34)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill((love && on) ? Color(.systemRed).opacity(0.16) : Color.clear)
