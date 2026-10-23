@@ -156,6 +156,33 @@ struct SettingsView: View {
                 TextField("播放器密码 (Web播放器)", text: $playerPassword)
                     .autocapitalization(.none)
             }
+            Section(header: Text("说明")) {
+                Text("密码：账号登录密码，用于登录换取 token。\n前端密码：管理权限，保存歌单/管理音源需要它。\n播放器密码：仅网页播放器使用，App 可不填。")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+            Section {
+                Button {
+                    Task { await testConnection() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isTesting {
+                            ProgressView()
+                            Text("连接中…")
+                        } else {
+                            Text("保存并登录").fontWeight(.semibold)
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(isTesting)
+                if let msg = statusMessage {
+                    Text(msg)
+                        .font(.footnote)
+                        .foregroundColor(isError ? .red : .green)
+                }
+            }
         }
         .navigationTitle("服务器")
     }
@@ -404,6 +431,9 @@ struct SettingsView: View {
                     ForEach(qualities, id: \.self) { Text($0) }
                 }
                 Toggle("源失效自动切换", isOn: $autoSwitch)
+            }
+            Section {
+                Button("保存") { save() }
             }
         }
         .navigationTitle("播放")
