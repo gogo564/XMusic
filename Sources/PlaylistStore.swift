@@ -330,6 +330,17 @@ final class PlaylistStore: ObservableObject {
         try await push(raw)
     }
 
+    /// 判断一份原始列表数据是否"完全为空"（默认列表/收藏/临时列表/所有歌单都没有歌）。
+    /// 用于拦截会把服务器数据清空的空推送。
+    private func isRawFullyEmpty(_ raw: [String: Any]) -> Bool {
+        let love = raw["loveList"] as? [[String: Any]] ?? []
+        let def = raw["defaultList"] as? [[String: Any]] ?? []
+        let temp = raw["tempList"] as? [[String: Any]] ?? []
+        if !love.isEmpty || !def.isEmpty || !temp.isEmpty { return false }
+        let userLists = raw["userList"] as? [[String: Any]] ?? []
+        return userLists.allSatisfy { (($0["list"] as? [[String: Any]]) ?? []).isEmpty }
+    }
+
     /// Fetch the latest server data before mutating, so edits never overwrite
     /// changes made elsewhere (CarPlay / web / other devices).
     private func freshRaw() async throws -> [String: Any] {
@@ -371,6 +382,13 @@ final class PlaylistStore: ObservableObject {
     private func flushPush() async {
         guard let raw = pendingRaw else { return }
         pendingRaw = nil
+        // 空列表保护：本地数据完全为空时绝不推送，否则会把服务器上的收藏/歌单清空
+        // （表现就是"收藏又不见了"）。跳过推送后立即从服务器拉回真实数据修正本地视图。
+        if isRawFullyEmpty(raw) {
+            Log.write("⚠️ [Playlist] 本地列表为空，已跳过推送（防止清空服务器数据），改为从服务器拉取")
+            await refresh()
+            return
+        }
         isPushing = true
         let updated = LXListData(raw)
         listData = updated
