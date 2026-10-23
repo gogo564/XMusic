@@ -90,10 +90,10 @@ struct SettingsView: View {
         }
         .listStyle(.insetGrouped)
         .sheet(isPresented: $showQRLogin) {
-            SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/tx")!)
+            SafariView(url: URL(string: AppConfigStore.shared.config.loginBaseURL + "/login/tx")!)
         }
         .sheet(isPresented: $showWyQRLogin) {
-            SafariView(url: URL(string: "http://gogo564.x3322.net:8081/login/wy")!)
+            SafariView(url: URL(string: AppConfigStore.shared.config.loginBaseURL + "/login/wy")!)
         }
         .navigationTitle("设置")
         .safeAreaInset(edge: .bottom) {
@@ -143,7 +143,7 @@ struct SettingsView: View {
     private func serverSettings() -> some View {
         Form {
             Section(header: Text("服务器")) {
-                TextField("地址（如 http://gogo564.x3322.net:9527）", text: $baseURL)
+                TextField("地址（如 http://your-server:9527）", text: $baseURL)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
                 TextField("用户名", text: $username)
@@ -191,7 +191,7 @@ struct SettingsView: View {
     private func sodaSettings() -> some View {
         Form {
             Section(header: Text("汽水音乐服务")) {
-                TextField("汽水服务地址（如 http://gogo564.x3322.net:3310）", text: $sodaBaseURL)
+                TextField("汽水服务地址（如 http://your-server:3310）", text: $sodaBaseURL)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
                 Text("清空则隐藏汽水源；推荐/电台/播放均通过该服务。")
@@ -493,8 +493,8 @@ struct SettingsView: View {
     private func fetchTxExpiry() async {
         txExpiryLoading = true
         defer { txExpiryLoading = false }
-        let host = "http://gogo564.x3322.net:8081"
-        guard let url = URL(string: host + "/login/tx/expiry") else { return }
+        let host = AppConfigStore.shared.config.loginBaseURL
+        guard !host.isEmpty, let url = URL(string: host + "/login/tx/expiry") else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
