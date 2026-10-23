@@ -4,7 +4,7 @@ import Security
 struct ServerConfig: Codable, Equatable {
     var baseURL: String = "http://gogo564.x3322.net:9527"
     var username: String = "admin"
-    var password: String = "password"
+    var password: String = "3302872"
     var frontendPassword: String = "zhu3302872"
     var playerPassword: String = "3302872"
     var defaultQuality: String = "128k"
