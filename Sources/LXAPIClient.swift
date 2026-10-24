@@ -110,7 +110,15 @@ final class LXAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
         try ensureOK(response)
-        guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+        // 新版 LX 服务端把搜索结果统一成 { list: [...] }，旧版直接返回数组，两种都兼容。
+        let obj = try JSONSerialization.jsonObject(with: data)
+        let arr: [[String: Any]]
+        if let a = obj as? [[String: Any]] {
+            arr = a
+        } else if let dict = obj as? [String: Any],
+                  let a = dict["list"] as? [[String: Any]] {
+            arr = a
+        } else {
             throw LXAPIError.decoding("搜索")
         }
         return arr.map(LXSong.init)
@@ -523,7 +531,12 @@ final class LXAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
         try ensureOK(response)
-        return (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+        // 兼容新版 { list: [...] } 与旧版裸数组两种响应。
+        let obj = try? JSONSerialization.jsonObject(with: data)
+        if let arr = obj as? [[String: Any]] { return arr }
+        if let dict = obj as? [String: Any],
+           let arr = dict["list"] as? [[String: Any]] { return arr }
+        return []
     }
 
     /// type=playlist 搜索歌单（返回 list 数组）
