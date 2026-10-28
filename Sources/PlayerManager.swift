@@ -80,6 +80,11 @@ final class PlayerManager: ObservableObject {
     private var nextItemKey = ""
     /// 当前已加载歌词归属的歌曲 id：支持"歌词与解析并行拉取"+ 防止跨歌覆盖
     private var loadedLyricSongID: String?
+    /// 最近一次被请求解析/播放的歌曲 id。resolveAndPlay 一进来就更新，早于 currentSong
+    /// （currentSong 只有真正起播 startPlayback 才更新）。歌词归属守卫据此容忍
+    /// 「歌词先于地址解析返回」的竞态——首播/冷启动时 currentSong 还是上一首，
+    /// 若只用 currentSong 判断会误丢弃第一首的合法歌词。
+    private var resolvingSongID: String?
     /// 最近一次实际起播的时间戳。用于过滤 AVPlayer 换 item 时滞留投递的
     /// AVPlayerItemDidPlayToEndTime 通知：刚起播（<1s）就收到结束通知，几乎都是
     /// 缓存文件 seek 起始时间异常或旧 item 残留通知，不应触发自动切歌。
@@ -574,6 +579,8 @@ final class PlayerManager: ObservableObject {
 
     private func resolveAndPlay(_ song: LXSong?) {
         guard let song = song else { return }
+        // 记录本次真正要播放的歌曲 id，供歌词归属守卫判断（竞态修复见 loadLyric）
+        resolvingSongID = song.id
         // 歌词与地址解析并行拉取：不用等起播成功才出现歌词
         Task { await self.loadLyric(for: song) }
         // 注意：不在解析前切换 currentSong。只有真正起播（startPlayback）成功才切，
@@ -828,8 +835,12 @@ final class PlayerManager: ObservableObject {
     private func loadLyric(for song: LXSong) async {
         let fetched: (raw: String, parsed: LRC)? = try? await fetchLyricData(for: song)
         await MainActor.run {
-            // 归属守卫：快速切歌时，迟到的歌词不得覆盖新歌的歌词
-            guard self.currentSong?.id == song.id || self.currentSong == nil else { return }
+            // 归属守卫：快速切歌时，迟到的歌词不得覆盖新歌的歌词。
+            // 但首播/冷启动时歌词常先于地址解析返回（currentSong 尚未更新为这首歌），
+            // 此时应认 resolvingSongID（这首歌正在被解析播放），否则第一首会被误丢弃。
+            guard self.currentSong?.id == song.id
+                    || self.resolvingSongID == song.id
+                    || self.currentSong == nil else { return }
             if let f = fetched {
                 self.lyrics = f.raw
                 self.lrc = f.parsed
