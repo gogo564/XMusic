@@ -71,6 +71,10 @@ final class PlayerManager: ObservableObject {
     private var shuffledIndices: [Int] = []
     private var prefetchTask: Task<Void, Never>?
     private var prefetchedURLs: [String: String] = [:]
+    /// 汽水流式 loader 的 delegate 队列（AVAssetResourceLoader 要求建 item 前挂好）
+    private let sodaLoaderQueue = DispatchQueue(label: "soda.resourceLoader")
+    /// 当前 item 是否为 sodastream:// 流式地址：失败时据此回落「整首下载+解密」
+    private var currentIsSodaStream = false
 
     /// 连续解析失败计数：>0 时解析失败自动跳下一首；跑满一圈（>= 队列长度）才停并弹错，
     /// 避免「播放全部」被一首失效/会员曲卡死，也避免整列失败时死循环。
@@ -529,18 +533,16 @@ final class PlayerManager: ObservableObject {
                 let delivered = stream.quality.isEmpty ? mapped : stream.quality
                 let display = SodaAPIClient.qualityDisplayName(delivered)
                 if stream.hexKey.count == 32 {
-                    // 加密流：只会下载+解密落盘成本地 m4a，AVPlayer 从本地文件播放。
-                    // 绝不回退 sodastream:// custom loader——实测该 loader 在 iOS AVPlayer
-                    // 上 item failed 概率 100%（历史日志 390/390），正是"头1秒重复"的根源。
-                    for attempt in 0..<2 {
-                        if let fileURL = try? await MusicCacheManager.shared.ensureSodaFile(trackID: trackID, id: song.id, quality: quality) {
-                            // 落盘后后台把封面+歌词一起打包进 meta/，不阻塞起播
-                            bundleSodaResources(song, fileURL: fileURL)
-                            return (fileURL.absoluteString, display, "汽水")
-                        }
-                        if attempt == 0 { try? await Task.sleep(nanoseconds: 700_000_000) }
-                    }
-                    throw SodaError.cacheFailed
+                    // 加密流走 sodastream:// 流式播放：loader 从 CDN 顺序下载加密字节，
+                    // moov 一到位就构建 cleanMoov 交给 AVPlayer，mdat 逐样本解密，
+                    // 实现「边下边播」（约 2 秒起播），不再整首下载完才播。
+                    // 下载完成后 loader 会把整首解密结果写入缓存（ck 参数）。
+                    return (SodaStreamLoader.customURL(
+                        trackID: trackID,
+                        quality: quality,
+                        cacheKey: song.id + "_" + quality,
+                        nonce: UUID().uuidString
+                    ).absoluteString, display, "汽水")
                 }
                 guard let url = URL(string: stream.mainURL) else {
                     throw SodaError.upstream
@@ -667,6 +669,24 @@ final class PlayerManager: ObservableObject {
         resolveAndPlay(currentQueueSong)
     }
 
+    /// 流式（sodastream://）被判失败时的兜底：整首下载 + 解密落盘，再从本地文件播放。
+    /// 只用于个别 CDN 布局异常（moov 不在前部）的曲目，正常曲目走流式起播。
+    private func fallbackToDownloadedFile(_ song: LXSong, quality: String) {
+        isResolving = true
+        let trackID = song.songmid ?? ""
+        Task {
+            if let localURL = try? await MusicCacheManager.shared.ensureSodaFile(trackID: trackID, id: song.id, quality: quality) {
+                await MainActor.run {
+                    self.startPlayback(url: localURL, song: song, sourceName: "汽水", qualityName: quality, playbackOrigin: "下载")
+                }
+            } else {
+                await MainActor.run {
+                    self.handleResolveFailure("播放地址无效")
+                }
+            }
+        }
+    }
+
     // MARK: - 播放引擎助手（统一走 AVPlayer）
 
     private func enginePlay() {
@@ -683,7 +703,16 @@ final class PlayerManager: ObservableObject {
     }
 
     private func makeItem(for url: URL) -> AVPlayerItem {
-        let item = AVPlayerItem(url: url)
+        let item: AVPlayerItem
+        if url.scheme == SodaStreamLoader.scheme {
+            // 自定义 scheme 的字节必须由 AVAssetResourceLoader delegate 提供，
+            // 且 delegate 要在构造 AVPlayerItem 之前挂到 asset 上。
+            let asset = AVURLAsset(url: url)
+            asset.resourceLoader.setDelegate(SodaStreamLoader.shared, queue: sodaLoaderQueue)
+            item = AVPlayerItem(asset: asset)
+        } else {
+            item = AVPlayerItem(url: url)
+        }
         item.preferredForwardBufferDuration = 8
         item.preferredPeakBitRate = 0
         return item
@@ -692,6 +721,7 @@ final class PlayerManager: ObservableObject {
     private func startPlayback(url: URL, song: LXSong, sourceName: String, qualityName: String, playbackOrigin: String = "") {
         Log.write("▶️ [Player] startPlayback song=\(song.name) scheme=\(url.scheme ?? "") origin=\(playbackOrigin) url=\(url.absoluteString.prefix(70))")
         resolveFailStreak = 0
+        currentIsSodaStream = url.scheme == SodaStreamLoader.scheme
         // 起播成功才切换当前曲目：封面/歌词/进度与声音同步更新
         currentSong = song
         // 歌词已在并行预取时到位则保留；否则清掉上一首的残留
@@ -808,9 +838,18 @@ final class PlayerManager: ObservableObject {
                         guard let self,
                               self.player.currentItem === pendingItem,
                               pendingItem.status == .failed else { return } // 已自愈为 ready → 忽略
+                        let detail = Self.avErrorDetail(err)
+                        Log.write("❌ [Player] item failed 确认（非瞬态） \(detail) | song=\(self.currentSong?.name ?? "")")
+                        if self.currentIsSodaStream, let song = self.currentSong {
+                            // 流式解密在个别曲目上被 AVPlayer 判失败：回落「整首下载+解密落盘」再播
+                            self.currentIsSodaStream = false
+                            self.isPlaying = false
+                            self.playbackError = nil
+                            self.fallbackToDownloadedFile(song, quality: self.quality)
+                            return
+                        }
                         self.playbackError = err?.localizedDescription ?? "播放失败"
                         self.isPlaying = false
-                        Log.write("❌ [Player] item failed 确认（非瞬态） \(Self.avErrorDetail(err)) | song=\(self.currentSong?.name ?? "")")
                     }
                 case .readyToPlay:
                     guard item === self.player.currentItem else { return }
