@@ -15,12 +15,8 @@ struct SodaAPIClient {
     private var baseURL: String {
         var url = AppConfigStore.shared.config.sodaBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         while url.hasSuffix("/") { url.removeLast() }
-        // 汽水服务已并入主服务：留空或仍指向旧 3310 端口时，自动用主服务器 /soda
-        if url.isEmpty || url.hasSuffix(":3310") {
-            let server = AppConfigStore.shared.config.normalizedBaseURL
-            guard !server.isEmpty else { return "" }
-            url = server + "/soda"
-        }
+        // 汽水服务独立部署（qishui-api，默认 3310 端口），直接使用所填地址
+        guard !url.isEmpty else { return "" }
         if !url.hasPrefix("http://") && !url.hasPrefix("https://") {
             url = "http://" + url
         }

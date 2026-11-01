@@ -44,7 +44,7 @@ struct SettingsView: View {
             // 目录导航区
             Section {
                 NavigationLink(destination: serverSettings()) { navRow(icon: "server.rack", title: "服务器", subtitle: baseURL.isEmpty ? "未配置" : baseURL) }
-                NavigationLink(destination: sodaSettings()) { navRow(icon: "speaker.wave.2", title: "汽水音乐服务", subtitle: sodaBaseURL.isEmpty ? "自动（主服务器 /soda）" : "推荐/歌单/播放") }
+                NavigationLink(destination: sodaSettings()) { navRow(icon: "speaker.wave.2", title: "汽水音乐服务", subtitle: sodaBaseURL.isEmpty ? "未配置" : "推荐/歌单/播放") }
             }
             Section {
                 NavigationLink(destination: accountSettings()) { navRow(icon: "person.crop.circle", title: "账号登录", subtitle: "QQ / 网易云") }
@@ -187,10 +187,10 @@ struct SettingsView: View {
     private func sodaSettings() -> some View {
         Form {
             Section(header: Text("汽水音乐服务")) {
-                TextField("留空自动使用主服务器 /soda（如 http://your-server:9527/soda）", text: $sodaBaseURL)
+                TextField("汽水服务地址（如 http://your-server:3310）", text: $sodaBaseURL)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
-                Text("推荐/电台/播放均通过该服务；留空时走主服务器的 /soda 路径，无需单独部署。")
+                Text("推荐/电台/播放均通过该服务（qishui-api，独立端口 3310，与主服务器分离）。")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                 if SodaAPIClient.shared.isConfigured {
@@ -528,9 +528,9 @@ struct SettingsView: View {
     private func updateSodaAuth(role: String) {
         guard SodaAPIClient.shared.isConfigured else {
             if role == "play" {
-                sodaPlayMessage = "请先配置服务器地址"
+                sodaPlayMessage = "请先配置汽水服务地址（如 http://your-server:3310）"
             } else {
-                sodaPlaylistMessage = "请先配置服务器地址"
+                sodaPlaylistMessage = "请先配置汽水服务地址（如 http://your-server:3310）"
             }
             return
         }
