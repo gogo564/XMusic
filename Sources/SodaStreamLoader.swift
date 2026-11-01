@@ -13,6 +13,24 @@ final class SodaStreamLoader: NSObject, AVAssetResourceLoaderDelegate {
     private let lock = NSLock()
     private let maxActiveSessions = 8
 
+    /// 播放侧刚解析出来的流信息（main_url + hex_key）先寄存于此，
+    /// 会话启动时直接取用，省掉一次重复的 /song/stream 往返（约 400ms 起播延迟）。
+    private static let primeLock = NSLock()
+    private static var primed: [String: (mainURL: String, hexKey: String)] = [:]
+
+    static func prime(trackID: String, quality: String, mainURL: String, hexKey: String) {
+        guard hexKey.count == 32, !mainURL.isEmpty else { return }
+        primeLock.lock()
+        primed[trackID + "_" + quality] = (mainURL, hexKey)
+        primeLock.unlock()
+    }
+
+    static func takePrimed(trackID: String, quality: String) -> (mainURL: String, hexKey: String)? {
+        primeLock.lock()
+        defer { primeLock.unlock() }
+        return primed.removeValue(forKey: trackID + "_" + quality)
+    }
+
     private override init() {}
 
     static func customURL(trackID: String, quality: String, cacheKey: String? = nil, nonce: String? = nil) -> URL {
@@ -191,8 +209,15 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
 
     private func begin() async {
         do {
-            let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
-            guard let url = URL(string: stream.mainURL), stream.hexKey.count == 32 else {
+            // 播放侧已解析过的流信息优先：省掉一次重复往返（直接影响起播时间）
+            let info: (mainURL: String, hexKey: String)
+            if let cached = SodaStreamLoader.takePrimed(trackID: trackID, quality: quality) {
+                info = cached
+            } else {
+                let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality)
+                info = (stream.mainURL, stream.hexKey)
+            }
+            guard let url = URL(string: info.mainURL), info.hexKey.count == 32 else {
                 failAll(error: NSError(domain: "SodaStream", code: -3,
                     userInfo: [NSLocalizedDescriptionKey: "流式信息缺失"]))
                 return
@@ -202,7 +227,7 @@ final class SodaStreamSession: NSObject, URLSessionDataDelegate {
             req.timeoutInterval = 60
             let task = session.dataTask(with: req)
             queue.sync {
-                self.keyHex = stream.hexKey
+                self.keyHex = info.hexKey
                 self.downloadSession = session
                 self.downloadTask = task
             }

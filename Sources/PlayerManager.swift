@@ -537,6 +537,8 @@ final class PlayerManager: ObservableObject {
                     // moov 一到位就构建 cleanMoov 交给 AVPlayer，mdat 逐样本解密，
                     // 实现「边下边播」（约 2 秒起播），不再整首下载完才播。
                     // 下载完成后 loader 会把整首解密结果写入缓存（ck 参数）。
+                    SodaStreamLoader.prime(trackID: trackID, quality: quality,
+                                           mainURL: stream.mainURL, hexKey: stream.hexKey)
                     return (SodaStreamLoader.customURL(
                         trackID: trackID,
                         quality: quality,
@@ -770,38 +772,47 @@ final class PlayerManager: ObservableObject {
         saveRecent(song: song)
     }
 
-    /// 预解析+预缓存队列下一首：当前曲开始播放后，后台解析下一首的播放地址并下载到缓存，
-    /// 使 4G 弱网下切歌时命中缓存秒开（跳过服务器解析 + 首包缓冲）。
-    /// 同时预建好 AVPlayerItem，让切歌时直接替换、无需重新构建（汽水 loader 也提前挂载）。
+    /// 预热队列：当前曲起播后，后台把后面 2 首**整首下载 + 解密落盘**（不是流式解析），
+    /// 切歌时直接命中缓存 → 0 等待起播。冷启动第一首走流式（moov 到位即出声），
+    /// 播完也会把整首写进缓存，因此「只有第一首慢、后面都秒开」。
     private func prefetchNext() {
         prefetchTask?.cancel()
         guard queue.count > 1, currentIndex >= 0 else { return }
-        let nextIndex = (currentIndex + 1) % queue.count
-        if nextIndex == currentIndex { return }
-        guard queue.indices.contains(nextIndex) else { return }
-        let next = queue[nextIndex]
         let prefetchQuality = self.quality
-        if MusicCacheManager.shared.isCached(id: next.id, quality: prefetchQuality) { return }
+        var targets: [(offset: Int, song: LXSong)] = []
+        let depth = min(2, queue.count - 1)
+        if depth >= 1 {
+            for offset in 1...depth {
+                let idx = (currentIndex + offset) % queue.count
+                if idx == currentIndex || !queue.indices.contains(idx) { continue }
+                targets.append((offset: offset, song: queue[idx]))
+            }
+        }
+        guard !targets.isEmpty else { return }
         prefetchTask = Task { [weak self] in
             guard let self = self else { return }
-            do {
-                let result = try await playbackInfo(for: next)
-                guard !Task.isCancelled else { return }
-                guard let u = URL(string: result.url) else { return }
-                self.prefetchedURLs[next.id + "_" + prefetchQuality] = result.url
-                // file:// 已由 ensureSodaFile 落盘，无需再对本地文件发起网络缓存
-                if !u.isFileURL {
-                    MusicCacheManager.shared.startCaching(url: result.url, quality: prefetchQuality, id: next.id)
+            for target in targets {
+                if Task.isCancelled { return }
+                let song = target.song
+                if MusicCacheManager.shared.isCached(id: song.id, quality: prefetchQuality) { continue }
+                var readyURL: URL?
+                if self.isSoda(song) {
+                    // 汽水加密曲：整首下载 + 客户端解密落盘，下一首起播命中缓存
+                    readyURL = try? await MusicCacheManager.shared.ensureSodaFile(
+                        trackID: song.songmid ?? "", id: song.id, quality: prefetchQuality
+                    )
+                } else if let result = try? await self.playbackInfo(for: song), let u = URL(string: result.url) {
+                    MusicCacheManager.shared.startCaching(url: result.url, quality: prefetchQuality, id: song.id)
+                    readyURL = u
                 }
-                // 预建 item（后台线程构建 asset 无碍，loader 挂载在 AVURLAsset 上）
-                let prebuilt = await MainActor.run { self.makeItem(for: u) }
-                guard !Task.isCancelled else { return }
-                self.nextItem = prebuilt
-                self.nextItemKey = next.id + "_" + prefetchQuality + "_" + (u.scheme ?? "")
-                // 主动触发资源预加载，让 readyToPlay 更快
-                prebuilt.preferredForwardBufferDuration = 8
-            } catch {
-                // 预取失败不影响当前播放，静默忽略
+                guard !Task.isCancelled, let url = readyURL else { continue }
+                // 只有「下一首」预建 AVPlayerItem；再往后只做缓存预热
+                guard target.offset == 1 else { continue }
+                await MainActor.run {
+                    self.prefetchedURLs[song.id + "_" + prefetchQuality] = url.absoluteString
+                    self.nextItem = self.makeItem(for: url)
+                    self.nextItemKey = song.id + "_" + prefetchQuality + "_" + (url.scheme ?? "")
+                }
             }
         }
     }
