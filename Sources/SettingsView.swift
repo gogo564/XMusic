@@ -7,7 +7,6 @@ struct SettingsView: View {
     @ObservedObject private var theme = ThemeManager.shared
 
     @State private var showQRLogin = false
-    @State private var showWyQRLogin = false
     @State private var txExpiryLoading = false
     @State private var txExpiryMessage = ""
     @State private var txVipType = ""
@@ -45,7 +44,7 @@ struct SettingsView: View {
             // 目录导航区
             Section {
                 NavigationLink(destination: serverSettings()) { navRow(icon: "server.rack", title: "服务器", subtitle: baseURL.isEmpty ? "未配置" : baseURL) }
-                NavigationLink(destination: sodaSettings()) { navRow(icon: "speaker.wave.2", title: "汽水音乐服务", subtitle: sodaBaseURL.isEmpty ? "未配置" : "推荐/歌单/播放") }
+                NavigationLink(destination: sodaSettings()) { navRow(icon: "speaker.wave.2", title: "汽水音乐服务", subtitle: sodaBaseURL.isEmpty ? "自动（主服务器 /soda）" : "推荐/歌单/播放") }
             }
             Section {
                 NavigationLink(destination: accountSettings()) { navRow(icon: "person.crop.circle", title: "账号登录", subtitle: "QQ / 网易云") }
@@ -90,10 +89,7 @@ struct SettingsView: View {
         }
         .listStyle(.insetGrouped)
         .sheet(isPresented: $showQRLogin) {
-            SafariView(url: URL(string: AppConfigStore.shared.config.loginBaseURL + "/login/tx")!)
-        }
-        .sheet(isPresented: $showWyQRLogin) {
-            SafariView(url: URL(string: AppConfigStore.shared.config.loginBaseURL + "/login/wy")!)
+            SafariView(url: URL(string: AppConfigStore.shared.config.loginBaseURL + "/login/account")!)
         }
         .navigationTitle("设置")
         .safeAreaInset(edge: .bottom) {
@@ -191,13 +187,13 @@ struct SettingsView: View {
     private func sodaSettings() -> some View {
         Form {
             Section(header: Text("汽水音乐服务")) {
-                TextField("汽水服务地址（如 http://your-server:3310）", text: $sodaBaseURL)
+                TextField("留空自动使用主服务器 /soda（如 http://your-server:9527/soda）", text: $sodaBaseURL)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
-                Text("清空则隐藏汽水源；推荐/电台/播放均通过该服务。")
+                Text("推荐/电台/播放均通过该服务；留空时走主服务器的 /soda 路径，无需单独部署。")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
-                if !sodaBaseURL.isEmpty {
+                if SodaAPIClient.shared.isConfigured {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("播放账号（会员）")
@@ -290,21 +286,23 @@ struct SettingsView: View {
     // MARK: - 账号登录子页
     private func accountSettings() -> some View {
         Form {
-            Section(header: Text("QQ 音乐账号")) {
+            Section(header: Text("扫码登录")) {
                 Button {
                     showQRLogin = true
                 } label: {
                     HStack {
-                        Label("扫码更换 QQ 音乐账号", systemImage: "qrcode")
+                        Label("QQ / 网易云 扫码登录", systemImage: "qrcode")
                         Spacer()
                         Image(systemName: "chevron.right")
                             .font(.footnote)
                             .foregroundColor(.secondary)
                     }
                 }
-                Text("用手机 QQ 扫描二维码登录后立即生效，原账号将被替换。")
+                Text("同一个页面可切换 QQ 音乐 / 网易云音乐，用对应 App 扫码后立即生效，原账号将被替换。")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
+            }
+            Section(header: Text("QQ 音乐账号")) {
 
                 VStack(alignment: .leading, spacing: 6) {
                     if txExpiryLoading {
@@ -356,18 +354,7 @@ struct SettingsView: View {
             }
             .task { await fetchTxExpiry() }
             Section(header: Text("网易云音乐账号")) {
-                Button {
-                    showWyQRLogin = true
-                } label: {
-                    HStack {
-                        Label("扫码更换网易云账号", systemImage: "qrcode")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                Text("用网易云音乐 App 扫描二维码登录后立即生效，原账号将被替换（VIP 歌曲可正常播放）。")
+                Text("在扫码页切换到「网易云音乐」标签，用网易云音乐 App 扫码后立即生效（VIP 歌曲可正常播放）。")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
             }
@@ -513,7 +500,7 @@ struct SettingsView: View {
     }
 
     private func checkSodaAuth() {
-        guard !sodaBaseURL.isEmpty else { return }
+        guard SodaAPIClient.shared.isConfigured else { return }
         sodaAuthLoading = true
         sodaAuthStatus = nil
         Task {
@@ -527,7 +514,7 @@ struct SettingsView: View {
     }
 
     private func checkSodaPlaylistAuth() {
-        guard !sodaBaseURL.isEmpty else { return }
+        guard SodaAPIClient.shared.isConfigured else { return }
         sodaPlaylistAuthStatus = nil
         Task {
             let result = (try? await SodaAPIClient.shared.authStatus(role: "playlist"))
@@ -539,11 +526,11 @@ struct SettingsView: View {
     }
 
     private func updateSodaAuth(role: String) {
-        guard !sodaBaseURL.isEmpty else {
+        guard SodaAPIClient.shared.isConfigured else {
             if role == "play" {
-                sodaPlayMessage = "请先填写汽水服务地址"
+                sodaPlayMessage = "请先配置服务器地址"
             } else {
-                sodaPlaylistMessage = "请先填写汽水服务地址"
+                sodaPlaylistMessage = "请先配置服务器地址"
             }
             return
         }

@@ -7,14 +7,20 @@ struct SodaAPIClient {
 
     private init() {}
 
-    /// 汽水服务是否已配置（baseURL 非空）
+    /// 汽水服务是否可用：留空时自动走主服务器的 /soda 路径
     var isConfigured: Bool {
-        !AppConfigStore.shared.config.sodaBaseURL.isEmpty
+        !baseURL.isEmpty
     }
 
     private var baseURL: String {
         var url = AppConfigStore.shared.config.sodaBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         while url.hasSuffix("/") { url.removeLast() }
+        // 汽水服务已并入主服务：留空或仍指向旧 3310 端口时，自动用主服务器 /soda
+        if url.isEmpty || url.hasSuffix(":3310") {
+            let server = AppConfigStore.shared.config.normalizedBaseURL
+            guard !server.isEmpty else { return "" }
+            url = server + "/soda"
+        }
         if !url.hasPrefix("http://") && !url.hasPrefix("https://") {
             url = "http://" + url
         }

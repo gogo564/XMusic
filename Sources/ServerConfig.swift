@@ -22,11 +22,10 @@ struct ServerConfig: Codable, Equatable {
         return url
     }
 
-    // 账号登录服务（lx-api-server）地址：默认与主服务器同主机、8081 端口
+    // 账号登录服务地址：与主服务器同源
+    // （lx-sync-server 已把 /login/tx、/login/wy 代理到 lx-api-server，无需再映射 8081）
     var loginBaseURL: String {
-        guard let u = URL(string: normalizedBaseURL), let host = u.host else { return "" }
-        let scheme = u.scheme ?? "http"
-        return "\(scheme)://\(host):8081"
+        normalizedBaseURL
     }
 
     func resolvedURL(_ path: String) -> URL? {
