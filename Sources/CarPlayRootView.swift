@@ -320,10 +320,10 @@ private struct CarPlayPlayerView: View {
             let padV: CGFloat = 12
             // 封面边长:按窗口比例推导,横向不超过 40%、纵向不超过 52%,下限 84 点
             let cover = max(84, min(w * 0.40, h * 0.52))
-            let titleSize = max(17, cover * 0.16)
-            let subSize = max(12, cover * 0.11)
-            let ctrlSize = max(18, cover * 0.17)
-            let playSize = max(28, cover * 0.26)
+            let titleSize = min(30, max(17, cover * 0.16))
+            let subSize = min(17, max(12, cover * 0.11))
+            let ctrlSize = min(30, max(18, cover * 0.15))
+            let playSize = min(46, max(28, cover * 0.24))
 
             VStack(spacing: 10) {
                 HStack(alignment: .center, spacing: 18) {
@@ -363,12 +363,15 @@ private struct CarPlayPlayerView: View {
                         VStack(spacing: 3) {
                             ProgressView(value: player.currentTime, total: max(player.duration, 1))
                                 .tint(Color(.systemOrange))
-                            HStack {
+                            HStack(spacing: 6) {
                                 Text(timeStr(player.currentTime))
-                                Spacer()
+                                Spacer(minLength: 4)
                                 Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
                             }
                             .font(.system(size: subSize * 0.8))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                             .foregroundColor(.secondary)
                         }
                     }
