@@ -76,6 +76,12 @@ final class PlayerManager: ObservableObject {
     /// 当前 item 是否为 sodastream:// 流式地址：失败时据此回落「整首下载+解密」
     private var currentIsSodaStream = false
 
+    /// 隔空播放（AirPlay）是否激活。激活时禁用本地 file:// 播放：
+    /// AirPlay 是把媒体 URL 交给接收端拉流，手机本地文件 / 自定义 scheme 接收端无法读取，
+    /// 表现为「第一首（HTTP 直链）能播，切歌后本地缓存无声、像卡死」。
+    private var isAirPlayActive = false
+    private var externalPlaybackObserver: NSKeyValueObservation?
+
     /// 连续解析失败计数：>0 时解析失败自动跳下一首；跑满一圈（>= 队列长度）才停并弹错，
     /// 避免「播放全部」被一首失效/会员曲卡死，也避免整列失败时死循环。
     private var resolveFailStreak = 0
@@ -101,6 +107,7 @@ final class PlayerManager: ObservableObject {
     private init() {
         self.quality = AppConfigStore.shared.config.defaultQuality
         setupAudioSession()
+        setupExternalPlaybackHandling()
         setupInterruptionHandling()
         setupPeriodicTimeObserver()
         observeEnd()
@@ -117,6 +124,24 @@ final class PlayerManager: ObservableObject {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("🔊 [Player] Audio Session Error: \(error.localizedDescription)")
+        }
+    }
+
+    /// 监听隔空播放连接状态。AirPlay 激活时后续曲目一律走 HTTP 直链（电视拉不到手机本地文件）；
+    /// 若当前正在播本地缓存/下载文件或汽水自定义流，立刻重新解析，避免切到电视后一直无声。
+    private func setupExternalPlaybackHandling() {
+        externalPlaybackObserver = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] _, change in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let active = change.newValue ?? false
+                guard active != self.isAirPlayActive else { return }
+                self.isAirPlayActive = active
+                Log.write(active ? "📺 [Player] 隔空播放已连接 → 后续曲目强制 HTTP 直链" : "📴 [Player] 隔空播放已断开")
+                guard active, self.currentSong != nil, self.player.currentItem != nil else { return }
+                if self.currentPlaybackURL?.isFileURL == true || self.currentIsSodaStream {
+                    self.resolveAndPlay(self.currentQueueSong ?? self.currentSong)
+                }
+            }
         }
     }
 
@@ -471,6 +496,11 @@ final class PlayerManager: ObservableObject {
     }
 
     func playLocalFile(url: URL, title: String, artist: String) {
+        // 隔空播放只认 HTTP 流，手机本地文件接收端读不到
+        guard !isAirPlayActive else {
+            playbackError = "隔空播放不支持播放本地文件，请先断开隔空播放"
+            return
+        }
         localPlaybackTitle = title
         localPlaybackArtist = artist
         currentSong = LXSong(["name": title, "singer": artist])
@@ -532,6 +562,17 @@ final class PlayerManager: ObservableObject {
                 let stream = try await SodaAPIClient.shared.songStream(trackID: trackID, quality: quality, mediaType: mediaType)
                 let delivered = stream.quality.isEmpty ? mapped : stream.quality
                 let display = SodaAPIClient.qualityDisplayName(delivered)
+                // 隔空播放：sodastream:// 自定义流与本地解密文件都投不出去，只接受明文直链；
+                // 加密曲目没有可直连地址，报错后由 resolveFailStreak 自动跳下一首。
+                if isAirPlayActive {
+                    if stream.hexKey.count == 32 {
+                        throw NSError(domain: "XMusic", code: -1, userInfo: [
+                            NSLocalizedDescriptionKey: "隔空播放暂不支持汽水加密曲目"
+                        ])
+                    }
+                    guard let plain = URL(string: stream.mainURL) else { throw SodaError.upstream }
+                    return (plain.absoluteString, display, "汽水")
+                }
                 if stream.hexKey.count == 32 {
                     // 加密流走 sodastream:// 流式播放：loader 从 CDN 顺序下载加密字节，
                     // moov 一到位就构建 cleanMoov 交给 AVPlayer，mdat 逐样本解密，
@@ -596,14 +637,15 @@ final class PlayerManager: ObservableObject {
         prefetchNext()
 
         // 0. Downloaded-file first (Documents/Downloads/) - instant playback
-        if let localURL = DownloadService.shared.localURL(for: song) {
+        //    隔空播放时跳过：接收端读不到手机本地文件
+        if !isAirPlayActive, let localURL = DownloadService.shared.localURL(for: song) {
             let dlQuality = DownloadService.shared.downloadedQuality(for: song) ?? quality
             startPlayback(url: localURL, song: song, sourceName: song.source, qualityName: dlQuality, playbackOrigin: "下载")
             return
         }
 
-        // 1. Cache-first（缓存按 音质 区分，命中即所选音质）
-        if MusicCacheManager.shared.isCached(id: song.id, quality: quality), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id, quality: quality) {
+        // 1. Cache-first（缓存按 音质 区分，命中即所选音质）；隔空播放时跳过本地缓存
+        if !isAirPlayActive, MusicCacheManager.shared.isCached(id: song.id, quality: quality), let cachedURL = MusicCacheManager.shared.cachedURL(for: song.id, quality: quality) {
             if isSoda(song) { bundleSodaResources(song, fileURL: cachedURL) }
             startPlayback(url: cachedURL, song: song, sourceName: song.source, qualityName: "缓存", playbackOrigin: "缓存")
             return
@@ -611,7 +653,7 @@ final class PlayerManager: ObservableObject {
         // 1.1 汽水跨音质兜底：本地任意音质的缓存都秒开，远好于慢网整首拉取。
         // （列表"缓存"角标按任意音质判断；若只精确匹配当前档，音质设置变过
         // 之后会永远 miss，明明有缓存却每次都要解析+下载。）
-        if isSoda(song), let anyURL = MusicCacheManager.shared.anyQualityCachedURL(for: song.id) {
+        if !isAirPlayActive, isSoda(song), let anyURL = MusicCacheManager.shared.anyQualityCachedURL(for: song.id) {
             Log.write("⚡️ [Player] 汽水跨音质缓存命中 song=\(song.name) file=\(anyURL.lastPathComponent)")
             bundleSodaResources(song, fileURL: anyURL)
             startPlayback(url: anyURL, song: song, sourceName: song.source, qualityName: "缓存", playbackOrigin: "缓存")
@@ -619,7 +661,10 @@ final class PlayerManager: ObservableObject {
         }
 
         // 1.5 Prefetched URL：上一首播放时已预取好的下一首地址，直接起播省一次服务器往返
-        if let preURL = prefetchedURLs.removeValue(forKey: song.id + "_" + quality), let url = URL(string: preURL) {
+        //     隔空播放时只认 HTTP 地址（汽水预取的是本地 file://，接收端读不到）
+        if let preURL = prefetchedURLs.removeValue(forKey: song.id + "_" + quality),
+           let url = URL(string: preURL),
+           !(isAirPlayActive && url.isFileURL) {
             startPlayback(url: url, song: song, sourceName: song.source, qualityName: quality, playbackOrigin: "")
             return
         }
@@ -737,7 +782,8 @@ final class PlayerManager: ObservableObject {
         // —— 汽水解密 m4a 统一走 AVPlayer（file://）。实测 AVAudioPlayer 无法打开解密 m4a
         //    （OSStatus 2003334207 UnsupportedFileType → 一律 create ERROR 并跳歌），故废弃专用引擎；
         //    而缓存命中走 AVPlayer+file:// 已被日志证明播放稳定、无失败。新下载同走此路。
-        player.automaticallyWaitsToMinimizeStalling = false
+        // AirPlay 外部播放必须等缓冲：关闭等待会出现「切歌后一直 waiting、电视不出声」
+        player.automaticallyWaitsToMinimizeStalling = isAirPlayActive
         // 优先复用预建好的下一首 item（省去 AVURLAsset + loader 构建）；不匹配则现建
         let item: AVPlayerItem
         let itemKey = song.id + "_" + quality + "_" + (url.scheme ?? "")
