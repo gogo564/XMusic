@@ -149,12 +149,12 @@ private struct CarPlayTabBar: View {
                         Text(tab.rawValue)
                             .font(.system(size: 12, weight: selected == tab ? .bold : .regular))
                     }
-                    .foregroundColor(selected == tab ? Color(.systemOrange) : .gray)
+                    .foregroundColor(selected == tab ? Color(.systemBlue) : .gray)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(selected == tab ? Color(.systemOrange).opacity(0.18) : Color.clear)
+                            .fill(selected == tab ? Color(.systemBlue).opacity(0.18) : Color.clear)
                     )
                 }
                 .buttonStyle(.borderless)
@@ -305,9 +305,8 @@ private struct CarPlaySongList: View {
     }
 }
 
-// 车机播放页(自绘,仿音流/Apple CarPlay 原生观感):
-// 左大封面 + 右(歌名/歌手/进度) + 下方控制排(随机/循环 | 上一首/播放/下一首 | 收藏/更多)。
-// 关键:封面与字号均由 GeometryReader 几何尺寸等比推导,任何分辨率都套在框内不溢出。
+// 车机播放页(对齐参考图):顶部进度(两端时间) → 居中三键 → 底部封面 + 歌名/歌手。
+// 字号与控件均由窗口高度等比推导并封顶,与顶部导航/列表字体比例保持一致,不溢出。
 private struct CarPlayPlayerView: View {
     @StateObject private var player = PlayerManager.shared
     @StateObject private var playlistStore = PlaylistStore.shared
@@ -316,107 +315,21 @@ private struct CarPlayPlayerView: View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let padH: CGFloat = 16
-            let padV: CGFloat = 12
-            // 封面边长:按窗口比例推导,横向不超过 40%、纵向不超过 52%,下限 84 点
-            let cover = max(84, min(w * 0.40, h * 0.52))
-            let titleSize = min(30, max(17, cover * 0.16))
-            let subSize = min(17, max(12, cover * 0.11))
-            let ctrlSize = min(30, max(18, cover * 0.15))
-            let playSize = min(46, max(28, cover * 0.24))
+            let padH = max(14, w * 0.022)
+            let padV = max(10, h * 0.022)
+            let cover = max(88, min(w * 0.24, h * 0.44))
+            let titleSize = min(26, max(17, h * 0.055))
+            let subSize = min(16, max(12, h * 0.033))
+            let timeSize = min(13, max(10, h * 0.026))
+            let ctrlSize = min(40, max(22, h * 0.062))
+            let playSize = min(62, max(34, h * 0.098))
 
-            VStack(spacing: 10) {
-                HStack(alignment: .center, spacing: 18) {
-                    // 左:大封面
-                    LXCachedImage(
-                        urlString: player.currentSong?.imageURL ?? "",
-                        placeholder: "music.note",
-                        size: cover,
-                        cornerRadius: 12
-                    )
-                    .frame(width: cover, height: cover)
-
-                    // 右:歌名/歌手/专辑/进度
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(player.currentSong?.name ?? "未在播放")
-                            .font(.system(size: titleSize, weight: .bold))
-                            .lineLimit(1)
-                        if let s = player.currentSong?.singer, !s.isEmpty {
-                            Text(s)
-                                .font(.system(size: subSize, weight: .regular))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        if let a = player.currentSong?.albumName, !a.isEmpty, a != player.currentSong?.singer {
-                            Text(a)
-                                .font(.system(size: subSize * 0.9, weight: .regular))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        if let line = currentLyricLine() {
-                            Text(line)
-                                .font(.system(size: subSize * 0.9, weight: .medium))
-                                .foregroundColor(Color(.systemOrange).opacity(0.85))
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        VStack(spacing: 3) {
-                            ProgressView(value: player.currentTime, total: max(player.duration, 1))
-                                .tint(Color(.systemOrange))
-                            HStack(spacing: 6) {
-                                Text(timeStr(player.currentTime))
-                                Spacer(minLength: 4)
-                                Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
-                            }
-                            .font(.system(size: subSize * 0.8))
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .foregroundColor(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                Spacer(minLength: 0)
-
-                // 下方控制排
-                HStack(spacing: 0) {
-                    HStack(spacing: 14) {
-                        actionButton("shuffle", love: false) { }
-                        actionButton("repeat", love: false) { }
-                    }
-                    Spacer(minLength: 0)
-                    HStack(spacing: 24) {
-                        Button { player.playPrevious() } label: {
-                            Image(systemName: "backward.fill")
-                                .font(.system(size: ctrlSize))
-                        }
-                        Button { player.togglePlayPause() } label: {
-                            Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: playSize))
-                        }
-                        Button { player.playNext() } label: {
-                            Image(systemName: "forward.fill")
-                                .font(.system(size: ctrlSize))
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    HStack(spacing: 14) {
-                        actionButton(player.currentSong.map { playlistStore.isLoved($0) } ?? false
-                            ? "suit.heart.fill" : "suit.heart", love: true) {
-                            guard let song = player.currentSong else { return }
-                            if playlistStore.isLoved(song) {
-                                Task { try? await playlistStore.removeSongFromLove(song) }
-                            } else {
-                                Task { try? await playlistStore.addSongToLove(song) }
-                                HapticManager.shared.notification(type: .success)
-                            }
-                        }
-                        actionButton("ellipsis.circle", love: false) { }
-                    }
-                }
-                .buttonStyle(.borderless)
+            VStack(spacing: 0) {
+                progressBlock(timeSize: timeSize)
+                Spacer(minLength: 8)
+                controlRow(ctrlSize: ctrlSize, playSize: playSize)
+                Spacer(minLength: 8)
+                infoRow(cover: cover, titleSize: titleSize, subSize: subSize)
             }
             .padding(.horizontal, padH)
             .padding(.vertical, padV)
@@ -430,19 +343,104 @@ private struct CarPlayPlayerView: View {
         }
     }
 
-    private func actionButton(_ icon: String, love: Bool, action: @escaping () -> Void) -> some View {
-        let on = player.currentSong.map { playlistStore.isLoved($0) } ?? false
-        return Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 19))
-                .foregroundColor((love && on) ? Color(.systemRed) : .primary)
-                .frame(width: 38, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill((love && on) ? Color(.systemRed).opacity(0.16) : Color.clear)
-                )
+    // 进度:两端时间 + 细条(等宽数字,单行不压缩)
+    private func progressBlock(timeSize: CGFloat) -> some View {
+        VStack(spacing: 5) {
+            ProgressView(value: min(player.currentTime, max(player.duration, 1)), total: max(player.duration, 1))
+                .tint(Color(.systemBlue))
+            HStack(spacing: 8) {
+                Text(timeStr(player.currentTime))
+                Spacer(minLength: 8)
+                Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
+            }
+            .font(.system(size: timeSize, weight: .medium))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundColor(.secondary)
         }
+    }
+
+    // 控制:居中三键,播放键为白色圆角方块
+    private func controlRow(ctrlSize: CGFloat, playSize: CGFloat) -> some View {
+        HStack(spacing: max(28, playSize * 0.9)) {
+            Button { player.playPrevious() } label: {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: ctrlSize))
+            }
+            Button { player.togglePlayPause() } label: {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: playSize * 0.42, weight: .bold))
+                    .foregroundColor(Color.black)
+                    .frame(width: playSize, height: playSize)
+                    .background(
+                        RoundedRectangle(cornerRadius: playSize * 0.22, style: .continuous)
+                            .fill(Color.white)
+                    )
+            }
+            Button { player.playNext() } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: ctrlSize))
+            }
+        }
+        .foregroundColor(Color(.systemBlue))
         .buttonStyle(.borderless)
+    }
+
+    // 信息:左封面 + 右歌名/歌手/专辑/歌词 + 收藏
+    private func infoRow(cover: CGFloat, titleSize: CGFloat, subSize: CGFloat) -> some View {
+        HStack(alignment: .center, spacing: 16) {
+            LXCachedImage(
+                urlString: player.currentSong?.imageURL ?? "",
+                placeholder: "music.note",
+                size: cover,
+                cornerRadius: 12
+            )
+            .frame(width: cover, height: cover)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(player.currentSong?.name ?? "未在播放")
+                    .font(.system(size: titleSize, weight: .bold))
+                    .lineLimit(1)
+                if let s = player.currentSong?.singer, !s.isEmpty {
+                    Text(s)
+                        .font(.system(size: subSize))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                if let a = player.currentSong?.albumName, !a.isEmpty, a != player.currentSong?.singer {
+                    Text(a)
+                        .font(.system(size: subSize * 0.92))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                if let line = currentLyricLine() {
+                    Text(line)
+                        .font(.system(size: subSize * 0.92, weight: .medium))
+                        .foregroundColor(Color(.systemBlue).opacity(0.85))
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                guard let song = player.currentSong else { return }
+                if playlistStore.isLoved(song) {
+                    Task { try? await playlistStore.removeSongFromLove(song) }
+                } else {
+                    Task { try? await playlistStore.addSongToLove(song) }
+                    HapticManager.shared.notification(type: .success)
+                }
+            } label: {
+                Image(systemName: isLoved ? "heart.fill" : "heart")
+                    .font(.system(size: min(24, max(16, cover * 0.20)))
+                    .foregroundColor(isLoved ? Color(.systemRed) : .secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private var isLoved: Bool {
+        player.currentSong.map { playlistStore.isLoved($0) } ?? false
     }
 
     private func currentLyricLine() -> String? {
