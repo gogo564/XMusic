@@ -29,21 +29,23 @@ struct CarPlayRootView: View {
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                CarPlayTabBar(selected: $selectedTab)
-                Group {
-                    switch selectedTab {
-                    case .playlists:
-                        playlistList
-                    case .recent:
-                        recentList
-                    case .nowPlaying:
-                        nowPlayingView
+            Group {
+                if selectedTab == .nowPlaying {
+                    // 播放页:整屏自绘,顶部「‹ 返回 我的歌单」,不显示 LX音乐 导航与三段标签
+                    nowPlayingView
+                } else {
+                    VStack(spacing: 0) {
+                        CarPlayTabBar(selected: $selectedTab)
+                        if selectedTab == .playlists {
+                            playlistList
+                        } else {
+                            recentList
+                        }
                     }
+                    .navigationTitle("LX音乐")
+                    .navigationBarTitleDisplayMode(.inline)
                 }
             }
-            .navigationTitle("LX音乐")
-            .navigationBarTitleDisplayMode(.inline)
             // 关键:锁定字体缩放,CarPlay 上 accessibility 档会让文字过大溢出
             .environment(\.sizeCategory, .large)
         }
@@ -94,7 +96,7 @@ struct CarPlayRootView: View {
                 VStack {
                     Spacer()
                     Text("暂无最近播放")
-                        .font(.system(size: 16))
+                        .font(.system(size: 17, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
                     Spacer()
                 }
@@ -114,17 +116,7 @@ struct CarPlayRootView: View {
 
     // MARK: - 正在播放视图
     private var nowPlayingView: some View {
-        VStack {
-            if player.currentSong != nil {
-                CarPlayPlayerView()
-            } else {
-                Spacer()
-                Text("当前没有正在播放的歌曲")
-                    .font(.system(size: 16))
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-        }
+        CarPlayPlayerView(onBack: { selectedTab = .playlists })
     }
 }
 
@@ -147,14 +139,14 @@ private struct CarPlayTabBar: View {
                         Image(systemName: icon)
                             .font(.system(size: 16))
                         Text(tab.rawValue)
-                            .font(.system(size: 12, weight: selected == tab ? .bold : .regular))
+                            .font(.system(size: 12, weight: selected == tab ? .heavy : .medium, design: .rounded))
                     }
-                    .foregroundColor(selected == tab ? Color(.systemOrange) : .gray)
+                    .foregroundColor(selected == tab ? Color(.systemBlue) : .gray)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(selected == tab ? Color(.systemOrange).opacity(0.18) : Color.clear)
+                            .fill(selected == tab ? Color(.systemBlue).opacity(0.18) : Color.clear)
                     )
                 }
                 .buttonStyle(.borderless)
@@ -177,12 +169,12 @@ private struct CarPlayListRow: View {
             artwork
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 17, weight: isNowPlaying ? .bold : .medium))
+                    .font(.system(size: 18, weight: isNowPlaying ? .heavy : .semibold, design: .rounded))
                     .foregroundColor(isNowPlaying ? Color(.systemOrange) : .primary)
                     .lineLimit(1)
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
@@ -235,12 +227,12 @@ private struct CarPlayNavRow<Destination: View>: View {
                 artwork
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 17, weight: .medium))
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
                         .foregroundColor(.primary)
                         .lineLimit(1)
                     if !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.system(size: 13, weight: .regular))
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
@@ -305,141 +297,276 @@ private struct CarPlaySongList: View {
     }
 }
 
-// 车机播放页(自绘,仿音流/Apple CarPlay 原生观感):
-// 左大封面 + 右(歌名/歌手/进度) + 下方控制排(随机/循环 | 上一首/播放/下一首 | 收藏/更多)。
-// 关键:封面与字号均由 GeometryReader 几何尺寸等比推导,任何分辨率都套在框内不溢出。
+
+// 车机播放页(仿网易云车机视觉):
+// 左上「‹ 返回歌单」/ 右上 App 名,主体大字歌词 + 右侧圆角封面,
+// 下方一排半透明大圆角控制块、细进度条、底部胶囊控件。
+// 圆润感来自:封面/按钮 18~22 圆角、白 8%~14% 半透明无边框、全胶囊控件、
+// 封面模糊铺底 + 黑色遮罩、全局 SF Rounded 字体。
 private struct CarPlayPlayerView: View {
+    let onBack: () -> Void
     @StateObject private var player = PlayerManager.shared
-    @StateObject private var playlistStore = PlaylistStore.shared
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let padH: CGFloat = 16
-            let padV: CGFloat = 12
-            // 封面边长:按窗口比例推导,横向不超过 40%、纵向不超过 52%,下限 84 点
-            let cover = max(84, min(w * 0.40, h * 0.52))
-            let titleSize = max(17, cover * 0.16)
-            let subSize = max(12, cover * 0.11)
-            let ctrlSize = max(18, cover * 0.17)
-            let playSize = max(28, cover * 0.26)
+            let padH = max(16, w * 0.030)
+            let topH = min(56, max(38, h * 0.105))
+            let cover = min(w * 0.178, h * 0.30)
+            let lyricSize = min(44, max(21, h * 0.088))
+            let metaSize = min(15, max(11, h * 0.030))
+            let smallSize = min(12, max(10, h * 0.024))
+            let btnW = min(w * 0.175, h * 0.290)
+            let btnH = min(80, max(52, h * 0.155))
+            let btnRadius = btnH * 0.30
+            let iconSize = min(30, max(17, h * 0.050))
+            let trackH = min(6, max(4, h * 0.011))
+            let knob = min(16, max(10, h * 0.030))
 
-            VStack(spacing: 10) {
-                HStack(alignment: .center, spacing: 18) {
-                    // 左:大封面
-                    LXCachedImage(
-                        urlString: player.currentSong?.imageURL ?? "",
-                        placeholder: "music.note",
-                        size: cover,
-                        cornerRadius: 12
-                    )
-                    .frame(width: cover, height: cover)
+            ZStack {
+                background(w: w, h: h)
 
-                    // 右:歌名/歌手/专辑/进度
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(player.currentSong?.name ?? "未在播放")
-                            .font(.system(size: titleSize, weight: .bold))
-                            .lineLimit(1)
-                        if let s = player.currentSong?.singer, !s.isEmpty {
-                            Text(s)
-                                .font(.system(size: subSize, weight: .regular))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        if let a = player.currentSong?.albumName, !a.isEmpty, a != player.currentSong?.singer {
-                            Text(a)
-                                .font(.system(size: subSize * 0.9, weight: .regular))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        if let line = currentLyricLine() {
-                            Text(line)
-                                .font(.system(size: subSize * 0.9, weight: .medium))
-                                .foregroundColor(Color(.systemOrange).opacity(0.85))
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        VStack(spacing: 3) {
-                            ProgressView(value: player.currentTime, total: max(player.duration, 1))
-                                .tint(Color(.systemOrange))
-                            HStack {
-                                Text(timeStr(player.currentTime))
-                                Spacer()
-                                Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
-                            }
-                            .font(.system(size: subSize * 0.8))
-                            .foregroundColor(.secondary)
-                        }
+                VStack(spacing: 0) {
+                    header(barH: topH, padH: padH, size: metaSize)
+
+                    HStack(alignment: .top, spacing: max(18, w * 0.030)) {
+                        lyricsBlock(lyricSize: lyricSize, metaSize: metaSize)
+
+                        Spacer(minLength: 8)
+
+                        LXCachedImage(
+                            urlString: player.currentSong?.imageURL ?? "",
+                            placeholder: "music.note",
+                            size: cover,
+                            cornerRadius: min(20, cover * 0.16)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: min(20, cover * 0.16), style: .continuous)
+                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                        )
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, padH)
+                    // 歌词+封面整块占满 header 与控件之间的空间并垂直居中,
+                    // 不再让 Spacer 把空白全压成歌词下方一大块
+                    .frame(maxHeight: .infinity, alignment: .center)
+
+                    controlRow(btnW: btnW, btnH: btnH, radius: btnRadius, iconSize: iconSize)
+                        .padding(.horizontal, padH)
+                        .padding(.top, h * 0.030)
+
+                    progressBlock(trackH: trackH, knob: knob, timeSize: smallSize)
+                        .padding(.horizontal, padH)
+                        .padding(.top, h * 0.045)
+
+                    pillRow(size: smallSize, height: max(28, h * 0.067))
+                        .padding(.horizontal, padH)
+                        .padding(.top, h * 0.050)
+                        // 底部留白加大,把「按钮 + 进度 + 胶囊」整组往上抬
+                        .padding(.bottom, h * 0.075)
                 }
-
-                Spacer(minLength: 0)
-
-                // 下方控制排
-                HStack(spacing: 0) {
-                    HStack(spacing: 14) {
-                        actionButton("shuffle", love: false) { }
-                        actionButton("repeat", love: false) { }
-                    }
-                    Spacer(minLength: 0)
-                    HStack(spacing: 24) {
-                        Button { player.playPrevious() } label: {
-                            Image(systemName: "backward.fill")
-                                .font(.system(size: ctrlSize))
-                        }
-                        Button { player.togglePlayPause() } label: {
-                            Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: playSize))
-                        }
-                        Button { player.playNext() } label: {
-                            Image(systemName: "forward.fill")
-                                .font(.system(size: ctrlSize))
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    HStack(spacing: 14) {
-                        actionButton(player.currentSong.map { playlistStore.isLoved($0) } ?? false
-                            ? "suit.heart.fill" : "suit.heart", love: true) {
-                            guard let song = player.currentSong else { return }
-                            if playlistStore.isLoved(song) {
-                                Task { try? await playlistStore.removeSongFromLove(song) }
-                            } else {
-                                Task { try? await playlistStore.addSongToLove(song) }
-                                HapticManager.shared.notification(type: .success)
-                            }
-                        }
-                        actionButton("ellipsis.circle", love: false) { }
-                    }
-                }
-                .buttonStyle(.borderless)
             }
-            .padding(.horizontal, padH)
-            .padding(.vertical, padV)
-            .frame(width: w, height: h, alignment: .center)
-        }
-        .navigationTitle("正在播放")
-        .navigationBarTitleDisplayMode(.inline)
-        .environment(\.sizeCategory, .large)
-        .onAppear {
-            Log.write("[CarPlay] CarPlayPlayerView 出现 song=\(player.currentSong?.name ?? "nil")")
         }
     }
 
-    private func actionButton(_ icon: String, love: Bool, action: @escaping () -> Void) -> some View {
-        let on = player.currentSong.map { playlistStore.isLoved($0) } ?? false
-        return Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 19))
-                .foregroundColor((love && on) ? Color(.systemRed) : .primary)
-                .frame(width: 38, height: 34)
+    // 封面模糊铺底 + 黑遮罩,避免纯黑屏的硬边
+    private func background(w: CGFloat, h: CGFloat) -> some View {
+        ZStack {
+            if let url = player.currentSong?.imageURL, !url.isEmpty {
+                LXCachedImage(urlString: url, placeholder: "music.note", size: max(w, h), cornerRadius: 0)
+                    .scaleEffect(1.12)
+                    .blur(radius: 36)
+                    .opacity(0.85)
+            } else {
+                Color(red: 0.10, green: 0.10, blue: 0.13)
+            }
+            Color.black.opacity(0.58)
+        }
+        .frame(width: w, height: h)
+        .clipped()
+        .allowsHitTesting(false)
+    }
+
+    // 顶部:‹ 返回歌单 + 右侧 App 名
+    private func header(barH: CGFloat, padH: CGFloat, size: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            Button(action: onBack) {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: size, weight: .bold, design: .rounded))
+                    Text("返回歌单")
+                        .font(.system(size: size + 2, weight: .semibold, design: .rounded))
+                }
+                .foregroundColor(.white.opacity(0.94))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+
+            Spacer(minLength: 0)
+
+            Text("LX音乐")
+                .font(.system(size: size, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.62))
+        }
+        .padding(.horizontal, padH)
+        .frame(height: barH)
+    }
+
+    // 主体:大字歌词 + 歌手 + 歌名(无歌词时降级为歌名)
+    private func lyricsBlock(lyricSize: CGFloat, metaSize: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(currentLyricLine() ?? player.currentSong?.name ?? "未在播放")
+                .font(.system(size: lyricSize, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let singer = player.currentSong?.singer, !singer.isEmpty {
+                Text(singer)
+                    .font(.system(size: metaSize, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.66))
+                    .lineLimit(1)
+                    .padding(.top, 8)
+            }
+
+            if currentLyricLine() != nil, let name = player.currentSong?.name, !name.isEmpty {
+                Text(name)
+                    .font(.system(size: metaSize + 2, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.90))
+                    .lineLimit(1)
+                    .padding(.top, 6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // 三颗半透明大圆角控制块,左对齐
+    private func controlRow(btnW: CGFloat, btnH: CGFloat, radius: CGFloat, iconSize: CGFloat) -> some View {
+        HStack(spacing: max(12, btnH * 0.20)) {
+            controlButton(width: btnW, height: btnH, radius: radius, opacity: 0.085) {
+                player.playPrevious()
+            } label: {
+                Image(systemName: "backward.end.fill")
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.9))
+            }
+
+            controlButton(width: btnW, height: btnH, radius: radius, opacity: 0.14) {
+                player.togglePlayPause()
+            } label: {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: iconSize, weight: .bold))
+                    .foregroundColor(.white)
+            }
+
+            controlButton(width: btnW, height: btnH, radius: radius, opacity: 0.085) {
+                player.playNext()
+            } label: {
+                Image(systemName: "forward.end.fill")
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.9))
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func controlButton<Icon: View>(
+        width: CGFloat,
+        height: CGFloat,
+        radius: CGFloat,
+        opacity: Double,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Icon
+    ) -> some View {
+        Button(action: action) {
+            label()
+                .frame(width: width, height: height)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill((love && on) ? Color(.systemRed).opacity(0.16) : Color.clear)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(Color.white.opacity(opacity))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .stroke(Color.white.opacity(0.07), lineWidth: 1)
                 )
         }
         .buttonStyle(.borderless)
+    }
+
+    // 进度:细胶囊轨道 + 白色圆点 + 两端时间
+    private func progressBlock(trackH: CGFloat, knob: CGFloat, timeSize: CGFloat) -> some View {
+        VStack(spacing: 6) {
+            GeometryReader { g in
+                let ratio = player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
+                let full = g.size.width
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.16))
+                        .frame(height: trackH)
+                    Capsule()
+                        .fill(Color.white.opacity(0.92))
+                        .frame(width: max(trackH, full * ratio), height: trackH)
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: knob, height: knob)
+                        .offset(x: min(max(full * ratio - knob / 2, 0), full - knob))
+                }
+                .frame(height: knob, alignment: .center)
+            }
+            .frame(height: knob)
+
+            HStack(spacing: 6) {
+                Text(timeStr(player.currentTime))
+                Spacer(minLength: 4)
+                Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
+            }
+            .font(.system(size: timeSize, weight: .medium, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundColor(.white.opacity(0.66))
+        }
+    }
+
+    // 底部胶囊:随机(可切模式) + 音质(只展示)
+    private func pillRow(size: CGFloat, height: CGFloat) -> some View {
+        HStack(spacing: 8) {
+            Button { player.togglePlayMode() } label: {
+                pillLabel(playModeText, size: size, height: height)
+            }
+            .buttonStyle(.borderless)
+
+            if !player.qualityName.isEmpty {
+                pillLabel(player.qualityName, size: size, height: height)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func pillLabel(_ text: String, size: CGFloat, height: CGFloat) -> some View {
+        Text(text)
+            .font(.system(size: size, weight: .medium, design: .rounded))
+            .foregroundColor(.white.opacity(0.80))
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .frame(height: height)
+            .background(
+                Capsule().fill(Color.white.opacity(0.07))
+            )
+            .overlay(
+                Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+    }
+
+    private var playModeText: String {
+        switch player.playMode {
+        case .sequential: return "顺序播放"
+        case .loopAll: return "列表循环"
+        case .loopOne: return "单曲循环"
+        case .shuffle: return "随机播放"
+        }
     }
 
     private func currentLyricLine() -> String? {

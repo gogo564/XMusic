@@ -36,6 +36,7 @@ struct SettingsView: View {
     @State private var sodaPlaylistCookie = ""
     @State private var sodaPlaylistUpdating = false
     @State private var sodaPlaylistMessage: String?
+    @State private var showCarPlayPreview = false
 
     private let qualities = ["128k", "320k", "flac"]
 
@@ -52,6 +53,11 @@ struct SettingsView: View {
             Section {
                 NavigationLink(destination: appearanceSettings()) { navRow(icon: "paintpalette", title: "外观与主题", subtitle: "\(theme.color.name) · \(theme.mode.name)") }
                 NavigationLink(destination: playbackSettings()) { navRow(icon: "play.circle", title: "播放", subtitle: quality) }
+            }
+            Section {
+                Button { showCarPlayPreview = true } label: {
+                    navRow(icon: "car.fill", title: "CarPlay 界面预览", subtitle: "800×480 模拟车机画布")
+                }
             }
             // 连接动作
             Section {
@@ -90,6 +96,9 @@ struct SettingsView: View {
         .listStyle(.insetGrouped)
         .sheet(isPresented: $showQRLogin) {
             SafariView(url: URL(string: AppConfigStore.shared.config.loginBaseURL + "/login/account")!)
+        }
+        .sheet(isPresented: $showCarPlayPreview) {
+            CarPlayPreviewView()
         }
         .navigationTitle("设置")
         .safeAreaInset(edge: .bottom) {
