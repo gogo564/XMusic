@@ -26,36 +26,57 @@ struct CarPlayRootView: View {
     @State private var loaded = false
 
     @State private var selectedTab: Tab = .playlists
+    @State private var detailRoute: CarPlayListRoute?
+    /// 进入播放器前的 tab,用于返回时回到原处
+    @State private var lastNonPlayerTab: Tab = .playlists
+    /// 播放器左上角动态来源名(歌单名 / 歌单 / 最近)
+    @State private var playerBackTitle: String = "歌单"
 
     var body: some View {
-        NavigationView {
-            Group {
-                if selectedTab == .nowPlaying {
-                    // 播放页:整屏自绘,顶部「‹ 返回 我的歌单」,不显示 LX音乐 导航与三段标签
-                    nowPlayingView
-                } else {
-                    VStack(spacing: 0) {
-                        CarPlayTabBar(selected: $selectedTab)
-                        if selectedTab == .playlists {
-                            playlistList
-                        } else {
-                            recentList
-                        }
+        // 不再用 NavigationView:系统导航栏会在内容顶部留出一条空白(CarPlay 上尤其明显),
+        // 改为手动路由,主页/播放页/歌单详情全部贴住内容区顶部。
+        Group {
+            if selectedTab == .nowPlaying {
+                nowPlayingView
+            } else if let route = detailRoute {
+                CarPlayDetailView(
+                    route: route,
+                    onBack: { detailRoute = nil },
+                    onPlay: { openPlayer(backTitle: route.title) }
+                )
+            } else {
+                VStack(spacing: 0) {
+                    CarPlayTabBar(selected: $selectedTab, onNeedPlayer: {
+                        openPlayer(backTitle: selectedTab == .playlists ? "歌单" : "最近")
+                    })
+                    .padding(.top, 6)
+                    if selectedTab == .playlists {
+                        playlistList
+                    } else {
+                        recentList
                     }
-                    .navigationTitle("LX音乐")
-                    .navigationBarTitleDisplayMode(.inline)
                 }
             }
-            // 关键:锁定字体缩放,CarPlay 上 accessibility 档会让文字过大溢出
-            .environment(\.sizeCategory, .large)
         }
-        .navigationViewStyle(.stack)
+        .onChange(of: selectedTab) { newValue in
+            if newValue != .nowPlaying {
+                lastNonPlayerTab = newValue
+            }
+        }
+        // 关键:锁定字体缩放,CarPlay 上 accessibility 档会让文字过大溢出
+        .environment(\.sizeCategory, .large)
         .onAppear {
             if !loaded {
                 loaded = true
                 Task { await playlistStore.refresh() }
             }
         }
+    }
+
+    /// 跳到播放器并记录来源名;返回时回到 lastNonPlayerTab(若来源是歌单详情,detailRoute 仍在,自然回详情)
+    private func openPlayer(backTitle: String) {
+        playerBackTitle = backTitle
+        selectedTab = .nowPlaying
     }
 
     // MARK: - 歌单列表(原生 CarPlay 列表行)
@@ -66,14 +87,14 @@ struct CarPlayRootView: View {
                 subtitle: "\(playlistStore.songs(kind: .love, playlistID: "").count) 首",
                 coverURL: playlistStore.songs(kind: .love, playlistID: "").first?.imageURL ?? ""
             ) {
-                CarPlaySongList(title: "我喜欢的音乐", songs: playlistStore.songs(kind: .love, playlistID: ""))
+                detailRoute = CarPlayListRoute(title: "我喜欢的音乐", songs: playlistStore.songs(kind: .love, playlistID: ""))
             }
             CarPlayNavRow(
                 title: "默认列表",
                 subtitle: "\(playlistStore.songs(kind: .defaultList, playlistID: "").count) 首",
                 coverURL: playlistStore.songs(kind: .defaultList, playlistID: "").first?.imageURL ?? ""
             ) {
-                CarPlaySongList(title: "默认列表", songs: playlistStore.songs(kind: .defaultList, playlistID: ""))
+                detailRoute = CarPlayListRoute(title: "默认列表", songs: playlistStore.songs(kind: .defaultList, playlistID: ""))
             }
             ForEach(playlistStore.playlists, id: \.id) { pl in
                 CarPlayNavRow(
@@ -81,7 +102,7 @@ struct CarPlayRootView: View {
                     subtitle: "\(playlistStore.songs(kind: .user, playlistID: pl.id).count) 首",
                     coverURL: playlistStore.songs(kind: .user, playlistID: pl.id).first?.imageURL ?? ""
                 ) {
-                    CarPlaySongList(title: pl.name, songs: playlistStore.songs(kind: .user, playlistID: pl.id))
+                    detailRoute = CarPlayListRoute(title: pl.name, songs: playlistStore.songs(kind: .user, playlistID: pl.id))
                 }
             }
         }
@@ -105,7 +126,7 @@ struct CarPlayRootView: View {
                     ForEach(songs.indices, id: \.self) { idx in
                         let song = songs[idx]
                         CarPlayNavRow(title: song.name, subtitle: song.singer, coverURL: song.imageURL) {
-                            CarPlaySongList(title: "最近播放", songs: songs)
+                            detailRoute = CarPlayListRoute(title: "最近播放", songs: songs)
                         }
                     }
                 }
@@ -116,13 +137,19 @@ struct CarPlayRootView: View {
 
     // MARK: - 正在播放视图
     private var nowPlayingView: some View {
-        CarPlayPlayerView(onBack: { selectedTab = .playlists })
+        CarPlayPlayerView(
+            backTitle: playerBackTitle,
+            onBack: { selectedTab = lastNonPlayerTab }
+        )
     }
 }
 
 // 顶部功能标签栏
 private struct CarPlayTabBar: View {
     @Binding var selected: Tab
+    /// 点击「正在播放」时回调,由外部决定播放器的返回来源名
+    var onNeedPlayer: () -> Void = {}
+
     private let tabs: [(Tab, String)] = [
         (.playlists, "list.bullet.rectangle"),
         (.recent, "clock"),
@@ -133,6 +160,9 @@ private struct CarPlayTabBar: View {
         HStack(spacing: 8) {
             ForEach(tabs, id: \.0) { tab, icon in
                 Button {
+                    if tab == .nowPlaying {
+                        onNeedPlayer()
+                    }
                     selected = tab
                 } label: {
                     VStack(spacing: 2) {
@@ -205,24 +235,66 @@ private struct CarPlayListRow: View {
     }
 }
 
+// 手动路由:歌单详情,取代 NavigationView(避免系统导航栏在顶部撑出空白条)
+private struct CarPlayListRoute: Identifiable {
+    let id = UUID()
+    let title: String
+    let songs: [LXSong]
+}
+
+// 歌单详情页:自绘顶部「‹ 返回 + 歌单名」+ 歌曲列表
+private struct CarPlayDetailView: View {
+    let route: CarPlayListRoute
+    let onBack: () -> Void
+    let onPlay: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button(action: onBack) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                        Text("返回")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundColor(Color(.systemBlue))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Text(route.title)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+
+            CarPlaySongList(title: route.title, songs: route.songs, onPlay: onPlay)
+        }
+    }
+}
+
 // 主页导航行:左侧 56 小封面 + 右侧标题/副标题 + 右箭头(用于歌单/最近)
-private struct CarPlayNavRow<Destination: View>: View {
+private struct CarPlayNavRow: View {
     let title: String
     let subtitle: String
     let coverURL: String
-    @ViewBuilder var destination: Destination
+    let action: () -> Void
 
-    init(title: String, subtitle: String, coverURL: String = "", @ViewBuilder destination: () -> Destination) {
+    init(title: String, subtitle: String, coverURL: String = "", action: @escaping () -> Void) {
         self.title = title
         self.subtitle = subtitle
         self.coverURL = coverURL
-        self.destination = destination()
+        self.action = action
     }
 
     var body: some View {
-        NavigationLink {
-            destination
-        } label: {
+        Button(action: action) {
             HStack(spacing: 14) {
                 artwork
                 VStack(alignment: .leading, spacing: 3) {
@@ -273,6 +345,8 @@ private struct CarPlayNavRow<Destination: View>: View {
 private struct CarPlaySongList: View {
     let title: String
     let songs: [LXSong]
+    /// 点歌返回后跳到播放器
+    var onPlay: () -> Void = {}
     @StateObject private var player = PlayerManager.shared
 
     var body: some View {
@@ -281,6 +355,7 @@ private struct CarPlaySongList: View {
             Button {
                 Log.write("[CarPlay] 点击播放: \(song.name)")
                 player.play(song: song, in: songs, index: idx, presentPlayer: false, sceneName: "CarPlay")
+                onPlay()
             } label: {
                 CarPlayListRow(
                     title: song.name,
@@ -291,8 +366,6 @@ private struct CarPlaySongList: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
         .environment(\.sizeCategory, .large)
     }
 }
@@ -304,6 +377,8 @@ private struct CarPlaySongList: View {
 // 圆润感来自:封面/按钮 18~22 圆角、白 8%~14% 半透明无边框、全胶囊控件、
 // 封面模糊铺底 + 黑色遮罩、全局 SF Rounded 字体。
 private struct CarPlayPlayerView: View {
+    /// 来源名(歌单名 / 歌单 / 最近),显示在返回按钮上
+    let backTitle: String
     let onBack: () -> Void
     @StateObject private var player = PlayerManager.shared
 
@@ -329,6 +404,8 @@ private struct CarPlayPlayerView: View {
 
                 VStack(spacing: 0) {
                     header(barH: topH, padH: padH, size: metaSize)
+                        // 去掉系统导航栏后,顶部补一点呼吸距离
+                        .padding(.top, h * 0.022)
 
                     HStack(alignment: .top, spacing: max(18, w * 0.030)) {
                         lyricsBlock(lyricSize: lyricSize, metaSize: metaSize)
@@ -387,15 +464,17 @@ private struct CarPlayPlayerView: View {
         .allowsHitTesting(false)
     }
 
-    // 顶部:‹ 返回歌单 + 右侧 App 名
+    // 顶部:‹ 返回 · 来源名 + 右侧 App 名
     private func header(barH: CGFloat, padH: CGFloat, size: CGFloat) -> some View {
         HStack(spacing: 6) {
             Button(action: onBack) {
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: size, weight: .bold, design: .rounded))
-                    Text("返回歌单")
+                    Text("返回 · \(backTitle)")
                         .font(.system(size: size + 2, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
                 .foregroundColor(.white.opacity(0.94))
                 .contentShape(Rectangle())
