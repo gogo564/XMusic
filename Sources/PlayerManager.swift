@@ -309,10 +309,13 @@ final class PlayerManager: ObservableObject {
     /// 静默预置队列：把浏览到的歌单设为播放队列，但**不触发播放、不打断当前正在播的歌**。
     /// 供歌单详情页进入/加载完成后调用，实现「翻到哪个歌单就以哪个歌单为队列」——
     /// 之后点播放器切歌/点列表任意一首都圈在当前歌单内，不会沿用上一个残留队列。
-    func silentSetPlaylist(_ songs: [LXSong], startIndex: Int = 0) {
+    func silentSetPlaylist(_ songs: [LXSong], startIndex: Int = 0, preserveRefresh: Bool = false) {
         guard !songs.isEmpty else { return }
         queue = songs
-        queueRefreshHandler = nil
+        // 场景/推荐流自己的队列:保留刷新回调,否则播到队尾只能重放同一批
+        if !preserveRefresh {
+            queueRefreshHandler = nil
+        }
         currentIndex = startIndex
     }
 
@@ -387,28 +390,19 @@ final class PlayerManager: ObservableObject {
         case .loopAll:
             let nextIndex = (currentIndex + 1) % queue.count
             // 场景/推荐流：播到队尾（自动或手动切歌）时拉新一批替换，避免反复循环同一批旧歌
-            if nextIndex == 0, let refresh = queueRefreshHandler {
+            if nextIndex == 0, let refresh = activeQueueRefresh {
                 Task { @MainActor in
-                    let newSongs = await refresh()
+                    let newSongs = await self.fetchRefreshedQueue(refresh)
                     guard !newSongs.isEmpty else {
                         self.currentIndex = nextIndex
                         self.resolveAndPlay(self.currentQueueSong)
                         return
                     }
-                    var deduped: [LXSong] = []
-                    var seen = Set<String>()
-                    for s in newSongs {
-                        guard seen.insert(s.id).inserted else { continue }
-                        deduped.append(s)
-                    }
-                    guard !deduped.isEmpty else {
-                        self.currentIndex = nextIndex
-                        self.resolveAndPlay(self.currentQueueSong)
-                        return
-                    }
-                    self.queue = deduped
+                    let oldCount = self.queue.count
+                    self.queue = newSongs
                     self.currentIndex = 0
                     self.queueRefreshCount += 1
+                    Log.write("🔄 [Player] 队列刷新 \(oldCount) → \(newSongs.count) scene=\(self.sceneName)")
                     self.resolveAndPlay(self.currentQueueSong)
                 }
                 return
@@ -416,6 +410,38 @@ final class PlayerManager: ObservableObject {
             currentIndex = nextIndex
             resolveAndPlay(currentQueueSong)
         }
+    }
+
+    /// 队尾刷新回调：优先视图显式注册的 handler，其次回退到汽水场景上下文。
+    /// 视图重建、silentSetPlaylist 等操作会清掉 handler，回退可保证场景流始终能换批。
+    private var activeQueueRefresh: (() async -> [LXSong])? {
+        if let handler = queueRefreshHandler { return handler }
+        guard !sceneName.isEmpty else { return nil }
+        return SodaScenarioQueue.shared.handler(for: sceneName)
+    }
+
+    /// 拉取新一批并去重；若与当前队列完全相同，再拉一次（汽水接口每次返回随机批次），
+    /// 避免「同一批歌原样从头重播」。
+    private func fetchRefreshedQueue(_ refresh: () async -> [LXSong]) async -> [LXSong] {
+        let oldIDs = Set(queue.map { $0.id })
+        var fallback: [LXSong] = []
+        for attempt in 0..<2 {
+            let songs = await refresh()
+            var deduped: [LXSong] = []
+            var seen = Set<String>()
+            for s in songs where seen.insert(s.id).inserted {
+                deduped.append(s)
+            }
+            guard !deduped.isEmpty else { continue }
+            if Set(deduped.map { $0.id }) != oldIDs {
+                return deduped
+            }
+            fallback = deduped
+            if attempt == 0 {
+                Log.write("🔁 [Player] 刷新返回同一批(\(deduped.count) 首)，重试一次")
+            }
+        }
+        return fallback
     }
 
     func playPrevious() {
