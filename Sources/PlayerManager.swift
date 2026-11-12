@@ -379,11 +379,34 @@ final class PlayerManager: ObservableObject {
             resolveAndPlay(currentQueueSong)
         case .sequential:
             let nextIndex = (currentIndex + 1) % queue.count
-            if auto && nextIndex == 0 {
-                enginePause()
-                isPlaying = false
-                updateNowPlaying()
-                return
+            if nextIndex == 0 {
+                // 场景/推荐流：顺序播到队尾也要换一批继续，而不是停下
+                if let refresh = activeQueueRefresh {
+                    Task { @MainActor in
+                        let newSongs = await self.fetchRefreshedQueue(refresh)
+                        guard !newSongs.isEmpty else {
+                            if auto {
+                                self.enginePause()
+                                self.isPlaying = false
+                                self.updateNowPlaying()
+                            }
+                            return
+                        }
+                        let oldCount = self.queue.count
+                        self.queue = newSongs
+                        self.currentIndex = 0
+                        self.queueRefreshCount += 1
+                        Log.write("🔄 [Player] 顺序到队尾,队列刷新 \(oldCount) → \(newSongs.count) scene=\(self.sceneName)")
+                        self.resolveAndPlay(self.currentQueueSong)
+                    }
+                    return
+                }
+                if auto {
+                    enginePause()
+                    isPlaying = false
+                    updateNowPlaying()
+                    return
+                }
             }
             currentIndex = nextIndex
             resolveAndPlay(currentQueueSong)
@@ -564,7 +587,10 @@ final class PlayerManager: ObservableObject {
     }
 
     func canPlayNext() -> Bool {
-        !queue.isEmpty && (playMode == .loopAll || playMode == .loopOne || playMode == .shuffle || currentIndex < queue.count - 1)
+        guard !queue.isEmpty else { return false }
+        // 场景/推荐流：队尾也能继续（会自动拉新一批），按钮不该变灰
+        if currentIndex >= queue.count - 1, activeQueueRefresh != nil { return true }
+        return playMode == .loopAll || playMode == .loopOne || playMode == .shuffle || currentIndex < queue.count - 1
     }
 
     func canPlayPrevious() -> Bool {
