@@ -629,3 +629,25 @@ enum SodaError: LocalizedError {
         }
     }
 }
+
+/// 汽水场景/推荐流的刷新上下文。
+/// 视图进入场景时登记,退出不清空;PlayerManager 播到队尾时按 sceneName 回退取用,
+/// 避免「视图重建 / silentSetPlaylist 清空 handler」导致播完只能重放同一批旧歌。
+final class SodaScenarioQueue {
+    static let shared = SodaScenarioQueue()
+    private init() {}
+
+    private var title = ""
+    private var refresh: (() async -> [LXSong])?
+
+    func register(title: String, refresh: @escaping () async -> [LXSong]) {
+        self.title = title
+        self.refresh = refresh
+    }
+
+    /// 仅当登记的仍是当前播放场景时返回,避免污染普通歌单
+    func handler(for sceneName: String) -> (() async -> [LXSong])? {
+        guard !title.isEmpty, title == sceneName, let refresh else { return nil }
+        return refresh
+    }
+}
