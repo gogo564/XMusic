@@ -52,7 +52,7 @@ struct SodaTrackListView: View {
 
     /// 注册场景/推荐流队列刷新：播完一批后自动拉新一批替换队列
     private func registerQueueRefresh() {
-        player.queueRefreshHandler = { [load] in
+        let handler: () async -> [LXSong] = { [load] in
             do {
                 let tracks = try await load()
                 return tracks.map { $0.toLXSong() }
@@ -60,6 +60,9 @@ struct SodaTrackListView: View {
                 return []
             }
         }
+        player.queueRefreshHandler = handler
+        // 同时登记到场景上下文：视图重建 / 静默置队列后仍能换批
+        SodaScenarioQueue.shared.register(title: title, refresh: handler)
     }
 
     @MainActor
@@ -71,7 +74,9 @@ struct SodaTrackListView: View {
             let tracks = try await load()
             songs = tracks.map { $0.toLXSong() }
             // 进入该歌单即将其预置为播放队列，点任意一首/切歌都圈在当前歌单内
-            player.silentSetPlaylist(songs)
+            player.silentSetPlaylist(songs, preserveRefresh: true)
+            // 预置后立即登记刷新器，无论是否点过歌，播到队尾都能换批
+            registerQueueRefresh()
         } catch {
             errorMessage = error.localizedDescription
         }

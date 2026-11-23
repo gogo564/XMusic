@@ -15,6 +15,19 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
+    // CarPlay 车机是横屏(800×480 等),但 App 本体需要保持竖屏。
+    // 这里按窗口所属场景区分:CarPlay 场景只允许横屏,手机上的普通场景仍锁竖屏。
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        if let role = window?.windowScene?.session.role,
+           role.rawValue == "UIWindowSceneSessionRoleCarPlay" {
+            return .landscape
+        }
+        return .portrait
+    }
+
     // CarPlay 音频 App 必须有 playback 类别 + 激活,否则车机不显示/无响应。
     // .allowBluetooth 只对 playAndRecord/record 有效,配 .playback 会抛 kAudioSessionUnspecifiedError。
     private func configureAudioSession() {
