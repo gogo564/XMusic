@@ -419,28 +419,31 @@ private struct CarPlayPlayerPage: View {
                 GeometryReader { geo in
                     let w = geo.size.width
                     let h = geo.size.height
-                    // CarPlay 的逻辑尺寸比截图像素小很多（本机约 480×320 pt），
-                    // 所有尺寸都按宽度比例推导，避免固定点值超出屏幕。
+                    // CarPlay 的逻辑尺寸比截图像素小（本机约 430×290 pt），
+                    // 所有尺寸按宽高比例推导；顶栏/底栏用绝对定位，避免被挤压或裁掉。
+                    let pad = max(12, w * 0.03)
+                    let gap = max(10, w * 0.04)
                     let cover = min(w * 0.30, h * 0.52)
+                    let leftW = max(140, w - pad * 2 - cover - gap)
                     let titleSize = max(13, min(24, w * 0.045))
                     let subSize = max(9, min(15, w * 0.031))
                     let lyricSize = max(9, min(13, w * 0.027))
                     let sideTileW = w * 0.145
                     let playTileW = w * 0.165
-                    let tileH = h * 0.135
+                    let tileH = h * 0.15
                     let tileGap = max(7, w * 0.028)
-                    let ctrlIcon = tileH * 0.42
-                    let playIcon = tileH * 0.44
+                    let ctrlIcon = tileH * 0.50
+                    let playIcon = tileH * 0.52
                     let modeW = w * 0.115
-                    let modeH = h * 0.085
-                    let modeIcon = min(15, modeH * 0.5)
+                    let modeH = h * 0.09
+                    let modeIcon = min(15, modeH * 0.50)
 
-                    VStack(spacing: 0) {
+                    ZStack(alignment: .topLeading) {
                         topBar
+                            .frame(width: w - pad * 2)
+                            .position(x: w / 2, y: 16)
 
-                        Spacer(minLength: 0)
-
-                        HStack(alignment: .center, spacing: max(10, w * 0.04)) {
+                        HStack(alignment: .center, spacing: gap) {
                             VStack(spacing: 0) {
                                 Text(player.currentSong?.name ?? "")
                                     .font(.system(size: titleSize, weight: .bold))
@@ -490,9 +493,8 @@ private struct CarPlayPlayerPage: View {
                                 Spacer().frame(height: max(6, h * 0.025))
 
                                 progressRow
-                                    .frame(maxWidth: 260)
                             }
-                            .frame(maxWidth: .infinity)
+                            .frame(width: leftW)
 
                             LXCachedImage(urlString: player.currentSong?.imageURL ?? "",
                                           placeholder: "music.note",
@@ -501,9 +503,7 @@ private struct CarPlayPlayerPage: View {
                                 .frame(width: cover, height: cover)
                                 .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 7)
                         }
-                        .padding(.horizontal, max(12, w * 0.035))
-
-                        Spacer(minLength: 0)
+                        .position(x: w / 2, y: h * 0.50)
 
                         HStack(spacing: max(12, w * 0.045)) {
                             modeTile(icon: "shuffle", width: modeW, height: modeH, iconSize: modeIcon,
@@ -520,8 +520,9 @@ private struct CarPlayPlayerPage: View {
                                 cycleRepeatMode()
                             }
                         }
-                        .padding(.bottom, max(6, h * 0.025))
+                        .position(x: w / 2, y: h - max(14, modeH * 0.62))
                     }
+                    .frame(width: w, height: h)
                 }
             }
         }
