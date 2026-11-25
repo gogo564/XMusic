@@ -136,19 +136,19 @@ struct CarPlayRootView: View {
     // MARK: - 最近播放
 
     private var recentPage: some View {
-        let songs = recentStore.items.compactMap { $0.song }
+        let songs: [LXSong] = recentStore.items.compactMap { $0.song }
         return Group {
             if songs.isEmpty {
                 emptyState("暂无最近播放")
             } else {
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        ForEach(songs.indices, id: \.self) { idx in
+                        ForEach(Array(songs.indices), id: \.self) { idx in
                             let song = songs[idx]
                             Button {
                                 playSong(song, in: songs, index: idx)
                             } label: {
-                                SongRow(song: song,
+                                CarPlaySongRow(song: song,
                                         index: idx + 1,
                                         isCurrent: song.id == player.currentSong?.id,
                                         isPlaying: player.isPlaying)
@@ -201,12 +201,12 @@ struct CarPlayRootView: View {
 
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    ForEach(open.songs.indices, id: \.self) { idx in
+                    ForEach(Array(open.songs.indices), id: \.self) { idx in
                         let song = open.songs[idx]
                         Button {
                             playSong(song, in: open.songs, index: idx)
                         } label: {
-                            SongRow(song: song,
+                            CarPlaySongRow(song: song,
                                     index: idx + 1,
                                     isCurrent: song.id == player.currentSong?.id,
                                     isPlaying: player.isPlaying)
@@ -317,7 +317,7 @@ private struct NavigationRowButton: View {
 
 // MARK: - 歌曲行（序号/封面 + 歌名 + 歌手 + 正在播放标识）
 
-private struct SongRow: View {
+private struct CarPlaySongRow: View {
     let song: LXSong
     let index: Int
     let isCurrent: Bool
@@ -592,7 +592,7 @@ private struct CarPlayPlayerPage: View {
         .buttonStyle(.borderless)
     }
 
-    private func modeTile(_ icon: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func modeTile(icon: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 22, weight: .semibold))
