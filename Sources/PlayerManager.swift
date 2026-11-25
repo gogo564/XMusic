@@ -502,8 +502,10 @@ final class PlayerManager: ObservableObject {
             MPMediaItemPropertyPlaybackDuration: duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: 1.0,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
         ]
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        MPNowPlayingInfoCenter.default().playbackState = .playing
         showPlayer = true
     }
 
@@ -1005,9 +1007,12 @@ final class PlayerManager: ObservableObject {
                 if let art = artworkCache["local"] {
                     info[MPMediaItemPropertyArtwork] = art
                 }
+                info[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+                MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
             } else {
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+                MPNowPlayingInfoCenter.default().playbackState = .stopped
             }
             return
         }
@@ -1017,6 +1022,7 @@ final class PlayerManager: ObservableObject {
             MPMediaItemPropertyPlaybackDuration: duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
         ]
         if !lyrics.isEmpty {
             info[MPMediaItemPropertyLyrics] = lyrics
@@ -1025,6 +1031,9 @@ final class PlayerManager: ObservableObject {
             info[MPMediaItemPropertyArtwork] = art
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        // 上报播放状态：CarPlay 首页的“正在播放”卡片据此判断归属应用，
+        // 点击时才会进入本 App 而不是上一个发声的第三方音乐 App。
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         loadArtwork(for: song)
     }
 
@@ -1037,6 +1046,7 @@ final class PlayerManager: ObservableObject {
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
     }
 
     /// Downloads the cover once per song, then re-applies it without disturbing the rest.
