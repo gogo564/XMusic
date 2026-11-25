@@ -99,7 +99,7 @@ struct BlurredCoverBackground: View {
         let input = CIImage(cgImage: cg)
         guard let filter = CIFilter(name: "CIAreaAverage", parameters: [
             kCIInputImageKey: input,
-            "inputExtent": CIVector(cgImage: cg),
+            "inputExtent": CIVector(cgRect: input.extent),
         ]), let output = filter.outputImage else { return nil }
 
         var pixel = [UInt8](repeating: 0, count: 4)
