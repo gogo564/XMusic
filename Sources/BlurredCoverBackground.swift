@@ -21,9 +21,9 @@ struct BlurredCoverBackground: View {
             // 主色渐变：左上偏亮、右下压黑，文字始终可读
             LinearGradient(
                 colors: [
-                    tint.opacity(0.95),
-                    tint.opacity(0.45),
-                    Color.black.opacity(0.95),
+                    tint.opacity(1.0),
+                    tint.opacity(0.55),
+                    Color.black.opacity(0.97),
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -35,7 +35,7 @@ struct BlurredCoverBackground: View {
                     .scaledToFill()
                     .blur(radius: 42)
                     .scaleEffect(1.4)
-                    .opacity(0.55)
+                    .opacity(0.50)
                     .clipped()
             }
 
@@ -119,8 +119,8 @@ struct BlurredCoverBackground: View {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard raw.getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return raw }
         return UIColor(hue: h,
-                       saturation: min(1, max(0.30, s * 1.35)),
-                       brightness: min(0.58, max(0.34, b * 1.10)),
+                       saturation: min(1, max(0.36, s * 1.40)),
+                       brightness: min(0.66, max(0.40, b * 1.15)),
                        alpha: 1)
     }
 }
