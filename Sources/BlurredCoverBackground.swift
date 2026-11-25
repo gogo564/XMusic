@@ -16,14 +16,22 @@ struct BlurredCoverBackground: View {
 
     var body: some View {
         ZStack {
-            Color.black
-
-            // 主色渐变：左上偏亮、右下压黑，文字始终可读
+            // 中性深灰底（对齐网易云 CarPlay 的压暗背景，文字对比稳定）
             LinearGradient(
                 colors: [
-                    tint.opacity(1.0),
-                    tint.opacity(0.55),
-                    Color.black.opacity(0.97),
+                    Color(red: 0.085, green: 0.09, blue: 0.10),
+                    Color(red: 0.043, green: 0.045, blue: 0.05),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            // 封面主色只做很淡的氛围染色，换歌时有变化但不抢内容
+            LinearGradient(
+                colors: [
+                    tint.opacity(0.30),
+                    Color.clear,
+                    Color.black.opacity(0.55),
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -33,18 +41,18 @@ struct BlurredCoverBackground: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .blur(radius: 42)
-                    .scaleEffect(1.4)
-                    .opacity(0.50)
+                    .blur(radius: 60)
+                    .scaleEffect(1.6)
+                    .opacity(0.30)
                     .clipped()
             }
 
             // 底部渐变遮罩（对齐 bottomMaskGradientView）
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.30),
-                    Color.black.opacity(0.10),
-                    Color.black.opacity(0.45),
+                    Color.black.opacity(0.20),
+                    Color.black.opacity(0.06),
+                    Color.black.opacity(0.40),
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -119,8 +127,8 @@ struct BlurredCoverBackground: View {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard raw.getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return raw }
         return UIColor(hue: h,
-                       saturation: min(1, max(0.36, s * 1.40)),
-                       brightness: min(0.66, max(0.40, b * 1.15)),
+                       saturation: min(1, max(0.30, s * 1.30)),
+                       brightness: min(0.58, max(0.36, b * 1.10)),
                        alpha: 1)
     }
 }
