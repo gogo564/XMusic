@@ -101,7 +101,7 @@ struct CarPlayRootView: View {
         let loveSongs = playlistStore.songs(kind: .love, playlistID: "")
         let defaultSongs = playlistStore.songs(kind: .defaultList, playlistID: "")
         return ScrollView {
-            LazyVStack(spacing: 10) {
+            LazyVStack(spacing: 8) {
                 NavigationRowButton(title: "我喜欢的音乐",
                                     subtitle: "\(loveSongs.count) 首",
                                     coverURL: loveSongs.first?.imageURL ?? "") {
@@ -118,9 +118,9 @@ struct CarPlayRootView: View {
                     playlistRow(pl)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 6)
-            .padding(.bottom, 16)
+            .padding(.horizontal, 10)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
         }
     }
 
@@ -142,7 +142,7 @@ struct CarPlayRootView: View {
                 emptyState("暂无最近播放")
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 8) {
+                    LazyVStack(spacing: 6) {
                         ForEach(Array(songs.indices), id: \.self) { idx in
                             let song = songs[idx]
                             Button {
@@ -156,9 +156,9 @@ struct CarPlayRootView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 6)
-                    .padding(.bottom, 16)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 4)
+                    .padding(.bottom, 12)
                 }
             }
         }
@@ -172,35 +172,35 @@ struct CarPlayRootView: View {
                 Button {
                     openPlaylist = nil
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                         Text("返回")
-                            .font(.system(size: 19, weight: .medium))
+                            .font(.system(size: 14, weight: .medium))
                     }
                     .foregroundColor(cpAccent)
                 }
                 .buttonStyle(.borderless)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 6)
 
                 Text(open.title)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                     .lineLimit(1)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 6)
 
                 Text("\(open.songs.count) 首")
-                    .font(.system(size: 15))
+                    .font(.system(size: 11.5))
                     .foregroundColor(.white.opacity(0.5))
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 12)
+            .padding(.top, 7)
+            .padding(.bottom, 5)
 
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 6) {
                     ForEach(Array(open.songs.indices), id: \.self) { idx in
                         let song = open.songs[idx]
                         Button {
@@ -214,8 +214,8 @@ struct CarPlayRootView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 16)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
             }
         }
     }
@@ -232,7 +232,7 @@ struct CarPlayRootView: View {
         VStack {
             Spacer()
             Text(text)
-                .font(.system(size: 18))
+                .font(.system(size: 14))
                 .foregroundColor(.white.opacity(0.55))
             Spacer()
         }
@@ -245,31 +245,31 @@ private struct CarPlayTabBar: View {
     @Binding var selected: Tab
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             ForEach(Tab.allCases) { t in
                 Button {
                     selected = t
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 5) {
                         Image(systemName: t.icon)
-                            .font(.system(size: 19, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                         Text(t.rawValue)
-                            .font(.system(size: 16, weight: selected == t ? .semibold : .regular))
+                            .font(.system(size: 13.5, weight: selected == t ? .semibold : .regular))
                     }
                     .foregroundColor(selected == t ? cpAccent : Color.white.opacity(0.45))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(selected == t ? cpAccent.opacity(0.14) : Color.clear)
                     )
                 }
                 .buttonStyle(.borderless)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 10)
+        .padding(.top, 5)
+        .padding(.bottom, 3)
     }
 }
 
@@ -283,33 +283,33 @@ private struct NavigationRowButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                CoverArt(urlString: coverURL, size: 48, radius: 8)
-                VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 10) {
+                CoverArt(urlString: coverURL, size: 34, radius: 6)
+                VStack(alignment: .leading, spacing: 1) {
                     Text(title)
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.system(size: 15.5, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
                     if !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.system(size: 14))
+                            .font(.system(size: 11.5))
                             .foregroundColor(.white.opacity(0.55))
                             .lineLimit(1)
                     }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 6)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.35))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.white.opacity(0.07))
             )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -324,39 +324,39 @@ private struct CarPlaySongRow: View {
     let isPlaying: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            CoverArt(urlString: song.imageURL, size: 42, radius: 8)
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 9) {
+            CoverArt(urlString: song.imageURL, size: 30, radius: 6)
+            VStack(alignment: .leading, spacing: 1) {
                 Text(song.name)
-                    .font(.system(size: 18, weight: isCurrent ? .semibold : .medium))
+                    .font(.system(size: 14.5, weight: isCurrent ? .semibold : .medium))
                     .foregroundColor(isCurrent ? cpAccent : .white)
                     .lineLimit(1)
                 Text(song.singer)
-                    .font(.system(size: 13.5))
+                    .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(1)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
             if isCurrent {
                 Image(systemName: isPlaying ? "waveform" : "pause.circle")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(cpAccent)
             } else {
                 Text("\(index)")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 11.5, weight: .medium))
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.3))
-                    .frame(minWidth: 26, alignment: .trailing)
+                    .frame(minWidth: 20, alignment: .trailing)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(isCurrent ? cpAccent.opacity(0.14) : Color.white.opacity(0.06))
         )
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -419,18 +419,28 @@ private struct CarPlayPlayerPage: View {
                 GeometryReader { geo in
                     let w = geo.size.width
                     let h = geo.size.height
-                    let cover = min(max(140, w * 0.255), h * 0.60)
-                    let titleSize = min(33, max(20, cover * 0.135))
-                    let subSize = min(21, max(14, cover * 0.082))
-                    let ctrlIcon = min(38, max(26, cover * 0.15))
-                    let playIcon = min(44, max(30, cover * 0.18))
+                    // CarPlay 的逻辑尺寸比截图像素小很多（本机约 480×320 pt），
+                    // 所有尺寸都按宽度比例推导，避免固定点值超出屏幕。
+                    let cover = min(w * 0.30, h * 0.52)
+                    let titleSize = max(13, min(24, w * 0.045))
+                    let subSize = max(9, min(15, w * 0.031))
+                    let lyricSize = max(9, min(13, w * 0.027))
+                    let sideTileW = w * 0.145
+                    let playTileW = w * 0.165
+                    let tileH = h * 0.135
+                    let tileGap = max(7, w * 0.028)
+                    let ctrlIcon = tileH * 0.42
+                    let playIcon = tileH * 0.44
+                    let modeW = w * 0.115
+                    let modeH = h * 0.085
+                    let modeIcon = min(15, modeH * 0.5)
 
                     VStack(spacing: 0) {
                         topBar
 
                         Spacer(minLength: 0)
 
-                        HStack(alignment: .center, spacing: max(24, w * 0.05)) {
+                        HStack(alignment: .center, spacing: max(10, w * 0.04)) {
                             VStack(spacing: 0) {
                                 Text(player.currentSong?.name ?? "")
                                     .font(.system(size: titleSize, weight: .bold))
@@ -456,58 +466,61 @@ private struct CarPlayPlayerPage: View {
 
                                 if let line = currentLyricLine() {
                                     Text(line)
-                                        .font(.system(size: max(13, subSize * 0.8), weight: .medium))
+                                        .font(.system(size: lyricSize, weight: .medium))
                                         .foregroundColor(cpAccent.opacity(0.9))
                                         .lineLimit(1)
-                                        .padding(.top, 6)
+                                        .padding(.top, 4)
                                 }
 
-                                Spacer().frame(height: max(12, cover * 0.07))
+                                Spacer().frame(height: max(8, h * 0.03))
 
-                                HStack(spacing: max(22, cover * 0.13)) {
-                                    controlTile("backward.fill", width: 108, height: 78, icon: ctrlIcon) {
+                                HStack(spacing: tileGap) {
+                                    controlTile("backward.fill", width: sideTileW, height: tileH, icon: ctrlIcon) {
                                         player.playPrevious()
                                     }
                                     controlTile(player.isPlaying ? "pause.fill" : "play.fill",
-                                                width: 120, height: 86, icon: playIcon) {
+                                                width: playTileW, height: tileH, icon: playIcon) {
                                         player.togglePlayPause()
                                     }
-                                    controlTile("forward.fill", width: 108, height: 78, icon: ctrlIcon) {
+                                    controlTile("forward.fill", width: sideTileW, height: tileH, icon: ctrlIcon) {
                                         player.playNext()
                                     }
                                 }
 
-                                Spacer().frame(height: max(10, cover * 0.06))
+                                Spacer().frame(height: max(6, h * 0.025))
 
                                 progressRow
-                                    .frame(maxWidth: 430)
+                                    .frame(maxWidth: 260)
                             }
                             .frame(maxWidth: .infinity)
 
                             LXCachedImage(urlString: player.currentSong?.imageURL ?? "",
                                           placeholder: "music.note",
                                           size: cover,
-                                          cornerRadius: 8)
+                                          cornerRadius: 6)
                                 .frame(width: cover, height: cover)
-                                .shadow(color: .black.opacity(0.45), radius: 18, x: 0, y: 10)
+                                .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 7)
                         }
-                        .padding(.horizontal, max(18, w * 0.04))
+                        .padding(.horizontal, max(12, w * 0.035))
 
                         Spacer(minLength: 0)
 
-                        HStack(spacing: 26) {
-                            modeTile(icon: "shuffle", active: player.playMode == .shuffle) {
+                        HStack(spacing: max(12, w * 0.045)) {
+                            modeTile(icon: "shuffle", width: modeW, height: modeH, iconSize: modeIcon,
+                                     active: player.playMode == .shuffle) {
                                 player.playMode = (player.playMode == .shuffle ? .loopAll : .shuffle)
                             }
-                            modeTile(icon: isLoved ? "heart.fill" : "heart", active: isLoved) {
+                            modeTile(icon: isLoved ? "heart.fill" : "heart", width: modeW, height: modeH, iconSize: modeIcon,
+                                     active: isLoved) {
                                 toggleLove()
                             }
                             modeTile(icon: player.playMode == .loopOne ? "repeat.1" : "repeat",
+                                     width: modeW, height: modeH, iconSize: modeIcon,
                                      active: player.playMode == .loopOne) {
                                 cycleRepeatMode()
                             }
                         }
-                        .padding(.bottom, 14)
+                        .padding(.bottom, max(6, h * 0.025))
                     }
                 }
             }
@@ -518,11 +531,11 @@ private struct CarPlayPlayerPage: View {
         HStack {
             if showBack {
                 Button(action: onBack) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                         Text("返回")
-                            .font(.system(size: 19, weight: .medium))
+                            .font(.system(size: 14, weight: .medium))
                     }
                     .foregroundColor(cpAccent)
                 }
@@ -530,19 +543,19 @@ private struct CarPlayPlayerPage: View {
             }
             Spacer()
             Text("LX音乐")
-                .font(.system(size: 16))
+                .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.45))
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 10)
+        .padding(.horizontal, 14)
+        .padding(.top, 7)
     }
 
     private var progressRow: some View {
         let total = max(player.duration, 0.001)
         let fraction = min(max(player.currentTime / total, 0), 1)
-        return HStack(spacing: 12) {
+        return HStack(spacing: 8) {
             Text(timeStr(player.currentTime))
-                .font(.system(size: 16))
+                .font(.system(size: 11.5))
                 .monospacedDigit()
                 .foregroundColor(.white.opacity(0.8))
 
@@ -550,10 +563,10 @@ private struct CarPlayPlayerPage: View {
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Color.white.opacity(0.22))
-                        .frame(height: 4)
+                        .frame(height: 3)
                     Capsule()
                         .fill(Color.white)
-                        .frame(width: g.size.width * CGFloat(fraction), height: 4)
+                        .frame(width: g.size.width * CGFloat(fraction), height: 3)
                 }
                 .frame(maxHeight: .infinity, alignment: .center)
                 .contentShape(Rectangle())
@@ -565,10 +578,10 @@ private struct CarPlayPlayerPage: View {
                         }
                 )
             }
-            .frame(height: 22)
+            .frame(height: 16)
 
             Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
-                .font(.system(size: 16))
+                .font(.system(size: 11.5))
                 .monospacedDigit()
                 .foregroundColor(.white.opacity(0.8))
         }
@@ -585,21 +598,26 @@ private struct CarPlayPlayerPage: View {
                 .foregroundColor(.white)
                 .frame(width: width, height: height)
                 .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color.white.opacity(0.17))
                 )
         }
         .buttonStyle(.borderless)
     }
 
-    private func modeTile(icon: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func modeTile(icon: String,
+                          width: CGFloat,
+                          height: CGFloat,
+                          iconSize: CGFloat,
+                          active: Bool,
+                          action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: iconSize, weight: .semibold))
                 .foregroundColor(active ? .black : .white)
-                .frame(width: 86, height: 54)
+                .frame(width: width, height: height)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(active ? Color.white : Color.white.opacity(0.14))
                 )
         }
