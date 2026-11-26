@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private enum Tab: String, CaseIterable, Identifiable {
     case recommend = "推荐"
@@ -584,7 +585,7 @@ private struct CarPlayPlayerPage: View {
 
                     let titleSize = max(14, min(17, w * 0.037))
                     let subSize = max(10.5, min(13, w * 0.028))
-                    let lyricSize = max(9.5, min(11.5, w * 0.025))
+                    let lyricSize = max(12, min(15.5, w * 0.0315))
                     let tileW = w * 0.135
                     let tileH = vh * 0.185
                     let tileGap = max(10, w * 0.040)
@@ -624,10 +625,11 @@ private struct CarPlayPlayerPage: View {
 
                             if let line = currentLyricLine() {
                                 Text(line)
-                                    .font(.system(size: lyricSize, weight: .medium))
-                                    .foregroundColor(cpAccent.opacity(0.9))
+                                    .font(lyricFont(lyricSize))
+                                    .foregroundColor(cpAccent)
                                     .lineLimit(1)
-                                    .padding(.top, 4)
+                                    .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
+                                    .padding(.top, 5)
                             }
                         }
                         .frame(width: leftW)
@@ -811,6 +813,15 @@ private struct CarPlayPlayerPage: View {
         guard !player.parsedLyrics.isEmpty else { return nil }
         let idx = player.currentLyricIndex
         return player.parsedLyrics.indices.contains(idx) ? player.parsedLyrics[idx].text : player.parsedLyrics.last?.text
+    }
+
+    /// 歌词用系统自带圆体（Yuanti SC），字形更圆润；老系统没有该字体时回退到圆角粗体。
+    private func lyricFont(_ size: CGFloat) -> Font {
+        let roundedName = "YuantiSC-Regular"
+        if UIFont(name: roundedName, size: size) != nil {
+            return .custom(roundedName, size: size)
+        }
+        return .system(size: size, weight: .semibold, design: .rounded)
     }
 
     private func timeStr(_ t: Double) -> String {
