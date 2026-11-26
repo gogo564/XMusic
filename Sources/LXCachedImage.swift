@@ -13,8 +13,16 @@ struct LXCachedImage: View {
     var placeholder: String = "music.note"
     var size: CGFloat
     var cornerRadius: CGFloat = 8
+    /// 指定解码目标边长；不传则按 size * 3 估算。
+    /// 播放页大封面要固定传大值：GeometryReader 首次布局可能报很小的尺寸，
+    /// 若按 size 估算会先只解码 96px 小图，之后尺寸变大也不会重载（task 只监听 URL）。
+    var maxPixel: Int? = nil
 
     @State private var image: UIImage?
+
+    private var targetPixel: Int {
+        maxPixel ?? max(Int(size * 3), 96)
+    }
 
     var body: some View {
         ZStack {
@@ -34,8 +42,8 @@ struct LXCachedImage: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .task(id: urlString) {
-            image = await LXImageLoader.shared.load(urlString, maxPixel: max(Int(size * 3), 96))
+        .task(id: "\(urlString)#\(targetPixel)") {
+            image = await LXImageLoader.shared.load(urlString, maxPixel: targetPixel)
         }
     }
 }
@@ -63,13 +71,15 @@ final class LXImageLoader: @unchecked Sendable {
     /// 返回目标尺寸的缩略图（nil = 未加载/URL 非法/加载取消）。
     func load(_ urlString: String, maxPixel: Int) async -> UIImage? {
         guard let url = URL(string: urlString), !urlString.isEmpty else { return nil }
-        let key = urlString as NSString
+        // key 必须带上 maxPixel：同一个 URL 在列表里按 96px 缓存过，
+        // 播放页大封面若复用这张小图就会很糊。
+        let key = "\(urlString)#\(maxPixel)" as NSString
 
         if let cached = LXImageLoader.memoryCache.object(forKey: key) {
             return cached
         }
 
-        let cacheKey = urlString
+        let cacheKey = "\(urlString)#\(maxPixel)"
         lock.lock()
         if let running = inflight[cacheKey] {
             lock.unlock()
