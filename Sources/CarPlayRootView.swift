@@ -713,7 +713,8 @@ private struct CarPlayPlayerPage: View {
                         LXCachedImage(urlString: player.currentSong?.imageURL ?? "",
                                       placeholder: "music.note",
                                       size: cover,
-                                      cornerRadius: 7)
+                                      cornerRadius: 7,
+                                      maxPixel: 640)
                             .frame(width: cover, height: cover)
                             .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 7)
                             .position(x: coverX, y: vh * 0.47)
