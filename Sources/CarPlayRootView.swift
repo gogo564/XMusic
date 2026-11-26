@@ -1,17 +1,17 @@
 import SwiftUI
 
 private enum Tab: String, CaseIterable, Identifiable {
+    case recommend = "推荐"
     case playlists = "歌单"
     case recent = "最近"
-    case nowPlaying = "正在播放"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
+        case .recommend: return "sparkles"
         case .playlists: return "music.note.list"
         case .recent: return "clock.arrow.circlepath"
-        case .nowPlaying: return "play.circle"
         }
     }
 }
@@ -41,9 +41,15 @@ struct CarPlayRootView: View {
     @StateObject private var recentStore = RecentStore.shared
 
     @State private var loaded = false
-    @State private var tab: Tab = .playlists
+    @State private var tab: Tab = .recommend
     @State private var openPlaylist: OpenPlaylist?
     @State private var showPlayer = false
+
+    // 推荐页：热门榜单
+    @State private var boards: [(id: String, bangid: String, name: String)] = []
+    @State private var boardsLoading = false
+    @State private var boardsLoaded = false
+    @State private var boardLoading: String?
 
     var body: some View {
         ZStack {
@@ -53,15 +59,31 @@ struct CarPlayRootView: View {
                 songListPage(open)
             } else {
                 VStack(spacing: 0) {
-                    CarPlayTabBar(selected: $tab)
+                    HStack(spacing: 4) {
+                        CarPlayTabBar(selected: $tab)
+                        // 右上角圆形「回播放页」按钮（对齐网易云）
+                        Button {
+                            showPlayer = true
+                        } label: {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(cpAccent)
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle().fill(Color.white.opacity(0.10))
+                                )
+                        }
+                        .buttonStyle(.borderless)
+                        .padding(.trailing, 10)
+                    }
                     Group {
                         switch tab {
+                        case .recommend:
+                            recommendPage
                         case .playlists:
                             playlistPage
                         case .recent:
                             recentPage
-                        case .nowPlaying:
-                            CarPlayPlayerPage(showBack: false, onBack: {})
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -82,7 +104,99 @@ struct CarPlayRootView: View {
                 loaded = true
                 Task { await playlistStore.refresh() }
             }
+            loadBoards()
         }
+        .onChange(of: tab) { t in
+            if t == .recommend { loadBoards() }
+        }
+    }
+
+    // MARK: - 推荐页（热门榜单，网易云式大行）
+
+    private var recommendPage: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if boards.isEmpty {
+                    if boardsLoading {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.top, 30)
+                    } else {
+                        emptyState("暂无榜单")
+                    }
+                } else {
+                    ForEach(boards, id: \.id) { b in
+                        IconRowButton(icon: iconForBoard(b.name), title: b.name) {
+                            openBoard(name: b.name, bangid: b.bangid)
+                        }
+                    }
+                }
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 26)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
+        }
+        .overlay(
+            Group {
+                if let name = boardLoading {
+                    ZStack {
+                        Color.black.opacity(0.35).ignoresSafeArea()
+                        VStack(spacing: 10) {
+                            ProgressView()
+                            Text("正在载入 \(name)…")
+                                .font(.system(size: 12))
+                                .foregroundColor(.white.opacity(0.75))
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    private func loadBoards() {
+        guard !boardsLoaded, !boardsLoading else { return }
+        boardsLoading = true
+        Task {
+            let raw = (try? await LXAPIClient.shared.getLeaderBoards(source: "wy")) ?? []
+            var list: [(id: String, bangid: String, name: String)] = []
+            for b in raw {
+                if let id = b["id"] as? String,
+                   let bangid = b["bangid"] as? String,
+                   let name = b["name"] as? String {
+                    list.append((id: id, bangid: bangid, name: name))
+                }
+            }
+            await MainActor.run {
+                boards = list
+                boardsLoading = false
+                boardsLoaded = true
+            }
+        }
+    }
+
+    private func openBoard(name: String, bangid: String) {
+        boardLoading = name
+        Task {
+            let songs = (try? await LXAPIClient.shared.getLeaderBoardSongs(source: "wy",
+                                                                          bangid: bangid,
+                                                                          page: 1)) ?? []
+            await MainActor.run {
+                boardLoading = nil
+                openPlaylist = OpenPlaylist(title: name, songs: songs)
+            }
+        }
+    }
+
+    private func iconForBoard(_ name: String) -> String {
+        if name.contains("热歌") { return "flame.fill" }
+        if name.contains("新歌") { return "sparkles" }
+        if name.contains("飙升") { return "chart.line.uptrend.xyaxis" }
+        if name.contains("原创") { return "music.note" }
+        return "chart.bar.fill"
     }
 
     private var background: some View {
@@ -262,17 +376,53 @@ private struct CarPlayTabBar: View {
                     .foregroundColor(selected == t ? cpAccent : Color.white.opacity(0.45))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(selected == t ? cpAccent.opacity(0.14) : Color.clear)
-                    )
                 }
                 .buttonStyle(.borderless)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, 10)
         .padding(.top, 5)
         .padding(.bottom, 3)
+    }
+}
+
+// MARK: - 推荐页行（单色图标 + 标题 + 箭头，网易云式）
+
+private struct IconRowButton: View {
+    let icon: String
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(width: 34, height: 34)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.white.opacity(0.10))
+                    )
+                Text(title)
+                    .font(.system(size: 15.5, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.white.opacity(0.07))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
