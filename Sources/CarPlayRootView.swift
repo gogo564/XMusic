@@ -136,7 +136,7 @@ struct CarPlayRootView: View {
                 }
             }
             .padding(.leading, 10)
-            .padding(.trailing, 26)
+            .padding(.trailing, 44)
             .padding(.top, 4)
             .padding(.bottom, 12)
         }
@@ -233,7 +233,7 @@ struct CarPlayRootView: View {
                 }
             }
             .padding(.leading, 10)
-            .padding(.trailing, 26)
+            .padding(.trailing, 44)
             .padding(.top, 4)
             .padding(.bottom, 12)
         }
@@ -272,7 +272,7 @@ struct CarPlayRootView: View {
                         }
                     }
                     .padding(.leading, 10)
-                    .padding(.trailing, 26)
+                    .padding(.trailing, 44)
                     .padding(.top, 4)
                     .padding(.bottom, 12)
                 }
@@ -331,7 +331,7 @@ struct CarPlayRootView: View {
                     }
                 }
                 .padding(.leading, 10)
-                .padding(.trailing, 26)
+                .padding(.trailing, 44)
                 .padding(.bottom, 12)
             }
         }
@@ -558,7 +558,6 @@ private struct CarPlayPlayerPage: View {
     var body: some View {
         ZStack {
             BlurredCoverBackground(url: URL(string: player.currentSong?.imageURL ?? ""))
-            Color.black.opacity(0.32).ignoresSafeArea()
 
             if player.currentSong == nil {
                 VStack {
@@ -572,93 +571,98 @@ private struct CarPlayPlayerPage: View {
                 GeometryReader { geo in
                     let w = geo.size.width
                     let h = geo.size.height
-                    // CarPlay 的逻辑尺寸比截图像素小（本机约 430×290 pt），
-                    // 所有尺寸按宽高比例推导；顶栏/底栏用绝对定位，避免被挤压或裁掉。
-                    let pad = max(12, w * 0.03)
-                    let gap = max(10, w * 0.04)
-                    let cover = min(w * 0.30, h * 0.52)
-                    let leftW = max(140, w - pad * 2 - cover - gap)
-                    let titleSize = max(13, min(24, w * 0.045))
-                    let subSize = max(9, min(15, w * 0.031))
-                    let lyricSize = max(9, min(13, w * 0.027))
-                    let sideTileW = w * 0.145
-                    let playTileW = w * 0.165
-                    let tileH = h * 0.15
-                    let tileGap = max(7, w * 0.028)
-                    let ctrlIcon = tileH * 0.50
-                    let playIcon = tileH * 0.52
-                    let modeW = w * 0.115
-                    let modeH = h * 0.09
-                    let modeIcon = min(15, modeH * 0.50)
+                    // 按网易云 CarPlay 播放页的比例还原（见 1024×600 截图逐项测量）：
+                    // 顶部返回、左侧信息 + 三个等宽大方块键、右侧正方形封面、
+                    // 进度条横贯整行压在封面下方、底部三个模式键。
+                    let pad = max(14, w * 0.035)
+                    let gap = max(12, w * 0.040)
+                    let cover = min(w * 0.275, h * 0.44)
+                    let coverX = w - max(18, w * 0.055) - cover / 2
+                    let leftRight = coverX - cover / 2 - gap
+                    let leftW = max(120, leftRight - pad)
+                    let leftCX = pad + leftW / 2
+
+                    let titleSize = max(14, min(17, w * 0.037))
+                    let subSize = max(10.5, min(13, w * 0.028))
+                    let lyricSize = max(9.5, min(11.5, w * 0.025))
+                    let tileW = w * 0.135
+                    let tileH = h * 0.185
+                    let tileGap = max(10, w * 0.040)
+                    let ctrlIcon = tileH * 0.46
+                    let modeW = w * 0.112
+                    let modeH = h * 0.105
+                    let modeIcon = min(15, modeH * 0.52)
 
                     ZStack(alignment: .topLeading) {
                         topBar
                             .frame(width: w - pad * 2)
-                            .position(x: w / 2, y: 16)
+                            .position(x: w / 2, y: h * 0.09)
 
-                        HStack(alignment: .center, spacing: gap) {
-                            VStack(spacing: 0) {
-                                Text(player.currentSong?.name ?? "")
-                                    .font(.system(size: titleSize, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .multilineTextAlignment(.center)
-                                    .lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        // 左侧：歌名 / 专辑 / 歌手 / 当前歌词
+                        VStack(spacing: 0) {
+                            Text(player.currentSong?.name ?? "")
+                                .font(.system(size: titleSize, weight: .bold))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
 
-                                let album = player.currentSong?.albumName ?? ""
-                                if !album.isEmpty {
-                                    Text(album)
-                                        .font(.system(size: subSize))
-                                        .foregroundColor(.white.opacity(0.72))
-                                        .lineLimit(1)
-                                        .padding(.top, 2)
-                                }
-
-                                Text(player.currentSong?.singer ?? "")
+                            let album = player.currentSong?.albumName ?? ""
+                            if !album.isEmpty {
+                                Text(album)
                                     .font(.system(size: subSize))
                                     .foregroundColor(.white.opacity(0.72))
                                     .lineLimit(1)
-                                    .padding(.top, 2)
-
-                                if let line = currentLyricLine() {
-                                    Text(line)
-                                        .font(.system(size: lyricSize, weight: .medium))
-                                        .foregroundColor(cpAccent.opacity(0.9))
-                                        .lineLimit(1)
-                                        .padding(.top, 4)
-                                }
-
-                                Spacer().frame(height: max(8, h * 0.03))
-
-                                HStack(spacing: tileGap) {
-                                    controlTile("backward.fill", width: sideTileW, height: tileH, icon: ctrlIcon) {
-                                        player.playPrevious()
-                                    }
-                                    controlTile(player.isPlaying ? "pause.fill" : "play.fill",
-                                                width: playTileW, height: tileH, icon: playIcon) {
-                                        player.togglePlayPause()
-                                    }
-                                    controlTile("forward.fill", width: sideTileW, height: tileH, icon: ctrlIcon) {
-                                        player.playNext()
-                                    }
-                                }
-
-                                Spacer().frame(height: max(6, h * 0.025))
-
-                                progressRow
+                                    .padding(.top, 3)
                             }
-                            .frame(width: leftW)
 
-                            LXCachedImage(urlString: player.currentSong?.imageURL ?? "",
-                                          placeholder: "music.note",
-                                          size: cover,
-                                          cornerRadius: 6)
-                                .frame(width: cover, height: cover)
-                                .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 7)
+                            Text(player.currentSong?.singer ?? "")
+                                .font(.system(size: subSize))
+                                .foregroundColor(.white.opacity(0.72))
+                                .lineLimit(1)
+                                .padding(.top, 3)
+
+                            if let line = currentLyricLine() {
+                                Text(line)
+                                    .font(.system(size: lyricSize, weight: .medium))
+                                    .foregroundColor(cpAccent.opacity(0.9))
+                                    .lineLimit(1)
+                                    .padding(.top, 4)
+                            }
                         }
-                        .position(x: w / 2, y: h * 0.50)
+                        .frame(width: leftW)
+                        .position(x: leftCX, y: h * 0.30)
 
-                        HStack(spacing: max(12, w * 0.045)) {
+                        // 三个等宽大方块控制键
+                        HStack(spacing: tileGap) {
+                            controlTile("backward.fill", width: tileW, height: tileH, icon: ctrlIcon) {
+                                player.playPrevious()
+                            }
+                            controlTile(player.isPlaying ? "pause.fill" : "play.fill",
+                                        width: tileW, height: tileH, icon: tileH * 0.48) {
+                                player.togglePlayPause()
+                            }
+                            controlTile("forward.fill", width: tileW, height: tileH, icon: ctrlIcon) {
+                                player.playNext()
+                            }
+                        }
+                        .position(x: leftCX, y: h * 0.585)
+
+                        // 右侧大封面（清晰原图，不做模糊）
+                        LXCachedImage(urlString: player.currentSong?.imageURL ?? "",
+                                      placeholder: "music.note",
+                                      size: cover,
+                                      cornerRadius: 7)
+                            .frame(width: cover, height: cover)
+                            .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 7)
+                            .position(x: coverX, y: h * 0.47)
+
+                        // 进度条：横贯整行，位于封面下方
+                        progressRow
+                            .frame(width: w - pad * 2 - 20)
+                            .position(x: w / 2, y: h * 0.80)
+
+                        HStack(spacing: max(12, w * 0.037)) {
                             modeTile(icon: "shuffle", width: modeW, height: modeH, iconSize: modeIcon,
                                      active: player.playMode == .shuffle) {
                                 player.playMode = (player.playMode == .shuffle ? .loopAll : .shuffle)
@@ -669,11 +673,11 @@ private struct CarPlayPlayerPage: View {
                             }
                             modeTile(icon: player.playMode == .loopOne ? "repeat.1" : "repeat",
                                      width: modeW, height: modeH, iconSize: modeIcon,
-                                     active: player.playMode == .loopOne) {
+                                     active: player.playMode != .sequential) {
                                 cycleRepeatMode()
                             }
                         }
-                        .position(x: w / 2, y: h - max(14, modeH * 0.62))
+                        .position(x: w / 2, y: h - max(11, modeH * 0.55))
                     }
                     .frame(width: w, height: h)
                 }
@@ -684,43 +688,45 @@ private struct CarPlayPlayerPage: View {
     private var topBar: some View {
         HStack {
             if showBack {
+                // 左上返回：圆形深底 + 青色箭头 + 青色文字（对齐网易云）
                 Button(action: onBack) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 15, weight: .semibold))
+                    HStack(spacing: 7) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.18))
+                                .frame(width: 21, height: 21)
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 10.5, weight: .bold))
+                                .foregroundColor(cpAccent)
+                        }
                         Text("返回")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(cpAccent)
                     }
-                    .foregroundColor(cpAccent)
                 }
                 .buttonStyle(.borderless)
             }
             Spacer()
-            Text("LX音乐")
-                .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.45))
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 7)
     }
 
     private var progressRow: some View {
         let total = max(player.duration, 0.001)
         let fraction = min(max(player.currentTime / total, 0), 1)
-        return HStack(spacing: 8) {
+        return HStack(spacing: 9) {
             Text(timeStr(player.currentTime))
-                .font(.system(size: 11.5))
+                .font(.system(size: 12.5))
                 .monospacedDigit()
-                .foregroundColor(.white.opacity(0.8))
+                .foregroundColor(.white.opacity(0.9))
 
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.white.opacity(0.22))
-                        .frame(height: 3)
+                        .fill(Color.white.opacity(0.28))
+                        .frame(height: 4)
                     Capsule()
                         .fill(Color.white)
-                        .frame(width: g.size.width * CGFloat(fraction), height: 3)
+                        .frame(width: g.size.width * CGFloat(fraction), height: 4)
                 }
                 .frame(maxHeight: .infinity, alignment: .center)
                 .contentShape(Rectangle())
@@ -735,9 +741,9 @@ private struct CarPlayPlayerPage: View {
             .frame(height: 16)
 
             Text("-" + timeStr(max(player.duration - player.currentTime, 0)))
-                .font(.system(size: 11.5))
+                .font(.system(size: 12.5))
                 .monospacedDigit()
-                .foregroundColor(.white.opacity(0.8))
+                .foregroundColor(.white.opacity(0.9))
         }
     }
 
@@ -752,8 +758,8 @@ private struct CarPlayPlayerPage: View {
                 .foregroundColor(.white)
                 .frame(width: width, height: height)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(0.17))
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.white.opacity(0.16))
                 )
         }
         .buttonStyle(.borderless)
@@ -771,8 +777,8 @@ private struct CarPlayPlayerPage: View {
                 .foregroundColor(active ? .black : .white)
                 .frame(width: width, height: height)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(active ? Color.white : Color.white.opacity(0.14))
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(active ? Color.white : Color.white.opacity(0.16))
                 )
         }
         .buttonStyle(.borderless)
