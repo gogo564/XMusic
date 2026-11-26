@@ -40,6 +40,7 @@ struct CarPlayRootView: View {
     @StateObject private var playlistStore = PlaylistStore.shared
     @StateObject private var player = PlayerManager.shared
     @StateObject private var recentStore = RecentStore.shared
+    @StateObject private var libraryStore = LibraryStore.shared
 
     @State private var loaded = false
     @State private var tab: Tab = .recommend
@@ -51,6 +52,7 @@ struct CarPlayRootView: View {
     @State private var boardsLoading = false
     @State private var boardsLoaded = false
     @State private var boardLoading: String?
+    @State private var albumLoading: String?
 
     var body: some View {
         ZStack {
@@ -106,9 +108,11 @@ struct CarPlayRootView: View {
                 Task { await playlistStore.refresh() }
             }
             loadBoards()
+            Task { await libraryStore.loadIfNeeded() }
         }
         .onChange(of: tab) { t in
             if t == .recommend { loadBoards() }
+            if t == .playlists { Task { await libraryStore.reload() } }
         }
     }
 
@@ -232,11 +236,66 @@ struct CarPlayRootView: View {
                 ForEach(playlistStore.playlists, id: \.id) { pl in
                     playlistRow(pl)
                 }
+
+                if !libraryStore.albums.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "square.stack")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("我的专辑")
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        Text("\(libraryStore.albums.count) 张")
+                            .font(.system(size: 10.5))
+                    }
+                    .foregroundColor(.white.opacity(0.5))
+                    .padding(.leading, 4)
+                    .padding(.top, 6)
+
+                    ForEach(libraryStore.albums, id: \.id) { album in
+                        NavigationRowButton(title: album.name,
+                                            subtitle: album.artistName.isEmpty ? "专辑" : album.artistName,
+                                            coverURL: album.picUrl) {
+                            openAlbum(album)
+                        }
+                    }
+                }
             }
             .padding(.leading, 10)
             .padding(.trailing, 44)
             .padding(.top, 4)
             .padding(.bottom, 12)
+        }
+        .overlay {
+            if let name = albumLoading {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("正在载入 \(name)…")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.75))
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.75))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+    }
+
+    private func openAlbum(_ album: LXLibraryAlbum) {
+        guard albumLoading == nil else { return }
+        albumLoading = album.name
+        Task {
+            defer { albumLoading = nil }
+            do {
+                let songs = try await LXAPIClient.shared.getAlbumSongs(source: album.source,
+                                                                       albumID: album.albumID,
+                                                                       cover: album.picUrl)
+                guard !songs.isEmpty else { return }
+                player.silentSetPlaylist(songs)
+                openPlaylist = OpenPlaylist(title: album.name, songs: songs)
+            } catch {
+                Log.write("[CarPlay] 专辑载入失败 \(album.name): \(error.localizedDescription)")
+            }
         }
     }
 
