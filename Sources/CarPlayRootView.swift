@@ -571,12 +571,12 @@ private struct CarPlayPlayerPage: View {
                 GeometryReader { geo in
                     let w = geo.size.width
                     let h = geo.size.height
-                    // 按网易云 CarPlay 播放页的比例还原（见 1024×600 截图逐项测量）：
-                    // 顶部返回、左侧信息 + 三个等宽大方块键、右侧正方形封面、
-                    // 进度条横贯整行压在封面下方、底部三个模式键。
+                    // 车机窗口的实际可视高度比 geo 高度小约 7%（DiPlay/部分车机会裁掉底部），
+                    // 直接用 h 会让整页越往下越偏低、底栏被切。这里按可视高度 vh 排布。
+                    let vh = h * 0.932
                     let pad = max(14, w * 0.035)
                     let gap = max(12, w * 0.040)
-                    let cover = min(w * 0.275, h * 0.44)
+                    let cover = min(w * 0.275, vh * 0.44)
                     let coverX = w - max(18, w * 0.055) - cover / 2
                     let leftRight = coverX - cover / 2 - gap
                     let leftW = max(120, leftRight - pad)
@@ -586,11 +586,11 @@ private struct CarPlayPlayerPage: View {
                     let subSize = max(10.5, min(13, w * 0.028))
                     let lyricSize = max(9.5, min(11.5, w * 0.025))
                     let tileW = w * 0.135
-                    let tileH = h * 0.185
+                    let tileH = vh * 0.185
                     let tileGap = max(10, w * 0.040)
                     let ctrlIcon = tileH * 0.46
                     let modeW = w * 0.112
-                    let modeH = h * 0.105
+                    let modeH = vh * 0.105
                     let modeIcon = min(15, modeH * 0.52)
 
                     ZStack(alignment: .topLeading) {
@@ -631,7 +631,7 @@ private struct CarPlayPlayerPage: View {
                             }
                         }
                         .frame(width: leftW)
-                        .position(x: leftCX, y: h * 0.30)
+                        .position(x: leftCX, y: vh * 0.30)
 
                         // 三个等宽大方块控制键
                         HStack(spacing: tileGap) {
@@ -646,7 +646,7 @@ private struct CarPlayPlayerPage: View {
                                 player.playNext()
                             }
                         }
-                        .position(x: leftCX, y: h * 0.585)
+                        .position(x: leftCX, y: vh * 0.585)
 
                         // 右侧大封面（清晰原图，不做模糊）
                         LXCachedImage(urlString: player.currentSong?.imageURL ?? "",
@@ -655,12 +655,12 @@ private struct CarPlayPlayerPage: View {
                                       cornerRadius: 7)
                             .frame(width: cover, height: cover)
                             .shadow(color: .black.opacity(0.45), radius: 12, x: 0, y: 7)
-                            .position(x: coverX, y: h * 0.47)
+                            .position(x: coverX, y: vh * 0.47)
 
                         // 进度条：横贯整行，位于封面下方
                         progressRow
                             .frame(width: w - pad * 2 - 20)
-                            .position(x: w / 2, y: h * 0.80)
+                            .position(x: w / 2, y: vh * 0.80)
 
                         HStack(spacing: max(12, w * 0.037)) {
                             modeTile(icon: "shuffle", width: modeW, height: modeH, iconSize: modeIcon,
@@ -677,7 +677,7 @@ private struct CarPlayPlayerPage: View {
                                 cycleRepeatMode()
                             }
                         }
-                        .position(x: w / 2, y: h - max(11, modeH * 0.55))
+                        .position(x: w / 2, y: vh * 0.945)
                     }
                     .frame(width: w, height: h)
                 }
