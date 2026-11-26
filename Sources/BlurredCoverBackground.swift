@@ -13,15 +13,19 @@ struct BlurredCoverBackground: View {
     private static var tintCache = NSCache<NSString, UIColor>()
 
     var body: some View {
-        LinearGradient(
-            colors: [
-                tint.opacity(1.0),
-                tint.opacity(0.55),
-                Color.black.opacity(0.97),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        // 必须有不透明底色：否则渐变里的半透明色会把下面的列表“透”出来
+        ZStack {
+            Color.black
+            LinearGradient(
+                colors: [
+                    tint.opacity(1.0),
+                    tint.opacity(0.55),
+                    Color.black.opacity(0.97),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 0.5), value: url)
         .onAppear { load() }
