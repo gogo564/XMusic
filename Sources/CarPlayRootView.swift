@@ -118,7 +118,8 @@ struct CarPlayRootView: View {
                     playlistRow(pl)
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.leading, 10)
+            .padding(.trailing, 26)
             .padding(.top, 4)
             .padding(.bottom, 12)
         }
@@ -156,7 +157,8 @@ struct CarPlayRootView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.leading, 10)
+                    .padding(.trailing, 26)
                     .padding(.top, 4)
                     .padding(.bottom, 12)
                 }
@@ -214,7 +216,8 @@ struct CarPlayRootView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 10)
+                .padding(.leading, 10)
+                .padding(.trailing, 26)
                 .padding(.bottom, 12)
             }
         }
